@@ -3,6 +3,7 @@ import { linkSync, lstatSync, readFileSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { externalEnv } from './external-env';
 import { promisify } from 'node:util';
 import { atomicWrite, containedFile } from './files';
 import { ExportChangedError } from './export-file';
@@ -272,7 +273,7 @@ export class ExportStore {
     if (!value) throw new ExportError('This exported file is no longer available.', 404);
     const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer.exe' : 'xdg-open';
     const args = process.platform === 'darwin' ? ['-R', value.path] : process.platform === 'win32' ? [`/select,${value.path}`] : [resolve(this.root, 'output')];
-    try { await promisify(execFile)(command, args, { timeout: 10_000 }); }
+    try { await promisify(execFile)(command, args, { timeout: 10_000, env: externalEnv() }); }
     catch { throw new ExportError(`Could not open the file manager. Your file is saved at ${value.path}.`); }
   }
   async copy(id: string) {

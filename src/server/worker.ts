@@ -19,6 +19,9 @@ import { containedFile } from './files';
 import { readProjects } from './projects';
 import { originalBinding, type SourceOverride } from './source-overrides';
 import { runtimeSource } from '../runtime/paths';
+import { exitWithParent } from './parent-watch';
+
+exitWithParent();
 
 const [inputEntry, destination, overrideFlag] = process.argv.slice(2);
 const entry = realpathSync(inputEntry);

@@ -36,7 +36,9 @@ test('removing one block of a three-place comment marks only that place missing,
     const pending = (await current(f.root)).pendingComments[0];
     assert.equal(pending.anchorStatus, 'missing', 'The comment reports its worst place.');
     assert.equal(pending.targetAvailable, false);
-    assert.deepEqual(pending.targets, comment.targets);
+    assert.deepEqual(pending.targets.map((place: { blockId: string; anchorStatus: string; targetAvailable: boolean }) => [place.blockId, place.anchorStatus, place.targetAvailable]),
+      [['target', 'attached', true], ['second', 'missing', false], ['third', 'attached', true]], 'Each place reports its own status.');
+    assert.deepEqual(pending.targets.map((place: { blockId: string; quote: string }) => [place.blockId, place.quote]), comment.targets!.map(place => [place.blockId, place.quote]));
     assert.deepEqual(await readComments(f.root, 'proof'), [comment], 'Nothing is rewritten or dropped.');
   } finally { await workspace.close(); await f.cleanup(); }
 });
@@ -51,6 +53,7 @@ test('current.json carries selections and selection stays the first of them', as
     await workspace.setContext({ documentId: 'proof', blockId: 'second', page: 1, ...selectionContext(list) });
     const written = await current(f.root);
     assert.deepEqual(written.selections, list);
+    assert.equal(list.length, 3);
     assert.deepEqual(written.selection, written.selections[0]);
     assert.equal(written.selectedBlock.id, 'second');
     await workspace.setContext({ documentId: 'proof', blockId: 'second', page: 1, ...selectionContext([]) });
@@ -120,4 +123,22 @@ test('comments on a single place read back byte for byte after a rewrite by eith
     const rows = await readComments(f.root, 'proof');
     assert.equal(JSON.stringify(rows, null, 2) + '\n', await readFile(file, 'utf8'));
   } finally { await rm(scratch, { recursive: true, force: true }); await f.cleanup(); }
+});
+
+test('current.json lists selections even when the context names only one, and a single-place comment keeps its keys', async () => {
+  const f = await fixture();
+  const workspace = new Workspace(f.root);
+  try {
+    await writeFile(f.entry, source(extra));
+    await workspace.refresh(); await settled(workspace);
+    const [single] = await addComment(f.root, 'proof', { blockId: 'target', text: 'One place.', quote: 'A stable paragraph' });
+    await workspace.setContext({ documentId: 'proof', blockId: 'target', page: 1, selection: { blockId: 'target', page: 1 } });
+    const written = await current(f.root);
+    assert.deepEqual(written.selections, [{ blockId: 'target', page: 1 }]);
+    assert.deepEqual(written.selection, written.selections[0]);
+    assert.deepEqual(Object.keys(written.pendingComments[0]).sort(), [...Object.keys(single), 'targetAvailable', 'anchorStatus', 'selection'].sort());
+    assert.equal('targets' in written.pendingComments[0], false);
+    await workspace.setContext({ documentId: 'proof', blockId: null, page: 1 });
+    assert.deepEqual(await current(f.root).then(value => [value.selection, value.selections]), [null, []]);
+  } finally { await workspace.close(); await f.cleanup(); }
 });

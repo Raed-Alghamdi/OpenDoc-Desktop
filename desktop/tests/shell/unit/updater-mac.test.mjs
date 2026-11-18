@@ -7,7 +7,7 @@ import { chmod, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createUpdaterClass } from '../../../src/main/updater/classes.mjs';
-import { decideMacInstall, installMacUpdate, macBundleState, swapArguments, swapScript } from '../../../src/main/updater/mac-install.mjs';
+import { decideMacInstall, installMacUpdate, macBundleState, swapArguments, swapScript, waitSteps } from '../../../src/main/updater/mac-install.mjs';
 import { scratch } from '../support/updater.mjs';
 
 const state = (overrides = {}) => ({ execPath: '/Applications/opendoc-desktop.app/Contents/MacOS/opendoc-desktop', bundle: '/Applications/opendoc-desktop.app', folder: '/Applications', translocated: false, writable: true, quarantine: null, ...overrides });
@@ -69,8 +69,9 @@ test('the install: unzip with ditto, verify the signature and the bundle id, the
   const { run, commands } = fakeRun();
   const result = await installMacUpdate({
     zipFile: '/cache/update.zip', state: setup.state, pid: 4242, run,
-    start: (command, args) => setup.started.push([command, args]),
-    exists: () => true,
+    start: async (command, args) => { setup.started.push([command, args]); },
+    list: () => ['opendoc-desktop.app'],
+    expected: { version: '0.6.1', build: 2 },
     helperLogFolder: setup.folder,
   });
   const stage = (await readdir(setup.folder)).find(name => name.startsWith('.opendoc-desktop-update-'));
@@ -78,9 +79,9 @@ test('the install: unzip with ditto, verify the signature and the bundle id, the
   const fresh = join(setup.folder, stage, 'opendoc-desktop.app');
   assert.deepEqual(commands, [
     ['ditto', '-xk', '/cache/update.zip', join(setup.folder, stage)],
-    ['codesign', '--verify', '--deep', '--strict', fresh],
     ['/usr/libexec/PlistBuddy', '-c', 'Print :CFBundleIdentifier', join(fresh, 'Contents', 'Info.plist')],
     ['/usr/libexec/PlistBuddy', '-c', 'Print :CFBundleIdentifier', join(setup.bundle, 'Contents', 'Info.plist')],
+    ['codesign', '--verify', '--deep', '--strict', fresh],
     ['/usr/libexec/PlistBuddy', '-c', 'Print :CFBundleShortVersionString', join(fresh, 'Contents', 'Info.plist')],
     ['/usr/libexec/PlistBuddy', '-c', 'Print :CFBundleVersion', join(fresh, 'Contents', 'Info.plist')],
   ]);
@@ -100,16 +101,41 @@ test('a translocated or read-only bundle never reaches the commands: nothing is 
 
 test('a bad update stops before the helper starts, and the staging folder is removed', async () => {
   const cases = [
-    ['a zip without the app', fakeRun(), { exists: () => false }, /has no opendoc-desktop\.app/],
+    ['a zip without the app', fakeRun(), { list: () => ['README.txt'] }, /holds no app/],
     ['a signature that does not verify', fakeRun({ fail: { codesign: true } }), {}, /codesign failed/],
     ['another bundle identifier', fakeRun({ plist: { 'fresh:CFBundleIdentifier': 'com.example.other' } }), {}, /another bundle identifier/],
     ['an unzip that fails', fakeRun({ fail: { ditto: true } }), {}, /ditto failed/],
+    ['another version than the release announced', fakeRun({ plist: { 'fresh:CFBundleShortVersionString': '0.6.0' } }), { expected: { version: '0.6.1', build: 2 } }, /version 0\.6\.0, build 2, but the release announced 0\.6\.1, build 2/],
+    ['another build than the release announced', fakeRun({ plist: { 'fresh:CFBundleVersion': '1' } }), { expected: { version: '0.6.1', build: 2 } }, /build 1, but the release announced 0\.6\.1, build 2/],
+    ['a helper that cannot be started', fakeRun(), { start: async () => { throw new Error('spawn /bin/sh ENOENT'); } }, /ENOENT/],
   ];
   for (const [label, { run }, extra, message] of cases) {
     const setup = await stageSetup();
-    await assert.rejects(installMacUpdate({ zipFile: '/z.zip', state: setup.state, run, start: () => assert.fail('no helper'), exists: () => true, ...extra }), message, label);
+    await assert.rejects(installMacUpdate({ zipFile: '/z.zip', state: setup.state, run, start: () => assert.fail('no helper'), list: () => ['opendoc-desktop.app'], ...extra }), message, label);
     assert.deepEqual(await readdir(setup.folder), ['opendoc-desktop.app'], `${label}: the staging folder is gone`);
   }
+});
+
+test('the new bundle is found by its bundle identifier, whatever the .app is called in the zip, and installed under the running name', async () => {
+  const setup = await stageSetup();
+  const { run } = fakeRun({ plist: { 'fresh:CFBundleIdentifier': 'com.example.other' } });
+  // Two apps in the zip: the first has another identifier (the fake answers "other" for every fresh bundle except by name below).
+  const ids = { 'Helper.app': 'com.example.helper', 'OpenDoc Desktop.app': 'io.github.ryanyahya.OpenDocDesktop' };
+  const asking = async (command, args) => {
+    if (command === '/usr/libexec/PlistBuddy' && args[2].includes('.opendoc-desktop-update-') && args[1] === 'Print :CFBundleIdentifier') return `${ids[args[2].split('/').at(-3)]}\n`;
+    return run(command, args);
+  };
+  const started = [];
+  const result = await installMacUpdate({ zipFile: '/z.zip', state: setup.state, pid: 7, run: asking, start: async (command, args) => { started.push(args); }, list: () => ['Helper.app', 'OpenDoc Desktop.app'], helperLogFolder: setup.folder });
+  assert.deepEqual(result.info, { version: '0.6.1', build: 2 });
+  assert.ok(started[0][5].endsWith('/OpenDoc Desktop.app'), 'the swap moves the matching bundle in');
+  assert.equal(started[0][3], setup.bundle, 'over the running bundle, so the installed name stays');
+});
+
+test('the helper that cannot be started (no /bin/sh) rejects instead of leaving the app to quit for nothing', async () => {
+  const { startHelper } = await import('../../../src/main/updater/mac-install.mjs');
+  await assert.rejects(startHelper('/nonexistent/sh', ['-c', 'true']), /ENOENT/);
+  await startHelper('/bin/sh', ['-c', 'true']);
 });
 
 test('the class decides before the download, and maps an install that was stopped or failed', async () => {
@@ -182,4 +208,28 @@ test('the swap helper keeps waiting while the app is alive', async () => {
   sleeper.kill();
   await new Promise(accept => helper.once('exit', accept));
   assert.ok(Date.now() - started >= 700);
+});
+
+test('the swap helper gives up without swapping when the app never exits, and cleans up its staging folder', async () => {
+  const sleeper = spawn('sleep', ['30']);
+  try {
+    const folder = await scratch('giveup');
+    const stage = join(folder, 'stage');
+    await mkdir(stage);
+    const bundle = join(folder, 'A.app');
+    await mkdir(bundle);
+    const log = join(folder, 'log');
+    const started = Date.now();
+    const result = spawnSync('/bin/sh', swapArguments({ bundle, old: join(folder, 'old'), fresh: join(stage, 'A.app'), stage, helperLog: log, pid: sleeper.pid, steps: 3 }), { encoding: 'utf8', timeout: 15_000 });
+    assert.equal(result.status, 1);
+    assert.ok(Date.now() - started < 10_000, 'about 0.6 seconds, not forever');
+    assert.match(await readFile(log, 'utf8'), /did not quit in time, nothing was swapped/);
+    assert.equal(existsSync(bundle), true, 'the app is untouched');
+    assert.equal(existsSync(stage), false);
+  } finally { sleeper.kill(); }
+});
+
+test('the default wait is 60 seconds', () => {
+  assert.equal(waitSteps * 0.2, 60);
+  assert.equal(swapArguments({ bundle: 'a', old: 'b', fresh: 'c', stage: 'd', helperLog: 'e', pid: 1 }).at(-1), String(waitSteps));
 });

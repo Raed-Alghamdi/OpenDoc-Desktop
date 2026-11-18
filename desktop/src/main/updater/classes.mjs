@@ -19,12 +19,12 @@ const { AppImageUpdater, DebUpdater, RpmUpdater, PacmanUpdater, MacUpdater } = r
 const bases = { appimage: AppImageUpdater, deb: DebUpdater, rpm: RpmUpdater, pacman: PacmanUpdater, mac: MacUpdater };
 
 /** Offer an update only when the metadata lists a file for this install type, with a checksum. */
-function withReleaseFile(Base, type) {
+function withReleaseFile(Base, type, getFeedBase) {
   return class extends Base {
     async isUpdateAvailable(info) {
       const available = await super.isUpdateAvailable(info);
       if (!available) return false;
-      const found = releaseFileFor(type, info);
+      const found = releaseFileFor(type, info, { base: getFeedBase() });
       if (!found.ok) {
         this._logger.warn(`Version ${info.version} (build ${info.build ?? 'none'}) is not offered: ${found.message}`);
         return false;
@@ -54,12 +54,13 @@ const writable = path => access(path, constants.W_OK).then(() => true, () => fal
  * Every class gets `preflight()` (can this install replace itself where it stands? { ok } or { ok: false, reason, message }) and,
  * for the types that need a click, `installDownloaded()` (resolves { outcome: 'installed' | 'cancelled' | 'failed' | 'blocked', message? }).
  * @param options.getBuild the running build number
+ * @param options.getFeedBase () => the feed's address (text or URL) when `updateFeed` is set, else null: file addresses must stay on its origin
  * @param options.seams for tests: install (replaces installPackage), appImagePath, statfs, swapOps, macState, macInstall
  */
-export function createUpdaterClass(type, { getBuild, seams = {} }) {
+export function createUpdaterClass(type, { getBuild, getFeedBase = () => null, seams = {} }) {
   const Base = bases[type];
   if (!Base) throw new Error(`No updater for install type ${type}.`);
-  const Checked = withConfigFallback(withReleaseFile(withBuildCompare(Base, getBuild), type));
+  const Checked = withConfigFallback(withReleaseFile(withBuildCompare(Base, getBuild), type, getFeedBase));
 
   if (type === 'appimage') {
     return class extends Checked {

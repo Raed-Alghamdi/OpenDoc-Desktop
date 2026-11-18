@@ -38,6 +38,13 @@ class VersionedAppAdapter extends ElectronAppAdapter {
   get version() { return this.fixedVersion; }
 }
 
+/** The origin release files must stay on for an `updateFeed` provider (null for the built-in address, whose file is https and fixed). */
+function feedBase(feed) {
+  if (!feed) return null;
+  if (feed.provider === 'generic') return feed.url;
+  return `${feed.protocol ?? 'https'}://${feed.host ?? 'github.com'}/`;
+}
+
 /** One line per event, to the console and to <profile>/logs/updater.log (the log is moved aside once it passes 512 KB). */
 function fileLogger(folder) {
   let prepared = null;
@@ -71,7 +78,7 @@ export function createUpdates({ config, getVersion, getBuild, parent, onChange, 
     getVersion,
     getBuild,
     createUpdater: (type, { feed, logger }) => {
-      const Updater = createUpdaterClass(type, { getBuild: () => getBuild() ?? 0 });
+      const Updater = createUpdaterClass(type, { getBuild: () => getBuild() ?? 0, getFeedBase: () => feedBase(feed) });
       const updater = new Updater(null, new VersionedAppAdapter(getVersion()));
       // Requests and redirects stay on https (loopback http only when the feed, or the test app-update.yml, is on loopback). Three layers:
       // the redirect handlers, createRequest (the differential download), and a catch-all on the session's webRequest.

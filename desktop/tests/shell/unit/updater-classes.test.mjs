@@ -155,3 +155,12 @@ test('the stock swap is not used: doInstall does not unlink the AppImage first',
   assert.equal(updater.installAtQuit(), false);
   assert.equal(existsSync(appImage), true);
 });
+
+test('the class checks file addresses against the feed it was given: a loopback feed refuses https:evil.example/x.deb', async () => {
+  const folder = await scratch('feedbase');
+  const build = base => newUpdater(createUpdaterClass('deb', { getBuild: () => 1, getFeedBase: () => base }), '0.6.1', folder);
+  const info = release(2, 'https:evil.example/opendoc-desktop_0.6.1-2_amd64.deb');
+  assert.equal(await build('http://127.0.0.1:8099/generic/').isUpdateAvailable(info), false);
+  assert.equal(await build(null).isUpdateAvailable(info), true, 'without a known feed only the dummy base is used');
+  assert.equal(await build('http://127.0.0.1:8099/generic/').isUpdateAvailable(release(2, 'opendoc-desktop_0.6.1-2_amd64.deb')), true);
+});

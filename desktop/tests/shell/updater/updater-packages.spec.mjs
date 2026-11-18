@@ -189,4 +189,18 @@ test.describe('what the updater refuses to follow', () => {
       expect((await feed.requests()).map(request => request.path.split('?')[0])).toEqual(['/generic/latest-linux.yml']);
     } finally { await run.app.close().catch(() => {}); }
   });
+
+  test('a release whose file address is a YAML list (new URL turns it into text) is refused as a whole, and nothing is requested', async () => {
+    const deb = { name: 'opendoc-desktop_0.6.1-8_amd64.deb', bytes: fakePackage(50_000) };
+    await publish(feed, { version: '0.6.1', build: 8, files: [deb] });
+    const yml = join(feed.root, 'generic', 'latest-linux.yml');
+    await writeFile(yml, (await readFile(yml, 'utf8')).replace(`url: ${deb.name}`, `url: [http://127.0.0.1:1/${deb.name}]`));
+    const run = await updaterApp({ config: { updateFeed: feed.url }, resources: { 'package-type': 'deb' } });
+    try {
+      await run.app.firstWindow();
+      await waitFor(async () => /not in the expected form/.test(await run.updaterLog()), { what: 'the reason in the updater log' });
+      expect(await run.dialogs()).toEqual([]);
+      expect((await feed.requests()).map(request => request.path.split('?')[0])).toEqual(['/generic/latest-linux.yml']);
+    } finally { await run.app.close().catch(() => {}); }
+  });
 });

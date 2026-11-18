@@ -686,3 +686,30 @@ test('macOS: what the swap helper left behind is put in the log at the next laun
   assert.ok(quiet.log.some(line => /the update helper said: swapped/.test(line)));
   assert.ok(!quiet.log.some(line => /offers it again/.test(line)));
 });
+
+test('AppImage: a swap that returns false without an error (electron-updater\'s own install already ran) is not a failure: nothing is recorded or shown', async () => {
+  const { controller, config, log, shown } = await setup({ type: 'appimage', script: { check: downloadedUpdate(), installAtQuit: () => false } });
+  await controller.start();
+  await settle();
+  assert.equal(await controller.installOnQuit(), false);
+  assert.equal((await config.read()).updateNotices, undefined);
+  assert.ok(log.some(line => /already ran/.test(line)));
+  assert.deepEqual(shown, []);
+  // And the next launch has nothing to say.
+  const next = await setup({ type: 'appimage', script: { check: { isUpdateAvailable: false } } });
+  await next.controller.start();
+  await next.controller.idle();
+  assert.deepEqual(next.shown, []);
+});
+
+test('the real AppImage class: install() ignored because quitAndInstallCalled is already set raises no error', async () => {
+  const { createUpdaterClass } = await import('../../../src/main/updater/classes.mjs');
+  const { newUpdater } = await import('../support/updater.mjs');
+  const updater = newUpdater(createUpdaterClass('appimage', { getBuild: () => 1 }), '0.6.1', await scratch('ignored'));
+  updater.downloadedUpdateHelper = { file: '/cache/x.AppImage', downloadedFileInfo: { sha512: 'x' } };
+  updater.quitAndInstallCalled = true;
+  const errors = [];
+  updater.on('error', error => errors.push(error));
+  assert.equal(updater.installAtQuit(), false);
+  assert.deepEqual(errors, []);
+});

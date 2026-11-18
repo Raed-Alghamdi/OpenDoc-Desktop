@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { builtInRepository, feedProviderOptions, parseFeedAddress, releasePageUrl, releaseRepository, repositoryFromUpdateConfig, releaseTag, updateConfigIsLoopback } from '../../../src/main/updater/feed.mjs';
-import { isForeignUrl, metadataFiles, releaseFileFor } from '../../../src/main/updater/release-files.mjs';
+import { isForeignUrl, malformedMetadata, metadataFiles, releaseFileFor } from '../../../src/main/updater/release-files.mjs';
 
 test('https addresses are accepted', () => {
   for (const address of ['https://github.com/Raed-Alghamdi/OpenDoc-Desktop', 'https://updates.example.org/opendoc/', 'https://example.org:8443/feed']) assert.equal(parseFeedAddress(address).ok, true, address);
@@ -130,4 +130,49 @@ test('a test app-update.yml on the loopback address is recognised (the generic u
   assert.equal(updateConfigIsLoopback('provider: generic\nurl: https://updates.example.org/x/\n'), false);
   assert.equal(updateConfigIsLoopback('provider: github\nowner: a\nrepo: b\n'), false);
   assert.equal(updateConfigIsLoopback(undefined), false);
+});
+
+test('metadata that is not in the expected shape is refused as a whole, before anything is filtered (an array url reaches another host through new URL)', () => {
+  const evil = 'http://evil.example/x.deb';
+  assert.equal(new URL([evil], 'https://f/d/').href, evil, 'the premise: new URL coerces an array to its text');
+  const cases = {
+    'an array as an address': { version: '0.6.1', build: 2, files: [{ url: [evil], sha512: sha }, { url: 'opendoc-desktop_0.6.1-2_amd64.deb', sha512: sha }] },
+    'a number as an address': { version: '0.6.1', build: 2, files: [{ url: 7, sha512: sha }, { url: 'x.deb', sha512: sha }] },
+    'a missing address': { version: '0.6.1', build: 2, files: [{ sha512: sha }, { url: 'x.deb', sha512: sha }] },
+    'a null entry': { version: '0.6.1', build: 2, files: [null, { url: 'x.deb', sha512: sha }] },
+    'a text entry': { version: '0.6.1', build: 2, files: ['x.deb', { url: 'x.deb', sha512: sha }] },
+    'an array entry': { version: '0.6.1', build: 2, files: [[evil], { url: 'x.deb', sha512: sha }] },
+    'a list that is a text with a length': { version: '0.6.1', build: 2, files: 'x.deb' },
+    'a list that is an object with a length': { version: '0.6.1', build: 2, files: { length: 1, 0: { url: 'x.deb', sha512: sha } } },
+    'a path that is an array': { version: '0.6.1', build: 2, path: [evil], sha512: sha },
+    'a path that is an object': { version: '0.6.1', build: 2, files: [], path: { toString: () => evil }, sha512: sha },
+    'a packages entry that is an array': { version: '0.6.1', build: 2, files: [{ url: 'x.deb', sha512: sha }], packages: { x64: { path: [evil] } } },
+  };
+  for (const [label, info] of Object.entries(cases)) {
+    assert.ok(malformedMetadata(info), label);
+    const found = releaseFileFor('deb', info);
+    assert.deepEqual([found.ok, found.reason], [false, 'malformed'], label);
+  }
+  assert.equal(malformedMetadata({ version: '0.6.1', files: [{ url: 'x.deb', sha512: sha, size: 1 }] }), null);
+  assert.equal(malformedMetadata({ version: '0.6.1', path: 'x.deb', sha512: sha }), null);
+  assert.equal(malformedMetadata({ version: '0.6.1', files: [], path: 'x.deb' }), null);
+  assert.equal(releaseFileFor('deb', files('x.deb')).ok, true);
+});
+
+test('a packages entry with a foreign path is refused like a file entry', () => {
+  const info = { version: '0.6.1', build: 2, files: [{ url: 'x.deb', sha512: sha }], packages: { x64: { path: 'https://evil.example/p.7z', sha512: sha } } };
+  assert.equal(releaseFileFor('deb', info).reason, 'foreign-url');
+});
+
+test('against a real feed base, an entry must stay on its origin too: https:evil.example/x.deb leaves an http loopback feed', () => {
+  const loopback = 'http://127.0.0.1:8099/generic/';
+  assert.equal(new URL('https:evil.example/x.deb', 'https://x.invalid/dir/').hostname, 'x.invalid', 'the premise: the https dummy base reads it as a relative path');
+  assert.equal(new URL('https:evil.example/x.deb', loopback).hostname, 'evil.example', 'the premise: the real base does not');
+  assert.equal(isForeignUrl('https:evil.example/x.deb'), false, 'the dummy base alone cannot see it');
+  assert.equal(isForeignUrl('https:evil.example/x.deb', { base: loopback }), true);
+  assert.equal(releaseFileFor('deb', files('https:evil.example/x.deb'), { base: loopback }).reason, 'foreign-url');
+  for (const url of ['x.deb', 'dir/x.deb', 'pkg-1:2.rpm', '../x.deb']) assert.equal(isForeignUrl(url, { base: loopback }), false, url);
+  assert.equal(isForeignUrl('http:evil.example/x.deb', { base: 'https://updates.example.org/feed/' }), true, 'and the other way round');
+  assert.equal(isForeignUrl('x.deb', { base: 'not a url' }), true, 'an unusable base refuses');
+  assert.equal(isForeignUrl('x.deb', { base: new URL('https://github.com/') }), false);
 });

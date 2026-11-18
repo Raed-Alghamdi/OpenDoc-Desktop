@@ -405,7 +405,9 @@ export class UpdateController {
       const installed = this.updater.installAtQuit();
       this.log(`swap at quit: ${installed ? 'done' : 'not done'}`);
       if (installed && this.renamedTo) await this.onAppImageMoved(this.renamedTo);
-      if (!installed) await this.#rememberSwapFailure(this.swapError ?? 'The swap did not finish.');
+      // False with no error means install() was ignored (electron-updater's own quit handler already swapped, or is doing it): not a failure.
+      if (!installed && this.swapError) await this.#rememberSwapFailure(this.swapError);
+      else if (!installed) this.log('the swap was not run here: electron-updater\'s own install already ran');
       return Boolean(installed);
     } catch (error) {
       this.log(`the swap at quit failed: ${error.message}`);

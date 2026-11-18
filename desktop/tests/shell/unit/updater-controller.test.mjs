@@ -630,3 +630,59 @@ test('AppImage: no room beside the AppImage is reported like a read-only folder:
   assert.equal(shown.at(-1).message, 'A new version is available: 0.6.1, build 2');
   assert.match(shown.at(-1).detail, /not enough free space/);
 });
+
+// ---------- a swap at quit that failed is told once at the next launch ----------
+
+test('AppImage: a swap at quit that fails is recorded with its reason, and the next launch says so once, without blocking', async () => {
+  const failing = { check: downloadedUpdate('0.6.1', 2), installAtQuit: updater => { updater.emit('error', new Error('There is not enough free space in /home/u/Apps to put the update beside opendoc-desktop (180 MB needed, 2 MB free).')); return false; } };
+  const first = await setup({ type: 'appimage', script: failing });
+  await first.controller.start();
+  await settle();
+  assert.equal(await first.controller.installOnQuit(), false);
+  const recorded = (await first.config.read()).updateNotices.swapFailed;
+  assert.deepEqual([recorded.folder, recorded.build], ['/home/u/Apps', 2]);
+  assert.match(recorded.reason, /not enough free space/);
+  assert.deepEqual(first.shown, [], 'nothing is shown while quitting');
+
+  // The next launch: the same config file.
+  const second = await setup({ type: 'appimage', config: { updateNotices: { swapFailed: recorded, folder: '/keep/me' } }, script: { check: { isUpdateAvailable: false } } });
+  await second.controller.start();
+  await second.controller.idle();
+  assert.equal(second.shown.length, 1);
+  assert.equal(second.shown[0].message, 'The last update could not be installed');
+  assert.match(second.shown[0].detail, /in \/home\/u\/Apps: There is not enough free space/);
+  assert.match(second.shown[0].detail, /still the version you had/);
+  const kept = (await second.config.read()).updateNotices;
+  assert.equal(kept.swapFailed, undefined, 'recorded as shown before the dialog');
+  assert.equal(kept.folder, '/keep/me', 'other notices are kept');
+  // And not again.
+  await second.controller.start();
+  await second.controller.idle();
+  assert.equal(second.shown.length, 1);
+});
+
+test('AppImage: a swap that throws is recorded too; a swap that works records nothing', async () => {
+  const throwing = await setup({ type: 'appimage', script: { check: downloadedUpdate(), installAtQuit: () => { throw new Error('boom'); } } });
+  await throwing.controller.start();
+  await settle();
+  assert.equal(await throwing.controller.installOnQuit(), false);
+  assert.equal((await throwing.config.read()).updateNotices.swapFailed.reason, 'boom');
+  const fine = await setup({ type: 'appimage', script: { check: downloadedUpdate() } });
+  await fine.controller.start();
+  await settle();
+  assert.equal(await fine.controller.installOnQuit(), true);
+  assert.equal((await fine.config.read()).updateNotices, undefined);
+});
+
+test('macOS: what the swap helper left behind is put in the log at the next launch, and a give-up says the next check offers it again', async () => {
+  const { controller, log } = await setup({ type: 'mac', script: { check: { isUpdateAvailable: false } } });
+  controller.helperLogs = async () => ['2026-11-18 10:00:00 gave up: the app (pid 4242) did not quit in time, nothing was swapped'];
+  await controller.start();
+  assert.ok(log.some(line => /the update helper said: .*did not quit in time, nothing was swapped/.test(line)));
+  assert.ok(log.some(line => /the next check offers it again/.test(line)));
+  const quiet = await setup({ type: 'mac', script: { check: { isUpdateAvailable: false } } });
+  quiet.controller.helperLogs = async () => ['swapped'];
+  await quiet.controller.start();
+  assert.ok(quiet.log.some(line => /the update helper said: swapped/.test(line)));
+  assert.ok(!quiet.log.some(line => /offers it again/.test(line)));
+});

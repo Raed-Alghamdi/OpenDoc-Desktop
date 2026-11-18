@@ -4,7 +4,7 @@
 // two after this process has exited and open the new one. No Electron import: every system call comes in through `run`.
 import { execFile, spawn } from 'node:child_process';
 import { constants, readdirSync } from 'node:fs';
-import { access, mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -46,7 +46,7 @@ export const waitSteps = 300;
 export const swapScript = `waited=0
 while kill -0 "$6" 2>/dev/null; do
   waited=$((waited + 1))
-  if [ "$waited" -gt "\${7:-300}" ]; then echo "the app did not quit in time, nothing was swapped" >> "$5"; rm -rf "$4"; exit 1; fi
+  if [ "$waited" -gt "\${7:-300}" ]; then echo "$(date '+%Y-%m-%d %H:%M:%S') gave up: the app (pid $6) did not quit in time, nothing was swapped" >> "$5"; rm -rf "$4"; exit 1; fi
   sleep 0.2
 done
 mv "$1" "$2" && mv "$3" "$1" || { [ -e "$2" ] && [ ! -e "$1" ] && mv "$2" "$1"; echo "swap failed" >> "$5"; exit 1; }
@@ -64,6 +64,24 @@ export function startHelper(command, args) {
     child.once('error', reject);
     child.once('spawn', () => { child.unref(); accept(); });
   });
+}
+
+/** A version without its build metadata (1.2.3+4 is 1.2.3): the part that is compared. */
+const bare = version => String(version).replace(/\+.*$/, '');
+
+/**
+ * What the swap helper wrote last time, as lines, and removes those files. The helper runs after the app has quit, so this is how the
+ * next launch learns that it gave up or failed. `folder` and `fs` are for tests.
+ */
+export async function readHelperLogs({ folder = tmpdir(), fs = { readdir, readFile, rm } } = {}) {
+  const lines = [];
+  for (const name of (await fs.readdir(folder).catch(() => [])).filter(entry => /^opendoc-update-helper-\d+\.log$/.test(entry))) {
+    const file = join(folder, name);
+    const text = await fs.readFile(file, 'utf8').catch(() => '');
+    lines.push(...text.split('\n').map(line => line.trim()).filter(Boolean));
+    await fs.rm(file, { force: true }).catch(() => {});
+  }
+  return lines;
 }
 
 const defaultRun = async (command, args) => (await execFileAsync(command, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })).stdout;
@@ -97,7 +115,7 @@ export async function installMacUpdate({ zipFile, state, expected = null, pid = 
     if (!fresh) throw new Error('The update has another bundle identifier.');
     await run('codesign', ['--verify', '--deep', '--strict', fresh]);
     const info = { version: await plistKey(run, fresh, 'CFBundleShortVersionString'), build: Number(await plistKey(run, fresh, 'CFBundleVersion')) };
-    if (expected && (info.version !== expected.version || (expected.build != null && info.build !== expected.build))) {
+    if (expected && (bare(info.version) !== bare(expected.version) || (expected.build != null && info.build !== expected.build))) {
       throw new Error(`The update is version ${info.version}, build ${info.build}, but the release announced ${expected.version}${expected.build != null ? `, build ${expected.build}` : ''}, so it was not installed.`);
     }
     log(`the new bundle is verified: ${JSON.stringify(info)}${basename(fresh) !== basename(state.bundle) ? ` (it is called ${basename(fresh)} in the zip and is installed as ${basename(state.bundle)})` : ''}`);

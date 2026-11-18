@@ -7,7 +7,7 @@ import { chmod, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createUpdaterClass } from '../../../src/main/updater/classes.mjs';
-import { decideMacInstall, installMacUpdate, macBundleState, swapArguments, swapScript, waitSteps } from '../../../src/main/updater/mac-install.mjs';
+import { decideMacInstall, installMacUpdate, macBundleState, readHelperLogs, swapArguments, swapScript, waitSteps } from '../../../src/main/updater/mac-install.mjs';
 import { scratch } from '../support/updater.mjs';
 
 const state = (overrides = {}) => ({ execPath: '/Applications/opendoc-desktop.app/Contents/MacOS/opendoc-desktop', bundle: '/Applications/opendoc-desktop.app', folder: '/Applications', translocated: false, writable: true, quarantine: null, ...overrides });
@@ -223,7 +223,7 @@ test('the swap helper gives up without swapping when the app never exits, and cl
     const result = spawnSync('/bin/sh', swapArguments({ bundle, old: join(folder, 'old'), fresh: join(stage, 'A.app'), stage, helperLog: log, pid: sleeper.pid, steps: 3 }), { encoding: 'utf8', timeout: 15_000 });
     assert.equal(result.status, 1);
     assert.ok(Date.now() - started < 10_000, 'about 0.6 seconds, not forever');
-    assert.match(await readFile(log, 'utf8'), /did not quit in time, nothing was swapped/);
+    assert.match(await readFile(log, 'utf8'), /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d gave up: the app \(pid \d+\) did not quit in time, nothing was swapped/);
     assert.equal(existsSync(bundle), true, 'the app is untouched');
     assert.equal(existsSync(stage), false);
   } finally { sleeper.kill(); }
@@ -232,4 +232,28 @@ test('the swap helper gives up without swapping when the app never exits, and cl
 test('the default wait is 60 seconds', () => {
   assert.equal(waitSteps * 0.2, 60);
   assert.equal(swapArguments({ bundle: 'a', old: 'b', fresh: 'c', stage: 'd', helperLog: 'e', pid: 1 }).at(-1), String(waitSteps));
+});
+
+test('build metadata is stripped on both sides before the version is compared (1.2.3+4 is 1.2.3)', async () => {
+  for (const [bundle, announced] of [['0.6.1+7', '0.6.1'], ['0.6.1', '0.6.1+9'], ['0.6.1+7', '0.6.1+9']]) {
+    const setup = await stageSetup();
+    const { run } = fakeRun({ plist: { 'fresh:CFBundleShortVersionString': bundle } });
+    const result = await installMacUpdate({ zipFile: '/z.zip', state: setup.state, run, start: async () => {}, list: () => ['opendoc-desktop.app'], expected: { version: announced, build: 2 }, helperLogFolder: setup.folder });
+    assert.equal(result.info.build, 2, `${bundle} against ${announced}`);
+  }
+  const setup = await stageSetup();
+  const { run } = fakeRun({ plist: { 'fresh:CFBundleShortVersionString': '0.6.2+1' } });
+  await assert.rejects(installMacUpdate({ zipFile: '/z.zip', state: setup.state, run, start: async () => {}, list: () => ['opendoc-desktop.app'], expected: { version: '0.6.1+1', build: 2 } }), /announced 0\.6\.1/);
+});
+
+test('the helper logs are read once and removed, and only the helper\'s own files are touched', async () => {
+  const folder = await scratch('helperlogs');
+  await writeFile(join(folder, 'opendoc-update-helper-111.log'), 'gave up: x\n');
+  await writeFile(join(folder, 'opendoc-update-helper-222.log'), 'swapped\n');
+  await writeFile(join(folder, 'opendoc-update-helper-abc.log'), 'not ours\n');
+  await writeFile(join(folder, 'other.log'), 'not ours either\n');
+  assert.deepEqual((await readHelperLogs({ folder })).sort(), ['gave up: x', 'swapped']);
+  assert.deepEqual((await readdir(folder)).sort(), ['opendoc-update-helper-abc.log', 'other.log']);
+  assert.deepEqual(await readHelperLogs({ folder }), []);
+  assert.deepEqual(await readHelperLogs({ folder: join(folder, 'missing') }), []);
 });

@@ -8,7 +8,7 @@
 //   deb, rpm, pacman                        downloads in the background, then "Restart to Update" (the system password)
 //   macOS                                   downloads and checks, then "Restart to Update" runs the app's own swap, or a notice
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { parseBuild } from './build-compare.mjs';
 import { feedProviderOptions, parseFeedAddress, releasePageUrl, releaseRepository, repositoryFromUpdateConfig } from './feed.mjs';
 import { detectInstallType, needsRestartClick } from './install-type.mjs';
@@ -33,10 +33,11 @@ export class UpdateController {
    * @param options.relaunch, quit: the app's relaunch and quit
    * @param options.onChange called when the menu must be rebuilt
    * @param options.onAppImageMoved async (newPath): the AppImage got a new file name, so the opendoc command must follow it
+   * @param options.helperLogs async () => lines the macOS swap helper left from the last run (and removes them)
    * Everything else is for tests: platform, env, readText(path), createSchedule.
    */
-  constructor({ config, packaged, resourcesDir, getVersion, getBuild, createUpdater, show, openExternal, relaunch = () => {}, quit = () => {}, onChange = () => {}, onAppImageMoved = async () => {}, log = () => {}, platform = process.platform, env = process.env, readText = path => readFileSync(path, 'utf8'), scheduleFactory = createSchedule }) {
-    Object.assign(this, { config, packaged, resourcesDir, getVersion, getBuild, createUpdater, show, openExternal, relaunch, quit, onChange, onAppImageMoved, log, platform, env, readText });
+  constructor({ config, packaged, resourcesDir, getVersion, getBuild, createUpdater, show, openExternal, relaunch = () => {}, quit = () => {}, onChange = () => {}, onAppImageMoved = async () => {}, helperLogs = async () => [], log = () => {}, platform = process.platform, env = process.env, readText = path => readFileSync(path, 'utf8'), scheduleFactory = createSchedule }) {
+    Object.assign(this, { config, packaged, resourcesDir, getVersion, getBuild, createUpdater, show, openExternal, relaunch, quit, onChange, onAppImageMoved, helperLogs, log, platform, env, readText });
     this.schedule = scheduleFactory({ run: () => this.check({ manual: false }), log });
     this.kind = { type: 'inactive', active: false, reason: 'not started' };
     this.base = this.kind; // the install type with the user's switch left out: what a manual check works with
@@ -84,6 +85,8 @@ export class UpdateController {
   async start() {
     try {
       await this.#announceRun();
+      await this.#swapNotice();
+      await this.#helperNotes();
       await this.refresh();
       await this.#launchNotices();
     } catch (error) {
@@ -215,7 +218,10 @@ export class UpdateController {
     updater.on('update-available', info => this.log(`found ${describeInfo(info)}`));
     updater.on('update-not-available', () => this.log('no newer build'));
     updater.on('update-downloaded', info => this.log(`downloaded ${describeInfo(info)}`));
-    updater.on('error', error => this.log(`error: ${firstLine(error)}`));
+    updater.on('error', error => {
+      this.log(`error: ${firstLine(error)}`);
+      if (this.swapping) this.swapError = firstLine(error);
+    });
   }
 
   // ---------- the user's switch ----------
@@ -394,17 +400,51 @@ export class UpdateController {
       // A download from an automatic check is swapped in only while the switch is on; one the user asked for with "Check for Updates…" always is.
       if (!this.updater?.installAtQuit || !this.ready || (!this.automatic && !this.ready.manual) || this.updaterType !== 'appimage') return false;
       this.renamedTo = null;
+      this.swapError = null;
       this.swapping = true;
       const installed = this.updater.installAtQuit();
       this.log(`swap at quit: ${installed ? 'done' : 'not done'}`);
       if (installed && this.renamedTo) await this.onAppImageMoved(this.renamedTo);
+      if (!installed) await this.#rememberSwapFailure(this.swapError ?? 'The swap did not finish.');
       return Boolean(installed);
     } catch (error) {
       this.log(`the swap at quit failed: ${error.message}`);
+      await this.#rememberSwapFailure(firstLine(error));
       return false;
     } finally {
       this.swapping = false;
     }
+  }
+
+  /** The swap at quit failed (no room, a folder that turned read-only): keep why, so the next launch can say it once. Never throws. */
+  async #rememberSwapFailure(reason) {
+    try {
+      const appImage = this.env.APPIMAGE;
+      const failure = { folder: appImage ? dirname(appImage) : null, reason, build: parseBuild(this.ready?.info?.build) };
+      await this.config.update(value => ({ ...value, updateNotices: { ...(value.updateNotices ?? {}), swapFailed: failure } }));
+    } catch (error) { this.log(`the swap failure could not be recorded: ${error.message}`); }
+  }
+
+  /** At launch: the last quit could not install the update. Said once (the record goes before the dialog), without holding anything up. */
+  async #swapNotice() {
+    const notices = (await this.config.read()).updateNotices ?? {};
+    const failure = notices.swapFailed;
+    if (!failure) return;
+    await this.config.update(value => {
+      const { swapFailed, ...rest } = value.updateNotices ?? {};
+      return { ...value, updateNotices: rest };
+    });
+    this.log(`the last update could not be installed: ${failure.reason}`);
+    this.#track(this.#say('info', 'The last update could not be installed', `opendoc-desktop could not replace itself${failure.folder ? ` in ${failure.folder}` : ''}: ${failure.reason}\n\nNothing was changed, and this is still the version you had. The next check tries again.`));
+  }
+
+  /** macOS: what the swap helper wrote last time (it runs after the app has quit), put in the updater's log; the next check offers the update again. */
+  async #helperNotes() {
+    try {
+      const lines = await this.helperLogs();
+      for (const line of lines) this.log(`the update helper said: ${line}`);
+      if (lines.some(line => /nothing was swapped|swap failed/.test(line))) this.log('the last update was not installed; the next check offers it again');
+    } catch (error) { this.log(`the update helper's log could not be read: ${error.message}`); }
   }
 
   /** At launch: an AppImage in a folder the user cannot write to is told once (the swap would fail at quit), and nothing is downloaded. */

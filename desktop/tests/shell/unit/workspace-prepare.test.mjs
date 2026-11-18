@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
 import { lstat, mkdir, readFile, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -145,11 +146,40 @@ test('a headless pin (with or without a marker) is refused: the app opens the no
   assert.equal((await attempt(marked)).code, 'headless');
 });
 
-test('a marker of another workspace format is refused', async () => {
-  const context = await setup({ workspace: { marker: { formatVersion: 2, edition: 'normal' } } });
+test('a marker in a newer workspace format is read-only whatever the pin says (refused without support, nothing changed)', async () => {
+  const context = await setup({ workspace: { marker: { formatVersion: 2, createdWith: '0.6.1', edition: 'normal' } } });
+  const before = await snapshot(context.root);
   const result = await attempt(context);
-  assert.equal(result.code, 'unsupported-format');
-  assert.match(result.message, /format 2/);
+  assert.equal(result.code, 'read-only-unsupported');
+  assert.match(result.message, /workspace format 2, which is newer than the one this app writes \(1\)/);
+  assert.deepEqual(await snapshot(context.root), before);
+  const supported = await setup({ workspace: { marker: { formatVersion: 2, createdWith: '0.6.1', edition: 'normal' } }, readOnlySupport: true });
+  const open = await attempt(supported);
+  assert.equal(open.readOnly.reason, 'newer-minor');
+});
+
+test('a marker in an older workspace format goes to the upgrade path even when the pin is the app\'s version; the upgrade stamps the new format', async () => {
+  const context = await setup({ runtime: { format: 2 }, workspace: { pin: '0.6.1', marker: { formatVersion: 1, createdWith: '0.6.1', edition: 'normal' } } });
+  const result = await attempt(context);
+  assert.equal(result.ok, true);
+  assert.equal(result.upgraded, true);
+  assert.ok(context.calls.ui.includes('upgrade:0.6.1>0.6.1'), 'the dialog was asked');
+  assert.equal(JSON.parse(await readFile(join(context.root, '.opendoc', 'workspace.json'), 'utf8')).formatVersion, 2);
+  assert.equal(await pinOf(context.root), '0.6.1');
+  assert.equal((await listBackups(context.dataDir)).length, 1);
+});
+
+test('the format is stamped before the checks run, and the backup remembers the old one so Restore puts it back', async () => {
+  const context = await setup({ runtime: { format: 2 }, workspace: { pin: '0.5.0', documents: ['broken'] }, failDocuments: ['broken'], answers: { result: { action: 'restore' } }, readOnlySupport: true });
+  const seen = [];
+  const original = context.calls.cli;
+  const ui = { ...context.ui, progress: text => { if (text?.startsWith('Checking')) seen.push(['stamped', JSON.parse(readFileSync(join(context.root, '.opendoc', 'workspace.json'), 'utf8')).formatVersion, 'pending', existsSync(join(context.root, '.opendoc', 'upgrade-pending.json'))]); } };
+  const result = await attempt(context, { ui });
+  assert.deepEqual(seen, [['stamped', 2, 'pending', true]]);
+  assert.equal(result.readOnly.reason, 'restored-backup');
+  assert.equal(JSON.parse(await readFile(join(context.root, '.opendoc', 'workspace.json'), 'utf8')).formatVersion, 1, 'Restore puts the old format back');
+  assert.equal(await exists(join(context.root, '.opendoc', 'upgrade-pending.json')), false);
+  void original;
 });
 
 test('a damaged marker is refused', async () => {
@@ -427,4 +457,130 @@ test('after a crash part-way through an upgrade the next open sees the older pin
   assert.equal(result.ok, true);
   assert.ok(context.calls.ui.includes('upgrade:0.5.0>0.6.1'), 'it asked again');
   assert.equal((await listBackups(context.dataDir)).length, 2, 'the earlier backup is kept next to the new one');
+});
+
+// ---- read-only writes nothing
+
+test('a read-only open writes nothing but the node_modules link: no marker, no managed flag, no pin, no .claude/skills', async () => {
+  const bare = await setup({ workspace: { pin: '0.7.0', marker: false, skills: true }, readOnlySupport: true });
+  await rm(join(bare.root, '.claude'), { recursive: true, force: true });
+  const before = await snapshot(bare.root);
+  const result = await attempt(bare);
+  assert.equal(result.ok, true);
+  assert.equal(result.readOnly.reason, 'newer-minor');
+  assert.deepEqual(bare.calls.ui, [], 'no question about adopting');
+  const after = await snapshot(bare.root);
+  assert.deepEqual(Object.keys(after).filter(path => !(path in before)), ['node_modules']);
+  assert.equal(await exists(join(bare.root, '.opendoc')), false);
+
+  const marked = await setup({ workspace: { pin: '0.6.9' }, readOnlySupport: true });
+  const marker = await readFile(join(marked.root, '.opendoc', 'workspace.json'), 'utf8');
+  await attempt(marked);
+  assert.equal(await readFile(join(marked.root, '.opendoc', 'workspace.json'), 'utf8'), marker, 'the marker is not touched');
+
+  const declined = await setup({ workspace: { pin: '0.5.0' }, readOnlySupport: true, answers: { upgrade: { choice: 'readonly' } } });
+  const declinedMarker = await readFile(join(declined.root, '.opendoc', 'workspace.json'), 'utf8');
+  await attempt(declined);
+  assert.equal(await readFile(join(declined.root, '.opendoc', 'workspace.json'), 'utf8'), declinedMarker);
+});
+
+test('declining the upgrade on a marker-less folder (read-only) does not adopt it', async () => {
+  const context = await setup({ workspace: { pin: '0.5.0', marker: false }, readOnlySupport: true, answers: { upgrade: { choice: 'readonly' } } });
+  const result = await attempt(context);
+  assert.equal(result.adopted, false);
+  assert.equal(await exists(join(context.root, '.opendoc', 'workspace.json')), false);
+});
+
+// ---- a crash after the pin moved
+
+test('an upgrade that moved the pin and never settled its checks (the pending file) runs the checks at the next open', async () => {
+  const context = await setup({ workspace: { pin: '0.6.1', documents: ['alpha', 'broken'] }, failDocuments: ['broken'], answers: { result: { action: 'close' } } });
+  await writeFile(join(context.root, '.opendoc', 'upgrade-pending.json'), JSON.stringify({ from: '0.5.0', to: '0.6.1', backup: { name: 'gone', directory: '/nowhere' }, time: '2026-11-18T10:00:00.000Z' }));
+  const result = await attempt(context);
+  assert.deepEqual(result, { ok: false, canceled: true });
+  assert.deepEqual(context.calls.cli.map(call => call.args.join(' ')), ['check --json', 'review alpha --json', 'review broken --json']);
+  assert.deepEqual(context.calls.result.failures.map(failure => failure.id), ['broken']);
+  assert.match(context.calls.result.message, /interrupted/);
+  assert.equal(await exists(join(context.root, '.opendoc', 'upgrade-pending.json')), false, 'settled once the user has seen it');
+  // The next open has nothing left to check.
+  context.calls.cli.length = 0;
+  assert.equal((await attempt(context)).ok, true);
+  assert.equal(context.calls.cli.length, 0);
+});
+
+test('pending checks that pass say so, and the file goes; a pending file whose pin did not move is dropped without checks', async () => {
+  const passing = await setup({ workspace: { pin: '0.6.1' } });
+  await writeFile(join(passing.root, '.opendoc', 'upgrade-pending.json'), JSON.stringify({ from: '0.5.0', to: '0.6.1', backup: { name: 'b', directory: '/b' }, time: 'x' }));
+  const result = await attempt(passing);
+  assert.equal(result.ok, true);
+  assert.equal(passing.calls.cli.length > 0, true);
+  assert.equal(result.notes[0].title, 'Upgrade checks finished');
+  assert.equal(await exists(join(passing.root, '.opendoc', 'upgrade-pending.json')), false);
+
+  const stale = await setup({ workspace: { pin: '0.5.0' }, answers: { upgrade: { choice: 'cancel' } } });
+  await writeFile(join(stale.root, '.opendoc', 'upgrade-pending.json'), JSON.stringify({ from: '0.5.0', to: '0.6.1', backup: null, time: 'x' }));
+  await attempt(stale);
+  assert.equal(await exists(join(stale.root, '.opendoc', 'upgrade-pending.json')), true, 'a refusal changes nothing');
+  const moved = await setup({ workspace: { pin: '0.5.0' } });
+  await writeFile(join(moved.root, '.opendoc', 'upgrade-pending.json'), JSON.stringify({ from: '0.4.0', to: '0.5.0', backup: null, time: 'x' }));
+  assert.equal((await attempt(moved)).ok, true);
+  assert.equal(await exists(join(moved.root, '.opendoc', 'upgrade-pending.json')), false);
+});
+
+// ---- the link is checked again before it is replaced
+
+test('a real node_modules that appears after the questions were asked is not replaced', async () => {
+  const context = await setup({ workspace: { pin: '0.5.0' } });
+  const ui = { ...context.ui, askUpgrade: async () => { await mkdir(join(context.root, 'node_modules', 'new'), { recursive: true }); return { choice: 'upgrade', remember: false }; } };
+  const result = await attempt(context, { ui });
+  assert.equal(result.code, 'modules-kept');
+  assert.match(result.message, /changed while the app was asking/);
+  assert.equal((await lstat(join(context.root, 'node_modules'))).isDirectory(), true);
+  assert.deepEqual(context.calls.removed, []);
+  assert.equal(await pinOf(context.root), '0.5.0', 'the upgrade did not start');
+});
+
+test('created: true only counts when the marker names createdWith (what init writes)', async () => {
+  const marked = await setup({ workspace: { marker: { formatVersion: 1, edition: 'normal' } } });
+  await mkdir(join(marked.root, 'node_modules', 'x'), { recursive: true });
+  await attempt(marked, { created: true });
+  assert.deepEqual(marked.calls.ui, ['real:folder'], 'asked, because the marker has no createdWith');
+  const made = await setup();
+  await mkdir(join(made.root, 'node_modules', 'x'), { recursive: true });
+  await attempt(made, { created: true });
+  assert.deepEqual(made.calls.ui, []);
+});
+
+// ---- leftovers on open
+
+test('leftover temporary files of a dead process are removed on open, those of a live one are not', async () => {
+  const context = await setup({ workspace: { skills: true } });
+  const dead = 2 ** 22 + 12345; // beyond pid_max on this kind of machine
+  const files = [join(context.root, `package.json.opendoc-${dead}.part`), join(context.root, '.claude', `.skills.opendoc-${dead}.part`), join(context.root, '.opendoc', `.workspace.json.opendoc-${dead}.part`)];
+  const live = join(context.root, `.something.opendoc-${process.ppid}.part`); // the parent process is certainly alive
+  await mkdir(join(context.root, '.claude'), { recursive: true });
+  for (const file of [...files, live]) await writeFile(file, 'x');
+  assert.equal((await attempt(context)).ok, true);
+  for (const file of files) assert.equal(await exists(file), false, file);
+  assert.equal(await exists(live), true);
+});
+
+test('an interrupted restore (its journal) is undone at the next open, with a note', async () => {
+  const context = await setup({ workspace: { pin: '0.5.0', documents: ['broken'] }, failDocuments: ['broken'], answers: { result: { action: 'close' } } });
+  await attempt(context); // the upgrade runs and fails review; the backup exists
+  const [backup] = await listBackups(context.dataDir);
+  const { restoreBackup } = await import('../../../src/main/workspace/backup.mjs');
+  const before = await snapshot(context.root);
+  // A restore that dies in the middle and cannot roll back (the crash): the journal and the safety copy stay.
+  await assert.rejects(restoreBackup({ root: context.root, dataDir: context.dataDir, name: backup.name, step: async ({ stage }) => { if (stage === 'replace' || stage.startsWith('rollback')) throw new Error('power cut'); } }), /rollback-failed|putting the files back failed/);
+  assert.equal(await exists(join(context.root, '.opendoc', 'restore-journal.json')), true);
+  const result = await attempt(context);
+  assert.equal(result.ok, true);
+  assert.equal(result.notes[0].title, 'Interrupted restore undone');
+  assert.match(result.notes[0].message, /undid it/);
+  assert.equal(await exists(join(context.root, '.opendoc', 'restore-journal.json')), false);
+  const after = await snapshot(context.root);
+  const files = snapshotNow => Object.fromEntries(Object.entries(snapshotNow).filter(([path]) => !path.startsWith('.opendoc') && !path.startsWith('node_modules')));
+  assert.deepEqual(files(after), files(before), 'the workspace is as it was before the interrupted restore began');
+  assert.equal((await listBackups(context.dataDir)).filter(item => item.manifest.kind === 'before-restore').length, 0, 'the safety copy is removed once it has done its job');
 });

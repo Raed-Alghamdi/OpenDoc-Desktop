@@ -23,12 +23,18 @@ export async function readRuntimeInfo(runtime) {
   return { ok: true, version: metadata.version, edition, workspaceFormat: Number(format) };
 }
 
+/** The text of a TypeScript or JavaScript source without its comments (block and line comments; a `//` inside a string stays). */
+export function withoutComments(source) {
+  return source.replace(/("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (match, string) => string ?? ' ');
+}
+
 /**
  * Whether the runtime's service honours `readOnly` (U4 sets `readOnlySupported: true` on what `prepareOpenDocService`
  * returns). Read from the service's source, so it is known before anything is changed; the service host checks the real
- * object when it starts, and fails with `read-only-unsupported` if this guess was wrong.
+ * object when it starts, and fails with `read-only-unsupported` if this guess was wrong. Comments are ignored, and so is a
+ * type (`readOnlySupported: true;` in an interface): only the property of an object literal counts, which ends in `,` or `}`.
  */
 export async function readOnlySupported(runtime) {
   const source = await read(join(runtime, 'node_modules', 'opendoc', 'src', 'server', 'service.ts'));
-  return Boolean(source && /readOnlySupported\s*:\s*true/.test(source));
+  return Boolean(source && /\breadOnlySupported\s*:\s*true\s*[,}]/.test(withoutComments(source)));
 }

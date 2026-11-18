@@ -1,15 +1,37 @@
 // Backups outside the workspace's synced folder (plan 3.4): before an upgrade, and the "before restore" copy that
-// Restore makes of what it replaces. A backup is a folder `<data>/backups/<workspace>-<date>/` holding `backup.json`
+// Restore makes of the files it changes. A backup is a folder `<data>/backups/<workspace>-<date>/` holding `backup.json`
 // (the manifest) and `workspace/` (the copy). It is built under a temporary name and renamed when complete, so a backup
 // that is there is whole. Nothing here ever deletes one except `deleteBackup`, which the user asks for.
-import { cp, lstat, mkdir, readFile, readdir, rename, rm, statfs, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+//
+// What a backup covers: every top-level entry except `node_modules`, `.opendoc` and `output`, and, at any depth, the
+// metadata of version control and file sync (`isMetadata`). Restoring an old `.git` would silently roll back commits, and
+// restoring a sync journal puts an old one over a newer one, so none of them is copied or restored.
+//
+// Restore works file by file: it copies (never moves) what will change into a safety copy, writes a journal into the
+// workspace's `.opendoc/`, replaces files one at a time through a temporary name and a rename, removes the files the backup
+// does not have, and leaves identical files alone. A failure at any step rolls back from the safety copy, and the safety copy
+// is deleted only when the rollback fully succeeded.
+import { chmod, copyFile, cp, lstat, mkdir, open, readFile, readdir, readlink, rename, rm, rmdir, statfs, symlink, utimes, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
+import { readMarker } from './marker.mjs';
 import { backupsDirectory } from './paths.mjs';
 
 /** Not copied: the link and what the runtime can rebuild (`node_modules`, `.opendoc`) and what the user exports (`output`). */
 export const excludedTopLevel = new Set(['node_modules', '.opendoc', 'output']);
 const manifestName = 'backup.json';
 const copyFolder = 'workspace';
+export const journalName = 'restore-journal.json';
+const partialAge = 10 * 60_000;
+
+// Version control and file sync metadata, by file or folder name, at any depth.
+const metadataPatterns = [
+  /^\.(git|hg|svn|jj)$/,
+  /^\.(stfolder|stignore|stversions)$/,
+  /^\.sync_.*\.db.*$/, /^\._sync_.*\.db.*$/, /^\.csync_journal\.db.*$/, /^\.owncloudsync\.log.*$/, /^\.nextcloudsync\.log.*$/, /^\.~lock\..*$/,
+  /^\.dropbox.*$/,
+];
+/** True for the name of a version-control or file-sync metadata file or folder (`.git`, `.sync_*.db`, `.stfolder`, `.dropbox*`, ...). */
+export const isMetadata = name => metadataPatterns.some(pattern => pattern.test(name));
 
 export class BackupError extends Error {
   constructor(code, message) { super(message); this.name = 'BackupError'; this.code = code; }
@@ -19,13 +41,16 @@ const two = value => String(value).padStart(2, '0');
 /** `2026-11-18-142530`, in local time. */
 export const stamp = (date = new Date()) => `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}-${two(date.getHours())}${two(date.getMinutes())}${two(date.getSeconds())}`;
 
-/** Count the files and bytes below `path` (symlinks count as one file, never followed). */
+/** The folder name's own part of a backup name: never starts with a dot, so the list and Delete always see the backup. */
+export const backupBase = root => basename(root).replace(/^\.+/, '') || 'workspace';
+
+/** Count the files and bytes below `path` (symlinks count as one file, never followed; metadata is skipped). */
 export async function measure(path) {
   let files = 0;
   let bytes = 0;
   const walk = async current => {
     const info = await lstat(current);
-    if (info.isDirectory()) { for (const name of await readdir(current)) await walk(join(current, name)); return; }
+    if (info.isDirectory()) { for (const name of await readdir(current)) if (!isMetadata(name)) await walk(join(current, name)); return; }
     files += 1;
     bytes += info.isSymbolicLink() ? 0 : info.size;
   };
@@ -35,7 +60,7 @@ export async function measure(path) {
 
 /** The top-level entries of a workspace that a backup covers. */
 export async function backedUpEntries(root) {
-  return (await readdir(root)).filter(name => !excludedTopLevel.has(name)).sort();
+  return (await readdir(root)).filter(name => !excludedTopLevel.has(name) && !isMetadata(name)).sort();
 }
 
 async function measureEntries(root, names) {
@@ -66,6 +91,24 @@ async function writeManifest(folder, manifest) {
 }
 
 /**
+ * Remove the `.<name>.partial` folders that a crash left in the backups folder. A partial is only a copy that was never
+ * finished (the workspace itself was not touched while it was made), so removing it loses nothing. Folders younger than
+ * ten minutes are left: another backup may be being made.
+ */
+export async function cleanPartials(dataDir, now = Date.now()) {
+  const directory = backupsDirectory(dataDir);
+  const removed = [];
+  for (const name of await readdir(directory).catch(() => [])) {
+    if (!name.startsWith('.') || !name.endsWith('.partial')) continue;
+    const info = await lstat(join(directory, name)).catch(() => null);
+    if (!info || now - info.mtimeMs < partialAge) continue;
+    await rm(join(directory, name), { recursive: true, force: true }).catch(() => {});
+    removed.push(name);
+  }
+  return removed;
+}
+
+/**
  * Copy the workspace to a new backup. Checks the free space first (the copy's size and a margin), copies with symlinks
  * kept as they are, checks the copy has every file, then writes the manifest and renames the folder into place.
  * @returns { name, directory, manifest }
@@ -73,20 +116,23 @@ async function writeManifest(folder, manifest) {
 export async function createBackup({ root, dataDir, from, to, now = new Date(), kind = 'upgrade', free = freeBytes }) {
   const directory = backupsDirectory(dataDir);
   await mkdir(directory, { recursive: true, mode: 0o700 });
+  await cleanPartials(dataDir, now.getTime());
   const entries = await backedUpEntries(root);
   const size = await measureEntries(root, entries);
   const available = await free(directory);
   const needed = Math.ceil(size.bytes * 1.05) + 16 * 1024 * 1024;
   if (available < needed) throw new BackupError('no-space', `There is not enough free space for a backup of this workspace: it needs about ${humanBytes(needed)} in ${directory} and ${humanBytes(available)} is free. Nothing was changed.`);
-  const name = await newBackupName(directory, `${basename(root)}-${stamp(now)}`);
+  const name = await newBackupName(directory, `${backupBase(root)}-${stamp(now)}`);
   const partial = join(directory, `.${name}.partial`);
   await rm(partial, { recursive: true, force: true });
   await mkdir(join(partial, copyFolder), { recursive: true, mode: 0o700 });
   try {
-    for (const entry of entries) await cp(join(root, entry), join(partial, copyFolder, entry), { recursive: true, verbatimSymlinks: true, preserveTimestamps: true, errorOnExist: true });
+    for (const entry of entries) await cp(join(root, entry), join(partial, copyFolder, entry), { recursive: true, verbatimSymlinks: true, preserveTimestamps: true, errorOnExist: true, filter: source => !isMetadata(basename(source)) });
     const copied = await measureEntries(join(partial, copyFolder), entries);
     if (copied.files !== size.files) throw new BackupError('incomplete', `The backup is missing files (${copied.files} of ${size.files} were copied), so it was discarded. Nothing was changed.`);
-    const manifest = { formatVersion: 1, kind, name, source: root, workspace: basename(root), from, to, time: now.toISOString(), files: size.files, bytes: size.bytes, entries };
+    // The marker is not copied (it belongs to this device), so the format it names is kept here for Restore.
+    const marker = await readMarker(root);
+    const manifest = { formatVersion: 1, kind, name, source: root, workspace: basename(root), from, to, workspaceFormat: marker.state === 'ok' ? marker.marker.formatVersion ?? null : null, time: now.toISOString(), files: size.files, bytes: size.bytes, entries };
     await writeManifest(partial, manifest);
     await rename(partial, join(directory, name));
     return { name, directory: join(directory, name), manifest };
@@ -103,6 +149,9 @@ async function readManifestOf(folder) {
     return manifest && manifest.formatVersion === 1 && typeof manifest.source === 'string' ? manifest : null;
   } catch { return null; }
 }
+
+/** The manifest of the backup called `name`, or null. */
+export const backupManifest = (dataDir, name) => readManifestOf(join(backupsDirectory(dataDir), name));
 
 /** The backups on this device, newest first: `{ name, directory, manifest }`. Folders that are not complete backups are ignored. */
 export async function listBackups(dataDir) {
@@ -122,50 +171,229 @@ export async function listBackups(dataDir) {
 export async function deleteBackup({ dataDir, name, trash }) {
   if (typeof name !== 'string' || name !== basename(name) || name.startsWith('.')) throw new BackupError('bad-name', 'That is not the name of a backup.');
   const folder = join(backupsDirectory(dataDir), name);
-  if (!(await readManifestOf(folder))) throw new BackupError('missing', 'That backup is not there any more.');
+  const manifest = await readManifestOf(folder);
+  if (!manifest) throw new BackupError('missing', 'That backup is not there any more.');
+  // The safety copy of a restore that was interrupted is what undoes it: it stays until the app has done that.
+  const journal = await readFile(journalFile(manifest.source), 'utf8').then(JSON.parse, () => null);
+  if (journal?.before === name) throw new BackupError('needed', 'This backup is the safety copy of a restore that was interrupted and has not been undone yet. Open the workspace so the app can undo it; then this backup is removed by the app.');
   await trash(folder);
 }
 
-async function move(from, to) {
-  try { await rename(from, to); }
-  catch (error) {
-    if (error.code !== 'EXDEV') throw error;
-    await cp(from, to, { recursive: true, verbatimSymlinks: true, preserveTimestamps: true });
-    await rm(from, { recursive: true, force: true });
+// ---------- restore, file by file
+
+/** What is at `path`: { type: 'file' | 'dir' | 'link', size, target, mode, mtime }, or null when nothing is. Links are not followed. */
+async function describe(path) {
+  let info;
+  try { info = await lstat(path); } catch (error) { if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null; throw error; }
+  if (info.isSymbolicLink()) return { type: 'link', size: 0, target: await readlink(path) };
+  if (info.isDirectory()) return { type: 'dir', size: 0 };
+  return { type: 'file', size: info.size, mode: info.mode & 0o7777, mtime: info.mtimeMs };
+}
+
+/** Every entry below the top-level `names` of `base`, as a map from relative path to describe(), metadata skipped. */
+async function walkTree(base, names) {
+  const found = new Map();
+  const visit = async relative => {
+    const entry = await describe(join(base, relative));
+    if (!entry) return;
+    found.set(relative, entry);
+    if (entry.type === 'dir') for (const name of (await readdir(join(base, relative))).sort()) if (!isMetadata(name)) await visit(join(relative, name));
+  };
+  for (const name of names) await visit(name);
+  return found;
+}
+
+async function sameBytes(a, b) {
+  const [left, right] = [await open(a, 'r'), await open(b, 'r')];
+  try {
+    const one = Buffer.allocUnsafe(1 << 20);
+    const two = Buffer.allocUnsafe(1 << 20);
+    for (;;) {
+      const [x, y] = [await left.read(one, 0, one.length, null), await right.read(two, 0, two.length, null)];
+      if (x.bytesRead !== y.bytesRead) return false;
+      if (x.bytesRead === 0) return true;
+      if (!one.subarray(0, x.bytesRead).equals(two.subarray(0, y.bytesRead))) return false;
+    }
+  } finally { await left.close(); await right.close(); }
+}
+
+/** Do the entries at these two paths hold the same thing (same type; links to the same target; files with the same bytes)? */
+async function sameEntry(pathA, a, pathB, b) {
+  if (!a || !b || a.type !== b.type) return false;
+  if (a.type === 'dir') return true;
+  if (a.type === 'link') return a.target === b.target;
+  return a.size === b.size && sameBytes(pathA, pathB);
+}
+
+/** Put `source` at `target` through a temporary name beside it and a rename, so the path never holds half a file. */
+async function placeAtomically(source, info, target) {
+  await mkdir(dirname(target), { recursive: true });
+  const temporary = join(dirname(target), `.${basename(target)}.opendoc-${process.pid}.part`);
+  await rm(temporary, { force: true });
+  try {
+    if (info.type === 'link') await symlink(info.target, temporary);
+    else {
+      await copyFile(source, temporary);
+      await chmod(temporary, info.mode);
+      await utimes(temporary, new Date(), new Date(info.mtime));
+    }
+    await rename(temporary, target);
+  } catch (error) { await rm(temporary, { force: true }).catch(() => {}); throw error; }
+}
+
+const journalFile = root => join(root, '.opendoc', journalName);
+
+async function writeJournal(root, journal) {
+  await mkdir(join(root, '.opendoc'), { recursive: true });
+  const temporary = join(root, '.opendoc', `.${journalName}.opendoc-${process.pid}.part`);
+  await writeFile(temporary, `${JSON.stringify(journal, null, 2)}\n`);
+  await rename(temporary, journalFile(root));
+}
+
+const depth = relative => relative.split('/').length;
+const bytesOf = (tree, paths) => paths.reduce((sum, relative) => sum + (tree.get(relative)?.size ?? 0), 0);
+
+/**
+ * Undo a restore from its safety copy, exactly: remove what the restore added, bring back what it changed or removed. Every
+ * error is collected and reported, none is swallowed, and the result is verified against the safety copy. Throws a
+ * BackupError ('rollback-failed') that names the safety copy when anything could not be put back (the copy and the journal
+ * are then kept); otherwise removes the journal and the safety copy.
+ */
+async function rollback({ root, journal, step }) {
+  const savedRoot = join(journal.beforeDirectory, copyFolder);
+  const { plan } = journal;
+  const errors = [];
+  const attempt = async (stage, relative, run) => {
+    try { await step({ stage, path: relative }); await run(); } catch (error) { errors.push(`${relative}: ${error.message}`); }
+  };
+  for (const relative of plan.add) await attempt('rollback-add', relative, () => rm(join(root, relative), { force: true }));
+  for (const relative of [...plan.mkdirs].sort((a, b) => depth(b) - depth(a))) {
+    // A folder the restore made that now holds something the restore did not put there is not ours to remove.
+    await attempt('rollback-mkdir', relative, () => rmdir(join(root, relative)).catch(error => { if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error; }));
   }
+  for (const relative of [...plan.rmdirs].sort((a, b) => depth(a) - depth(b))) await attempt('rollback-rmdir', relative, () => mkdir(join(root, relative), { recursive: true }));
+  const restored = [...plan.remove, ...plan.replace];
+  for (const relative of restored) {
+    await attempt('rollback-file', relative, async () => {
+      const info = await describe(join(savedRoot, relative));
+      if (!info) throw new Error('the safety copy has no such file');
+      await placeAtomically(join(savedRoot, relative), info, join(root, relative));
+    });
+  }
+  for (const relative of restored) {
+    if (errors.some(message => message.startsWith(`${relative}:`))) continue;
+    const [saved, now] = [await describe(join(savedRoot, relative)), await describe(join(root, relative))];
+    if (!(await sameEntry(join(root, relative), now, join(savedRoot, relative), saved))) errors.push(`${relative}: it is not the same as in the safety copy`);
+  }
+  if (errors.length) throw new BackupError('rollback-failed', `The restore could not be undone completely (${errors.length} problem${errors.length === 1 ? '' : 's'}, the first: ${errors[0]}). Your files from before the restore are kept in ${journal.beforeDirectory}; the journal is ${journalFile(root)}.`);
+  await rm(journalFile(root), { force: true });
+  await rm(journal.beforeDirectory, { recursive: true, force: true });
 }
 
 /**
- * Put a backup's files back. First everything the backup covers in the workspace now (every top-level entry except
- * node_modules, .opendoc and output) is moved into a new backup of kind `before-restore`, so nothing the workspace holds
- * now is lost; then the backup's files are copied in. If the copy fails, the first step is undone.
- * @returns { before: { name, directory, manifest }, restored: manifest }
+ * Put a backup's files back, file by file. Files that are the same are not touched; files that differ are replaced one at a
+ * time through a temporary name and a rename; files the backup does not have are removed (unless the backup is itself only a
+ * set of changed files). Before the first change, the current version of every file that will change or disappear is copied
+ * into a new backup of kind `before-restore`, and a journal goes into the workspace's `.opendoc/`. If anything fails, everything
+ * is rolled back from that copy; the copy is deleted only when the rollback fully succeeded.
+ * `step({ stage, path })` is called before each file operation (tests use it to fail at a chosen place).
+ * @returns { before: { name, directory, manifest }, restored: manifest, replaced, added, removed }
  */
-export async function restoreBackup({ root, dataDir, name, now = new Date() }) {
+export async function restoreBackup({ root, dataDir, name, now = new Date(), free = freeBytes, step = async () => {} }) {
   const directory = backupsDirectory(dataDir);
   const source = join(directory, name);
   const manifest = await readManifestOf(source);
   if (!manifest) throw new BackupError('missing', 'That backup is not there any more.');
-  const wanted = (await readdir(join(source, copyFolder))).sort();
-  const current = await backedUpEntries(root);
-  const beforeName = await newBackupName(directory, `${basename(root)}-before-restore-${stamp(now)}`);
+  if (await describe(journalFile(root))) throw new BackupError('journal-present', 'An earlier restore of this workspace was interrupted. Open the workspace again so the app can undo it first.');
+  const backupRoot = join(source, copyFolder);
+  const wanted = await walkTree(backupRoot, (await readdir(backupRoot)).filter(entry => !excludedTopLevel.has(entry) && !isMetadata(entry)));
+  const current = await walkTree(root, await backedUpEntries(root));
+  const removeExtras = manifest.scope !== 'changed-files';
+
+  const plan = { mkdirs: [], replace: [], add: [], remove: [], rmdirs: [] };
+  for (const [relative, entry] of wanted) {
+    const now = current.get(relative);
+    if (!now) { (entry.type === 'dir' ? plan.mkdirs : plan.add).push(relative); continue; }
+    if (now.type !== entry.type) {
+      if (!removeExtras) throw new BackupError('conflict', `${relative} is a different kind of thing now than in the backup, so this backup cannot be put back over it.`);
+      (now.type === 'dir' ? plan.rmdirs : plan.remove).push(relative);
+      (entry.type === 'dir' ? plan.mkdirs : plan.add).push(relative);
+      continue;
+    }
+    if (entry.type !== 'dir' && !(await sameEntry(join(root, relative), now, join(backupRoot, relative), entry))) plan.replace.push(relative);
+  }
+  if (removeExtras) for (const [relative, now] of current) if (!wanted.has(relative)) (now.type === 'dir' ? plan.rmdirs : plan.remove).push(relative);
+  for (const key of Object.keys(plan)) plan[key].sort();
+
+  // Room for the safety copy, and for the temporary files beside the replaced ones.
+  const saved = [...plan.replace, ...plan.remove];
+  const savedBytes = bytesOf(current, saved);
+  const needCopy = Math.ceil(savedBytes * 1.05) + 16 * 1024 * 1024;
+  const needWorkspace = Math.ceil(bytesOf(wanted, [...plan.replace, ...plan.add]) * 1.05) + 16 * 1024 * 1024;
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const [roomForCopy, roomInWorkspace] = [await free(directory), await free(root)];
+  if (roomForCopy < needCopy) throw new BackupError('no-space', `There is not enough free space to restore: the safety copy of your current files needs about ${humanBytes(needCopy)} in ${directory} and ${humanBytes(roomForCopy)} is free. Nothing was changed.`);
+  if (roomInWorkspace < needWorkspace) throw new BackupError('no-space', `There is not enough free space to restore: the files need about ${humanBytes(needWorkspace)} in ${root} and ${humanBytes(roomInWorkspace)} is free. Nothing was changed.`);
+
+  // The safety copy: a copy, so every file is still where it was.
+  const beforeName = await newBackupName(directory, `${backupBase(root)}-before-restore-${stamp(now)}`);
   const partial = join(directory, `.${beforeName}.partial`);
   await rm(partial, { recursive: true, force: true });
   await mkdir(join(partial, copyFolder), { recursive: true, mode: 0o700 });
-  const moved = [];
+  let beforeInfo;
   try {
-    for (const entry of current) { await move(join(root, entry), join(partial, copyFolder, entry)); moved.push(entry); }
-    for (const entry of wanted) await cp(join(source, copyFolder, entry), join(root, entry), { recursive: true, verbatimSymlinks: true, preserveTimestamps: true, errorOnExist: true });
+    for (const relative of saved) {
+      await step({ stage: 'copy-before', path: relative });
+      await placeAtomically(join(root, relative), current.get(relative), join(partial, copyFolder, relative));
+    }
+    for (const relative of saved) {
+      if (!(await sameEntry(join(root, relative), current.get(relative), join(partial, copyFolder, relative), await describe(join(partial, copyFolder, relative))))) throw new Error(`the safety copy of ${relative} is not the same as the file`);
+    }
+    const before = { formatVersion: 1, kind: 'before-restore', scope: 'changed-files', name: beforeName, source: root, workspace: basename(root), from: manifest.to, to: manifest.from, time: now.toISOString(), files: saved.length, bytes: savedBytes, entries: saved, restoredFrom: name };
+    await writeManifest(partial, before);
+    await rename(partial, join(directory, beforeName));
+    beforeInfo = { name: beforeName, directory: join(directory, beforeName), manifest: before };
   } catch (error) {
-    // Undo: remove what was copied in, put back what was moved out.
-    for (const entry of wanted) await rm(join(root, entry), { recursive: true, force: true }).catch(() => {});
-    for (const entry of moved) await move(join(partial, copyFolder, entry), join(root, entry)).catch(() => {});
+    // Nothing in the workspace has changed yet: only the unfinished copy is removed.
     await rm(partial, { recursive: true, force: true }).catch(() => {});
-    throw new BackupError('restore-failed', `The backup could not be restored (${error.message}). The workspace was put back the way it was.`);
+    throw new BackupError('failed', `The backup could not be restored (${error.message}). Nothing was changed.`);
   }
-  const size = await measureEntries(join(partial, copyFolder), moved);
-  const before = { formatVersion: 1, kind: 'before-restore', name: beforeName, source: root, workspace: basename(root), from: manifest.to, to: manifest.from, time: now.toISOString(), files: size.files, bytes: size.bytes, entries: moved, restoredFrom: name };
-  await writeManifest(partial, before);
-  await rename(partial, join(directory, beforeName));
-  return { before: { name: beforeName, directory: join(directory, beforeName), manifest: before }, restored: manifest };
+
+  const journal = { formatVersion: 1, backup: name, before: beforeName, beforeDirectory: beforeInfo.directory, startedAt: now.toISOString(), plan };
+  try { await writeJournal(root, journal); }
+  catch (error) {
+    await rm(beforeInfo.directory, { recursive: true, force: true }).catch(() => {});
+    throw new BackupError('failed', `The backup could not be restored (${error.message}). Nothing was changed.`);
+  }
+
+  try {
+    for (const relative of plan.remove) { await step({ stage: 'remove', path: relative }); await rm(join(root, relative), { force: true }); }
+    for (const relative of [...plan.rmdirs].sort((a, b) => depth(b) - depth(a))) { await step({ stage: 'rmdir', path: relative }); await rmdir(join(root, relative)).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
+    for (const relative of [...plan.mkdirs].sort((a, b) => depth(a) - depth(b))) { await step({ stage: 'mkdir', path: relative }); await mkdir(join(root, relative), { recursive: true }); }
+    for (const relative of plan.replace) { await step({ stage: 'replace', path: relative }); await placeAtomically(join(backupRoot, relative), wanted.get(relative), join(root, relative)); }
+    for (const relative of plan.add) { await step({ stage: 'add', path: relative }); await placeAtomically(join(backupRoot, relative), wanted.get(relative), join(root, relative)); }
+    await step({ stage: 'finish', path: '' });
+  } catch (error) {
+    try { await rollback({ root, journal, step }); }
+    catch (failure) { throw new BackupError('rollback-failed', `The backup could not be restored (${error.message}), and putting the files back failed too. ${failure.message}`); }
+    throw new BackupError('restore-failed', `The backup could not be restored (${error.message}). Every file was put back the way it was.`);
+  }
+  await rm(journalFile(root), { force: true });
+  return { before: beforeInfo, restored: manifest, replaced: plan.replace.length, added: plan.add.length, removed: plan.remove.length };
+}
+
+/**
+ * A restore that was interrupted (the app or the machine stopped) leaves `.opendoc/restore-journal.json`. Roll it back from the
+ * safety copy, so the workspace is as it was before the restore. Resolves null when there is no journal, or
+ * `{ message }` after a rollback; throws a BackupError when the rollback cannot be completed (the journal and the safety copy are kept).
+ */
+export async function recoverRestore({ root, step = async () => {} }) {
+  let text;
+  try { text = await readFile(journalFile(root), 'utf8'); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  let journal;
+  try { journal = JSON.parse(text); } catch { throw new BackupError('journal-damaged', `${journalFile(root)} is damaged, so the app cannot tell how to undo an interrupted restore. The safety copies are in the backups folder; nothing was changed.`); }
+  if (!journal?.plan || typeof journal.beforeDirectory !== 'string') throw new BackupError('journal-damaged', `${journalFile(root)} is not a restore journal, so the app cannot undo an interrupted restore. Nothing was changed.`);
+  if (!(await describe(join(journal.beforeDirectory, copyFolder)))) throw new BackupError('journal-orphan', `A restore of this workspace was interrupted, and its safety copy (${journal.beforeDirectory}) is not there, so it cannot be undone automatically. The journal is ${journalFile(root)}; nothing was changed.`);
+  await rollback({ root, journal, step });
+  return { message: `A restore of this workspace from the backup ${journal.backup} was interrupted. The app undid it: the workspace is as it was before the restore began.` };
 }

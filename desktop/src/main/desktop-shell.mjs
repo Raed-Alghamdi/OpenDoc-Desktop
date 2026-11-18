@@ -19,7 +19,7 @@ import { shellPageUrl } from './shell-pages.mjs';
 import { superviseTransport } from './supervisor.mjs';
 import { serviceLocation, startTransport, TransportError } from './transport.mjs';
 import { prepareAppImageRuntime } from './workspace/appimage-runtime.mjs';
-import { deleteBackup, humanBytes, listBackups } from './workspace/backup.mjs';
+import { cleanPartials, deleteBackup, humanBytes, journalName, listBackups, recoverRestore } from './workspace/backup.mjs';
 import { prepareWorkspace } from './workspace/prepare.mjs';
 import { readOnlySupported, readRuntimeInfo } from './workspace/runtime-info.mjs';
 import { WorkspaceWindow, createPickerWindow, createShellWindow, guardAllContents } from './windows.mjs';
@@ -356,9 +356,10 @@ export class DesktopShell {
         detail: `${join(root, 'node_modules')}\n\nopendoc-desktop runs the workspace with the OpenDoc that comes with the app. To do that it replaces node_modules with a link to it. The ${kind === 'file' ? 'file' : 'folder'} you have now is moved to the trash, not deleted.`,
         buttons: ["Use the app's OpenDoc", 'Leave it as it is'], defaultId: 1, cancelId: 1, noLink: true,
       })).response === 0,
-      askUpgrade: async ({ from, to }) => {
+      askUpgrade: async ({ from, to, formatFrom, formatTo }) => {
+        const formatOnly = from === to && Number.isInteger(formatFrom);
         const answer = await ask('showMessageBox', parent(), {
-          type: 'question', title: 'Upgrade this workspace?', message: `"${name}" is on OpenDoc ${from}. This app has OpenDoc ${to}.`,
+          type: 'question', title: 'Upgrade this workspace?', message: formatOnly ? `"${name}" uses an older workspace format (${formatFrom}) than this app writes (${formatTo}).` : `"${name}" is on OpenDoc ${from}. This app has OpenDoc ${to}.`,
           detail: 'Upgrading copies the workspace to a backup first, then moves it to the new version and checks every document. Or open it read-only, which changes nothing.',
           buttons: ['Upgrade', 'Open read-only', 'Cancel'], defaultId: 0, cancelId: 2, noLink: true,
           checkboxLabel: 'Upgrade my workspaces without asking from now on', checkboxChecked: false,
@@ -423,9 +424,32 @@ export class DesktopShell {
     await window.loadURL(shellPageUrl('backups.html')).catch(() => {});
   }
 
+  /**
+   * A restore that was interrupted leaves a journal in its workspace; undo it for every workspace that is not in use (its
+   * lock can be taken), and say what was done. Also removes the unfinished copies a crashed backup left (they are only copies).
+   */
+  async #recoverLeftovers() {
+    const notices = [];
+    await cleanPartials(this.dataDir).catch(() => {});
+    const seen = new Set();
+    for (const { manifest } of await listBackups(this.dataDir)) {
+      const source = manifest.source;
+      if (manifest.kind !== 'before-restore' || seen.has(source) || !existsSync(join(source, '.opendoc', journalName))) continue;
+      seen.add(source);
+      let lock;
+      try { lock = await acquireWorkspaceLock(source); } catch { continue; } // open somewhere, or being used by a command
+      try { const done = await recoverRestore({ root: source }); if (done) notices.push(`${basename(source)}: ${done.message}`); }
+      catch (error) { notices.push(`${basename(source)}: ${error.message}`); }
+      finally { await lock.release().catch(() => {}); }
+    }
+    return notices;
+  }
+
   async #backupRows() {
+    const notices = await this.#recoverLeftovers();
     const found = await listBackups(this.dataDir);
-    return found.map(({ name, directory, manifest }) => ({ name, directory, source: manifest.source, time: manifest.time, from: manifest.from, to: manifest.to, kind: manifest.kind, sizeText: `${humanBytes(manifest.bytes)}, ${manifest.files} files` }));
+    const rows = found.map(({ name, directory, manifest }) => ({ name, directory, source: manifest.source, time: manifest.time, from: manifest.from, to: manifest.to, kind: manifest.kind, sizeText: `${humanBytes(manifest.bytes)}, ${manifest.files} files` }));
+    return { rows, notices };
   }
 
   async #deleteBackup(name) {

@@ -53,3 +53,8 @@ export function decideVersion(pin, runtime) {
 export const declinedUpgradeMessage = (from, to) => `You chose to open this workspace read-only. It is still on OpenDoc ${from}; upgrade it to ${to} to edit it.`;
 /** The banner text after Restore backup. */
 export const restoredBackupMessage = from => `This workspace was restored from a backup and is on OpenDoc ${from} again. It stays read-only here; open it again to upgrade it.`;
+
+/** How a workspace's format number compares with the one the app's CLI writes: 'older', 'equal' or 'newer'. */
+export const compareFormat = (workspace, app) => workspace < app ? 'older' : workspace > app ? 'newer' : 'equal';
+/** The banner text for a workspace in a newer workspace format than the app writes. */
+export const newerFormatMessage = (workspace, app) => `This workspace uses workspace format ${workspace}, which is newer than the one this app writes (${app}). Update the app to edit it.`;

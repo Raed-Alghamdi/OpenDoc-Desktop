@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { lstat, mkdir, readFile, readdir, readlink, realpath, symlink, utimes, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, readFile, readdir, readlink, realpath, symlink, utimes, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { prepareAppImageRuntime, pruneCopies } from '../../../src/main/workspace/appimage-runtime.mjs';
+import { inUse, prepareAppImageRuntime, pruneCopies } from '../../../src/main/workspace/appimage-runtime.mjs';
 import { dataDirectory } from '../../../src/main/workspace/paths.mjs';
-import { readOnlySupported, readRuntimeInfo } from '../../../src/main/workspace/runtime-info.mjs';
+import { readOnlySupported, readRuntimeInfo, withoutComments } from '../../../src/main/workspace/runtime-info.mjs';
 import { ensureModulesLink, inspectModules } from '../../../src/main/workspace/links.mjs';
 import { makeRuntime, scratch } from '../support/workspace-fixtures.mjs';
 
@@ -122,16 +123,57 @@ test('with no version in the runtime package.json the OpenDoc package version na
   assert.equal(result.runtime, join(dataDir, 'runtime', '0.6.1-7'));
 });
 
-test('pruning keeps a fresh .tmp folder (another process may be copying) and removes old leftovers', async () => {
+test('pruning removes other builds and old leftovers, and nothing else: not a fresh .tmp folder, a folder the user put there, or a copy in use', async () => {
   const { dataDir } = await fixture();
   const directory = join(dataDir, 'runtime');
   const now = Date.now();
-  for (const name of ['0.5.0-3', '.tmp.fresh', '.tmp.old', '0.6.1-7']) await mkdir(join(directory, name), { recursive: true });
+  const copy = async name => { await mkdir(join(directory, name), { recursive: true }); await writeFile(join(directory, name, 'build-info.json'), '{"build":1}'); };
+  for (const name of ['0.5.0-3', '0.4.0-2', '0.6.1-7']) await copy(name);
+  for (const name of ['.tmp.fresh', '.tmp.old', 'my-notes', '0.5.0', 'not-a-copy-9']) await mkdir(join(directory, name), { recursive: true });
+  await writeFile(join(directory, 'readme.txt'), 'mine');
+  await writeFile(join(directory, 'my-notes', 'important.txt'), 'mine');
   const old = new Date(now - 3_600_000);
   await utimes(join(directory, '.tmp.old'), old, old);
-  const removed = await pruneCopies(directory, '0.6.1-7', now);
+  const removed = await pruneCopies(directory, '0.6.1-7', now, async path => path.endsWith('0.4.0-2'));
   assert.deepEqual(removed.sort(), ['.tmp.old', '0.5.0-3']);
-  assert.deepEqual(await names(dataDir), ['.tmp.fresh', '0.6.1-7']);
+  assert.deepEqual(await names(dataDir), ['.tmp.fresh', '0.4.0-2', '0.5.0', '0.6.1-7', 'my-notes', 'not-a-copy-9', 'readme.txt']);
+  assert.equal(await readFile(join(directory, 'my-notes', 'important.txt'), 'utf8'), 'mine');
+});
+
+test('a copy that a running process has in its command line is never pruned (the real check reads /proc)', { skip: process.platform !== 'linux' }, async () => {
+  const { dataDir } = await fixture();
+  const directory = join(dataDir, 'runtime');
+  await mkdir(join(directory, '0.5.0-3'), { recursive: true });
+  await writeFile(join(directory, '0.5.0-3', 'build-info.json'), '{}');
+  assert.equal(await inUse(join(directory, '0.5.0-3')), false);
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)', join(directory, '0.5.0-3', 'node_modules', 'opendoc', 'bin', 'opendoc.mjs')], { stdio: 'ignore' });
+  try {
+    await new Promise(accept => setTimeout(accept, 200));
+    assert.equal(await inUse(join(directory, '0.5.0-3')), true);
+    assert.deepEqual(await pruneCopies(directory, '0.6.1-7'), []);
+    assert.deepEqual(await names(dataDir), ['0.5.0-3']);
+  } finally { child.kill('SIGKILL'); }
+  await new Promise(accept => child.once('exit', accept));
+  assert.deepEqual(await pruneCopies(directory, '0.6.1-7'), ['0.5.0-3']);
+});
+
+test('another process that finishes the same copy first wins: its complete copy is kept, never removed, and ours is dropped', async () => {
+  const { source, dataDir } = await fixture();
+  const target = join(dataDir, 'runtime', '0.6.1-7');
+  let before;
+  const copy = async (from, to) => {
+    await cp(from, to, { recursive: true, verbatimSymlinks: true });
+    // While we were copying, the agent command finished its own copy.
+    await mkdir(target, { recursive: true });
+    await cp(from, target, { recursive: true, verbatimSymlinks: true });
+    await writeFile(join(target, 'marker-of-the-other-copy'), 'theirs');
+    before = (await lstat(target)).ino;
+  };
+  const result = await prepareAppImageRuntime({ source, dataDir, copy });
+  assert.equal(result.copied, false);
+  assert.equal((await lstat(target)).ino, before);
+  assert.equal(await readFile(join(target, 'marker-of-the-other-copy'), 'utf8'), 'theirs');
+  assert.deepEqual(await names(dataDir), ['0.6.1-7', 'current']);
 });
 
 test('the data folder: XDG_DATA_HOME when absolute, else ~/.local/share; Application Support on macOS', () => {
@@ -158,4 +200,15 @@ test('read-only support is read from the service source (U4 marks readOnlySuppor
   assert.equal(await readOnlySupported(await makeRuntime(join(base, 'a'))), false);
   assert.equal(await readOnlySupported(await makeRuntime(join(base, 'b'), { readOnly: true })), true);
   assert.equal(await readOnlySupported(join(base, 'missing')), false);
+});
+
+test('the read-only probe ignores comments and types: only the property of an object literal counts', async () => {
+  const base = await scratch('probe');
+  const write = async (name, text) => { const runtime = await makeRuntime(join(base, name)); await writeFile(join(runtime, 'node_modules', 'opendoc', 'src', 'server', 'service.ts'), text); return runtime; };
+  assert.equal(await readOnlySupported(await write('comment', '// readOnlySupported: true,\n/* readOnlySupported: true } */\nexport const x = 1;\n')), false);
+  assert.equal(await readOnlySupported(await write('type', 'export interface Prepared { readOnlySupported: true; service: unknown }\n')), false);
+  assert.equal(await readOnlySupported(await write('false', 'return { readOnlySupported: false, service };\n')), false);
+  assert.equal(await readOnlySupported(await write('literal', 'return { readOnlySupported: true, service, start };\n')), true);
+  assert.equal(await readOnlySupported(await write('last', 'return { service, readOnlySupported: true };\n')), true);
+  assert.equal(withoutComments("const a = 'http://x'; // gone\nconst b = 2; /* gone */"), "const a = 'http://x';  \nconst b = 2;  ");
 });

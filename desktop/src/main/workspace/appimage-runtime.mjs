@@ -49,16 +49,36 @@ async function switchCurrent(directory, name) {
   return true;
 }
 
-/** Remove every copy but `keep`, and leftovers of copies that died. A fresh `.tmp.` folder may be another process's copy in progress. */
-export async function pruneCopies(directory, keep, now = Date.now()) {
+const copyName_ = /^[0-9A-Za-z.+]+(?:-[0-9A-Za-z.+]+)*-\d+$/; // `<version>-<build>`
+
+/** Does any running process have `path` in its command line? (The agent command passes the copy's path as an argument; so does the service host.) Linux only. */
+export async function inUse(path) {
+  let pids;
+  try { pids = (await readdir('/proc')).filter(name => /^\d+$/.test(name)); } catch { return false; }
+  for (const pid of pids) {
+    try { if ((await readFile(`/proc/${pid}/cmdline`, 'utf8')).includes(path)) return true; } catch { /* gone, or not ours to read */ }
+  }
+  return false;
+}
+
+/**
+ * Remove the copies of other builds, and the leftovers of copies that died. Only what the app made is touched: a folder named
+ * `<version>-<build>` that holds a `build-info.json`, a `.tmp.` folder or a `.current.<pid>.tmp` link older than ten minutes (a
+ * fresh one may be another process's copy in progress). A copy a running process uses is kept, and so is anything else, such as
+ * a folder the user put there.
+ */
+export async function pruneCopies(directory, keep, now = Date.now(), used = inUse) {
   const removed = [];
   for (const entry of await readdir(directory).catch(() => [])) {
     if (entry === keep || entry === currentName) continue;
     const path = join(directory, entry);
     let info;
     try { info = await lstat(path); } catch { continue; }
-    if (entry.startsWith('.tmp.') && now - info.mtimeMs < staleAfter) continue;
-    if (entry.startsWith('.') && !entry.startsWith('.tmp.')) { if (now - info.mtimeMs < staleAfter) continue; }
+    const stale = now - info.mtimeMs >= staleAfter;
+    const leftover = (entry.startsWith('.tmp.') || (entry.startsWith(`.${currentName}.`) && entry.endsWith('.tmp'))) && stale;
+    const oldCopy = info.isDirectory() && copyName_.test(entry) && (await stat(join(path, 'build-info.json')).then(file => file.isFile(), () => false));
+    if (!leftover && !oldCopy) continue;
+    if (oldCopy && await used(path)) continue;
     await rm(path, { recursive: true, force: true }).catch(() => {});
     removed.push(entry);
   }
@@ -71,7 +91,7 @@ export async function pruneCopies(directory, keep, now = Date.now()) {
  * was made, and what was pruned. Throws, with nothing half-used, when the copy cannot be made (a full disk).
  * `copy(from, to)` is for tests.
  */
-export async function prepareAppImageRuntime({ source, dataDir, copy = (from, to) => cp(from, to, { recursive: true, verbatimSymlinks: true }), now = Date.now() }) {
+export async function prepareAppImageRuntime({ source, dataDir, copy = (from, to) => cp(from, to, { recursive: true, verbatimSymlinks: true }), now = Date.now(), used }) {
   const directory = runtimeCopiesDirectory(dataDir);
   const { name, buildInfo } = await copyName(source);
   const target = join(directory, name);
@@ -83,15 +103,28 @@ export async function prepareAppImageRuntime({ source, dataDir, copy = (from, to
     try {
       await copy(source, temporary);
       if (!(await complete(temporary, buildInfo))) throw new Error('The copy of the runtime is incomplete.');
-      await rm(target, { recursive: true, force: true });
-      await rename(temporary, target);
+      // Another process (the agent command, a second instance) may have finished its copy first: a complete copy is kept, never removed.
+      if (!(await complete(target, buildInfo))) {
+        try { await rename(temporary, target); copied = true; }
+        catch (error) {
+          if (!['ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
+          if (!(await complete(target, buildInfo))) {
+            await rm(target, { recursive: true, force: true }); // an unfinished folder, or one of another build, at the name
+            await rename(temporary, target);
+            copied = true;
+          }
+        }
+      }
     } catch (error) {
       await rm(temporary, { recursive: true, force: true }).catch(() => {});
       throw new Error(`The OpenDoc runtime could not be copied to ${target}: ${error.message}`);
     }
-    copied = true;
+    await rm(temporary, { recursive: true, force: true }).catch(() => {}); // already gone when it became the copy
   }
-  await switchCurrent(directory, name);
-  const pruned = await pruneCopies(directory, name, now);
-  return { runtime: target, modules: join(directory, currentName, 'node_modules'), copied, pruned };
+  return finish(copied);
+  async function finish(didCopy) {
+    await switchCurrent(directory, name);
+    const pruned = await pruneCopies(directory, name, now, used);
+    return { runtime: target, modules: join(directory, currentName, 'node_modules'), copied: didCopy, pruned };
+  }
 }

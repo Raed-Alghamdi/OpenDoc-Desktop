@@ -14,8 +14,9 @@ async function act(action) {
 }
 
 async function load() {
-  const items = await window.opendocShell.backups();
+  const { rows: items, notices } = await window.opendocShell.backups();
   list.replaceChildren();
+  for (const text of notices) list.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: text }));
   if (!items.length) { list.append(Object.assign(document.createElement('p'), { className: 'empty', textContent: 'No backups yet.' })); return; }
   const table = Object.assign(document.createElement('table'), { className: 'backups' });
   const head = document.createElement('tr');

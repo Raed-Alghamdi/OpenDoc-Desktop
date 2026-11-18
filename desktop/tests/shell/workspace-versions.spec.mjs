@@ -385,13 +385,15 @@ test.describe('an AppImage', () => {
     const runtimes = join(home, '.local', 'share', 'opendoc-desktop', 'runtime');
     await mkdir(join(runtimes, '0.5.0-3'), { recursive: true });
     await writeFile(join(runtimes, '0.5.0-3', 'old'), 'old');
+    await writeFile(join(runtimes, '0.5.0-3', 'build-info.json'), '{"build":3}\n'); // only a folder that holds build-info.json is a runtime copy the app may prune
+    await mkdir(join(runtimes, 'something-of-the-user'));
     // APPIMAGE names a file that is not there: the agent command is left alone, the runtime copy is still made.
     const { app, picker } = await pickerApp({ env: { HOME: home, APPIMAGE: join(home, 'no-such.AppImage') } });
     try {
       const workspace = await newWorkspace('appimage-ws');
       await chooseInPicker(app, picker, workspace);
       await opened(app, workspace);
-      expect(await readdir(runtimes)).toEqual(['0.6.1-7', 'current']);
+      expect(await readdir(runtimes)).toEqual(['0.6.1-7', 'current', 'something-of-the-user']);
       expect(await readlink(join(runtimes, 'current'))).toBe('0.6.1-7');
       expect(await readlink(modulesOf(workspace))).toBe(join(runtimes, 'current', 'node_modules'));
       expect((await lstat(join(runtimes, '0.6.1-7', 'node_modules', 'opendoc', 'package.json'))).isFile()).toBe(true);
@@ -407,7 +409,7 @@ test.describe('an AppImage', () => {
     const second = await pickerApp({ env: { HOME: home, APPIMAGE: join(home, 'no-such.AppImage') } });
     try {
       expect((await lstat(join(runtimes, '0.6.1-7'))).ino).toBe(before);
-      expect(await readdir(runtimes)).toEqual(['0.6.1-7', 'current']);
+      expect(await readdir(runtimes)).toEqual(['0.6.1-7', 'current', 'something-of-the-user']);
     } finally { await second.app.close(); }
   });
 

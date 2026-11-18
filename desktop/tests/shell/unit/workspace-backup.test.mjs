@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { chmod, lstat, mkdir, readFile, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, readdir, readlink, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { BackupError, createBackup, deleteBackup, listBackups, restoreBackup, stamp } from '../../../src/main/workspace/backup.mjs';
+import { BackupError, cleanPartials, createBackup, deleteBackup, listBackups, recoverRestore, restoreBackup, stamp } from '../../../src/main/workspace/backup.mjs';
 import { runUpgradeSteps, stepsBetween } from '../../../src/main/workspace/registry.mjs';
 import { lockBytes, makeWorkspace, scratch } from '../support/workspace-fixtures.mjs';
 
@@ -169,4 +169,215 @@ test('registry: a script that cannot start fails the step with the reason', asyn
   const result = await runUpgradeSteps({ registry: [{ from: '0.5', to: '0.6', script: join(root, 'missing.mjs') }], from: '0.5.0', to: '0.6.0', root });
   assert.equal(result.ok, false);
   assert.equal(result.failed.status, 'failed');
+});
+
+// ---- metadata, names
+
+test('version control and sync metadata (.git, .stfolder, .sync_*.db, .~lock.*, .dropbox*, ...) is neither backed up nor restored', async () => {
+  const { root, dataDir } = await fixture();
+  const names = ['.git', '.hg', '.svn', '.jj', '.stfolder', '.stignore', '.stversions', '.sync_abc123.db', '.sync_abc123.db-wal', '._sync_abc123.db', '.csync_journal.db', '.owncloudsync.log', '.nextcloudsync.log.1', '.~lock.notes.odt#', '.dropbox', '.dropbox.cache'];
+  for (const name of names) { await mkdir(join(root, name), { recursive: true }); await writeFile(join(root, name, 'state'), 'old'); }
+  await mkdir(join(root, 'documents', 'welcome', '.git'), { recursive: true });
+  await writeFile(join(root, 'documents', 'welcome', '.git', 'inner'), 'old');
+  const backup = await createBackup({ root, dataDir, from: '0.5.0', to: '0.6.1', now: when });
+  const copied = await readdir(join(backup.directory, 'workspace'));
+  for (const name of names) assert.equal(copied.includes(name), false, name);
+  assert.equal(await exists(join(backup.directory, 'workspace', 'documents', 'welcome', '.git')), false, 'nested metadata too');
+  // The metadata moves on; a restore must leave it as it is, and the safety copy must not hold it.
+  for (const name of names) await writeFile(join(root, name, 'state'), 'newer');
+  await writeFile(join(root, 'documents', 'welcome', '.git', 'inner'), 'newer');
+  await writeFile(join(root, 'documents', 'welcome', 'index.tsx'), 'changed');
+  const restored = await restoreBackup({ root, dataDir, name: backup.name, now: new Date(2026, 10, 18, 15, 0, 0) });
+  for (const name of names) assert.equal(await readFile(join(root, name, 'state'), 'utf8'), 'newer', name);
+  assert.equal(await readFile(join(root, 'documents', 'welcome', '.git', 'inner'), 'utf8'), 'newer');
+  assert.deepEqual(restored.before.manifest.entries, ['documents/welcome/index.tsx']);
+  assert.equal(await readFile(join(root, 'documents', 'welcome', 'index.tsx'), 'utf8'), 'export default "welcome";\n');
+});
+
+const exists = path => lstat(path).then(() => true, () => false);
+
+test('a workspace whose folder name starts with a dot still gets backups the list and Delete can see', async () => {
+  const base = await scratch('hidden');
+  const root = join(base, '.my-notes');
+  await makeWorkspace(root, { pin: '0.5.0', skills: false });
+  const dataDir = join(base, 'data');
+  const backup = await createBackup({ root, dataDir, from: '0.5.0', to: '0.6.1', now: when });
+  assert.equal(backup.name.startsWith('.'), false);
+  assert.equal(backup.name, 'my-notes-2026-11-18-142530');
+  assert.deepEqual((await listBackups(dataDir)).map(item => item.name), [backup.name]);
+  await deleteBackup({ dataDir, name: backup.name, trash: async path => rm(path, { recursive: true }) });
+  assert.deepEqual(await listBackups(dataDir), []);
+  const hidden = join(base, '...');
+  await makeWorkspace(hidden, { pin: '0.5.0' });
+  assert.equal((await createBackup({ root: hidden, dataDir, from: 'a', to: 'b', now: when })).name, 'workspace-2026-11-18-142530');
+});
+
+test('unfinished copies of a crashed backup are removed once they are old; a fresh one is left (another backup may be running)', async () => {
+  const dataDir = join(await scratch('partials'), 'data');
+  const backups = join(dataDir, 'backups');
+  for (const name of ['.old-ws.partial', '.fresh-ws.partial']) await mkdir(join(backups, name, 'workspace'), { recursive: true });
+  const old = new Date(Date.now() - 3_600_000);
+  await utimes(join(backups, '.old-ws.partial'), old, old);
+  assert.deepEqual(await cleanPartials(dataDir), ['.old-ws.partial']);
+  assert.deepEqual(await readdir(backups), ['.fresh-ws.partial']);
+});
+
+// ---- restore: file by file, and no file lost at any stage
+
+/** A workspace and a backup of it, then changes of every kind that a restore must undo, and the state they make. */
+async function restoring() {
+  const { base, root, dataDir } = await fixture({ documents: ['welcome', 'second'] });
+  await mkdir(join(root, 'documents', 'empty-dir'), { recursive: true });
+  await mkdir(join(root, 'notes', 'deep'), { recursive: true });
+  await writeFile(join(root, 'notes', 'deep', 'kept.txt'), 'kept\n');
+  await writeFile(join(root, 'untouched.txt'), 'same\n');
+  const backup = await createBackup({ root, dataDir, from: '0.5.0', to: '0.6.1', now: when });
+  // After the backup: a changed file, a deleted file, a deleted folder with a file in it, a new file, a new folder, a symlink change.
+  await writeFile(join(root, 'documents', 'welcome', 'index.tsx'), 'export default "changed";\n');
+  await rm(join(root, 'documents', 'second', 'index.tsx'));
+  await rm(join(root, 'notes'), { recursive: true });
+  await rm(join(root, 'documents', 'empty-dir'), { recursive: true });
+  await writeFile(join(root, 'newest.txt'), 'newest\n');
+  await mkdir(join(root, 'brand-new', 'sub'), { recursive: true });
+  await writeFile(join(root, 'brand-new', 'sub', 'file.txt'), 'new\n');
+  await rm(join(root, '.claude', 'skills'));
+  await symlink('elsewhere', join(root, '.claude', 'skills'));
+  return { base, root, dataDir, backup, tree: () => treeOf(root) };
+}
+
+/** Everything in the workspace but node_modules, .opendoc and output: path to content, so "no file lost" is a plain comparison. */
+async function treeOf(root) {
+  const found = {};
+  const walk = async (path, relative) => {
+    const info = await lstat(path);
+    if (info.isSymbolicLink()) found[relative] = `link ${await readlink(path)}`;
+    else if (info.isDirectory()) { found[relative] = 'dir'; for (const name of (await readdir(path)).sort()) await walk(join(path, name), `${relative}/${name}`); }
+    else found[relative] = `file ${await readFile(path, 'utf8')}`;
+  };
+  for (const name of (await readdir(root)).sort()) if (!['node_modules', '.opendoc', 'output'].includes(name)) await walk(join(root, name), name);
+  return found;
+}
+
+test('restore puts back changed, deleted and moved files, removes new ones, and leaves identical files untouched (same inode)', async () => {
+  const { root, dataDir, backup } = await restoring();
+  const untouched = (await lstat(join(root, 'untouched.txt'))).ino;
+  const lock = await lockBytes(root);
+  const result = await restoreBackup({ root, dataDir, name: backup.name, now: new Date(2026, 10, 18, 15, 0, 0) });
+  assert.equal(await readFile(join(root, 'documents', 'welcome', 'index.tsx'), 'utf8'), 'export default "welcome";\n');
+  assert.equal(await readFile(join(root, 'documents', 'second', 'index.tsx'), 'utf8'), 'export default "second";\n');
+  assert.equal(await readFile(join(root, 'notes', 'deep', 'kept.txt'), 'utf8'), 'kept\n');
+  assert.equal(await exists(join(root, 'documents', 'empty-dir')), true, 'an empty folder comes back');
+  assert.equal(await exists(join(root, 'newest.txt')), false);
+  assert.equal(await exists(join(root, 'brand-new')), false);
+  assert.equal(await readlink(join(root, '.claude', 'skills')), join('..', '.agents', 'skills'));
+  assert.equal((await lstat(join(root, 'untouched.txt'))).ino, untouched, 'an identical file is not rewritten');
+  assert.deepEqual(await lockBytes(root), lock);
+  assert.deepEqual([result.replaced, result.added, result.removed].map(n => n > 0), [true, true, true]);
+  assert.equal(await exists(join(root, '.opendoc', 'restore-journal.json')), false);
+  assert.deepEqual((await readdir(root)).filter(name => name.endsWith('.part')), []);
+  // The safety copy has the files the restore changed or removed, as they were just before.
+  const safe = join(result.before.directory, 'workspace');
+  assert.equal(await readFile(join(safe, 'newest.txt'), 'utf8'), 'newest\n');
+  assert.equal(await readFile(join(safe, 'brand-new', 'sub', 'file.txt'), 'utf8'), 'new\n');
+  assert.equal(await readFile(join(safe, 'documents', 'welcome', 'index.tsx'), 'utf8'), 'export default "changed";\n');
+  assert.equal(await exists(join(safe, 'untouched.txt')), false);
+  assert.equal(result.before.manifest.scope, 'changed-files');
+});
+
+test('restoring from a backup of changed files only puts files back and removes nothing', async () => {
+  const { root, dataDir, backup } = await restoring();
+  const first = await restoreBackup({ root, dataDir, name: backup.name, now: new Date(2026, 10, 18, 15, 0, 0) });
+  await writeFile(join(root, 'another-new.txt'), 'mine\n');
+  await restoreBackup({ root, dataDir, name: first.before.name, now: new Date(2026, 10, 18, 16, 0, 0) });
+  assert.equal(await readFile(join(root, 'another-new.txt'), 'utf8'), 'mine\n');
+  assert.equal(await readFile(join(root, 'newest.txt'), 'utf8'), 'newest\n', 'the files the first restore removed are back');
+});
+
+for (const stage of ['copy-before', 'remove', 'rmdir', 'mkdir', 'replace', 'add', 'finish']) {
+  test(`a failure at the ${stage} stage loses no file: the workspace is exactly as it was, and no journal, temporary file or copy is left`, async () => {
+    const { root, dataDir, backup, tree } = await restoring();
+    const before = await tree();
+    const beforeLock = await lockBytes(root);
+    let seen = 0;
+    const step = async info => { if (info.stage === stage && ++seen === 1) throw new Error(`disk trouble at ${stage}`); };
+    await assert.rejects(restoreBackup({ root, dataDir, name: backup.name, now: new Date(2026, 10, 18, 15, 0, 0), step }), error => error instanceof BackupError && /disk trouble/.test(error.message) && /(put back the way it was|Nothing was changed)/.test(error.message));
+    assert.equal(seen, 1, 'the stage ran');
+    assert.deepEqual(await tree(), before);
+    assert.deepEqual(await lockBytes(root), beforeLock);
+    assert.equal(await exists(join(root, '.opendoc', 'restore-journal.json')), false);
+    assert.deepEqual((await readdir(root)).filter(name => name.endsWith('.part')), []);
+    assert.deepEqual((await listBackups(dataDir)).map(item => item.manifest.kind), ['upgrade'], 'the safety copy is gone only because everything was put back');
+    assert.deepEqual((await readdir(join(dataDir, 'backups'))).filter(name => name.startsWith('.')), []);
+  });
+}
+
+test('a failure in the middle of the replacements (the third file) rolls back the first two as well', async () => {
+  const { root, dataDir, backup, tree } = await restoring();
+  const before = await tree();
+  let count = 0;
+  const step = async ({ stage }) => { if (['replace', 'add'].includes(stage) && ++count === 2) throw new Error('unreadable file'); };
+  await assert.rejects(restoreBackup({ root, dataDir, name: backup.name, step }), /put back the way it was/);
+  assert.ok(count >= 2);
+  assert.deepEqual(await tree(), before);
+});
+
+test('a failed rollback keeps the journal and the safety copy, says where it is, and the next recovery finishes the job', async () => {
+  const { root, dataDir, backup, tree } = await restoring();
+  const before = await tree();
+  const fail = async ({ stage }) => { if (stage === 'replace' || stage === 'rollback-file') throw new Error('still broken'); };
+  const error = await restoreBackup({ root, dataDir, name: backup.name, now: new Date(2026, 10, 18, 15, 0, 0), step: fail }).catch(failure => failure);
+  assert.ok(error instanceof BackupError);
+  assert.equal(error.code, 'rollback-failed');
+  const [safety] = (await listBackups(dataDir)).filter(item => item.manifest.kind === 'before-restore');
+  assert.ok(safety, 'the safety copy is kept');
+  assert.ok(error.message.includes(safety.directory), 'the message says where it is');
+  assert.equal(await exists(join(root, '.opendoc', 'restore-journal.json')), true);
+  // A restore refuses to start on top of an unfinished one; Delete refuses to remove the copy that is needed.
+  await assert.rejects(restoreBackup({ root, dataDir, name: backup.name }), /interrupted/);
+  await assert.rejects(deleteBackup({ dataDir, name: safety.name, trash: async () => assert.fail('must not trash') }), /safety copy of a restore/);
+  const recovered = await recoverRestore({ root });
+  assert.match(recovered.message, /undid it/);
+  assert.deepEqual(await tree(), before);
+  assert.equal(await exists(join(root, '.opendoc', 'restore-journal.json')), false);
+  assert.deepEqual((await listBackups(dataDir)).map(item => item.manifest.kind), ['upgrade']);
+  assert.equal(await recoverRestore({ root }), null);
+});
+
+test('recovery that cannot be completed says so and keeps everything', async () => {
+  const { root, dataDir, backup } = await restoring();
+  await restoreBackup({ root, dataDir, name: backup.name, step: async ({ stage }) => { if (stage === 'replace' || stage.startsWith('rollback')) throw new Error('x'); } }).catch(() => {});
+  await assert.rejects(recoverRestore({ root, step: async ({ stage }) => { if (stage === 'rollback-file') throw new Error('again'); } }), error => error.code === 'rollback-failed' && /kept in/.test(error.message));
+  assert.equal(await exists(join(root, '.opendoc', 'restore-journal.json')), true);
+  await writeFile(join(root, '.opendoc', 'restore-journal.json'), '{ nope');
+  await assert.rejects(recoverRestore({ root }), error => error.code === 'journal-damaged');
+  await writeFile(join(root, '.opendoc', 'restore-journal.json'), JSON.stringify({ plan: { add: [], mkdirs: [], rmdirs: [], remove: [], replace: [] }, beforeDirectory: join(dataDir, 'gone') }));
+  await assert.rejects(recoverRestore({ root }), error => error.code === 'journal-orphan');
+});
+
+test('not enough free space for the safety copy or for the new files: nothing is touched, no journal', async () => {
+  const { root, dataDir, backup, tree } = await restoring();
+  const before = await tree();
+  for (const small of [folder => folder.includes('backups') ? 10 : 1e12, folder => folder === root ? 10 : 1e12]) {
+    await assert.rejects(restoreBackup({ root, dataDir, name: backup.name, free: async folder => small(folder) }), error => error.code === 'no-space' && /Nothing was changed/.test(error.message));
+    assert.deepEqual(await tree(), before);
+    assert.equal(await exists(join(root, '.opendoc', 'restore-journal.json')), false);
+    assert.deepEqual((await listBackups(dataDir)).length, 1);
+  }
+});
+
+test('a file that becomes a folder (and the other way round) is restored', async () => {
+  const { base, root, dataDir } = await fixture();
+  await mkdir(join(root, 'was-folder'), { recursive: true });
+  await writeFile(join(root, 'was-folder', 'a.txt'), 'a\n');
+  await writeFile(join(root, 'was-file'), 'file\n');
+  const backup = await createBackup({ root, dataDir, from: '0.5.0', to: '0.6.1', now: when });
+  await rm(join(root, 'was-folder'), { recursive: true });
+  await writeFile(join(root, 'was-folder'), 'now a file\n');
+  await rm(join(root, 'was-file'));
+  await mkdir(join(root, 'was-file', 'inner'), { recursive: true });
+  await writeFile(join(root, 'was-file', 'inner', 'b.txt'), 'b\n');
+  await restoreBackup({ root, dataDir, name: backup.name, now: new Date(2026, 10, 18, 15, 0, 0) });
+  assert.equal(await readFile(join(root, 'was-folder', 'a.txt'), 'utf8'), 'a\n');
+  assert.equal(await readFile(join(root, 'was-file'), 'utf8'), 'file\n');
+  void base;
 });

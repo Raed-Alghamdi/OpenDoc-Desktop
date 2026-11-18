@@ -5,7 +5,8 @@
 import { lstat, mkdir, readlink, realpath, rename, rm, stat, symlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
-const linkNames = (root, name) => ({ path: join(root, name), temporary: join(root, `.${name.replace(/\W/g, '')}.opendoc-${process.pid}.tmp`) });
+// The temporary names end in `.part`, which the sync clients' default exclude lists skip, and carry the pid so a leftover can be told from a live one (temps.mjs).
+const linkNames = (root, name) => ({ path: join(root, name), temporary: join(root, `.${name}.opendoc-${process.pid}.part`) });
 
 async function realOrNull(path) {
   try { return await realpath(path); } catch { return null; }

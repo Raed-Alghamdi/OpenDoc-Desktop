@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFile, readdir, stat, writeFile, chmod } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, readdir, readlink, stat, symlink, writeFile } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { adoptWorkspace, markManaged, readMarker } from '../../../src/main/workspace/marker.mjs';
-import { pinnedText, readManifest, writePin } from '../../../src/main/workspace/pin.mjs';
+import { PinError, pinnedText, readManifest, writePin } from '../../../src/main/workspace/pin.mjs';
 import { compareVersions, decideVersion, parseVersion, readPin } from '../../../src/main/workspace/versions.mjs';
 import { lockBytes, makeWorkspace, pinText, scratch } from '../support/workspace-fixtures.mjs';
 
@@ -106,7 +107,7 @@ test('writePin replaces the file atomically (no temporary left), keeps its mode,
   await writePin(root, '0.6.1');
   assert.equal(JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).dependencies.opendoc, 'npm:@ryanyahya/opendoc@0.6.1');
   assert.equal((await stat(join(root, 'package.json'))).mode & 0o777, 0o640);
-  assert.deepEqual((await readdir(root)).filter(name => name.includes('tmp')), []);
+  assert.deepEqual((await readdir(root)).filter(name => name.endsWith('.part')), []);
   assert.deepEqual(await lockBytes(root), lock);
   assert.equal((await stat(join(root, 'package-lock.json'))).mtimeMs, lockTime);
 });
@@ -154,4 +155,54 @@ test('a damaged marker is reported, not repaired', async () => {
   await writeFile(join(root, '.opendoc', 'workspace.json'), '{ nope');
   assert.equal((await readMarker(root)).state, 'invalid');
   await assert.rejects(markManaged(root), /missing or damaged/);
+});
+
+test('writePin never lowers a pin: one that was moved up meanwhile (another device) is left alone with a "newer-pin" error', async () => {
+  const root = await makeWorkspace(await scratch('pin-newer'), { pin: '0.7.0', marker: false });
+  const before = await readFile(join(root, 'package.json'), 'utf8');
+  await assert.rejects(writePin(root, '0.6.1'), error => error instanceof PinError && error.code === 'newer-pin' && /0\.7\.0/.test(error.message));
+  assert.equal(await readFile(join(root, 'package.json'), 'utf8'), before);
+  await writePin(root, '0.7.0');
+  await writePin(root, '0.7.1');
+  assert.match(await readFile(join(root, 'package.json'), 'utf8'), /@0\.7\.1"/);
+});
+
+test('writePin on a symlinked package.json writes through to the real file inside the workspace, and the link stays a link', async () => {
+  const root = await makeWorkspace(await scratch('pin-link'), { pin: '0.5.0', marker: false });
+  await mkdir(join(root, 'config'));
+  await writeFile(join(root, 'config', 'package.real.json'), await readFile(join(root, 'package.json')));
+  await rm(join(root, 'package.json'));
+  await symlink(join('config', 'package.real.json'), join(root, 'package.json'));
+  await writePin(root, '0.6.1');
+  assert.equal((await lstat(join(root, 'package.json'))).isSymbolicLink(), true);
+  assert.equal(await readlink(join(root, 'package.json')), join('config', 'package.real.json'));
+  assert.match(await readFile(join(root, 'config', 'package.real.json'), 'utf8'), /@0\.6\.1"/);
+  assert.deepEqual((await readdir(join(root, 'config'))), ['package.real.json']);
+});
+
+test('writePin on a package.json that links outside the workspace is refused and nothing changes', async () => {
+  const root = await makeWorkspace(await scratch('pin-out'), { pin: '0.5.0', marker: false });
+  const outside = join(await scratch('pin-outside'), 'package.json');
+  await writeFile(outside, await readFile(join(root, 'package.json')));
+  await rm(join(root, 'package.json'));
+  await symlink(outside, join(root, 'package.json'));
+  const before = await readFile(outside, 'utf8');
+  await assert.rejects(writePin(root, '0.6.1'), error => error.code === 'outside-package' && error.message.includes(outside));
+  assert.equal(await readFile(outside, 'utf8'), before);
+  assert.equal((await lstat(join(root, 'package.json'))).isSymbolicLink(), true);
+});
+
+test('a package.json with a UTF-8 byte order mark is read, and the mark is kept when the pin moves (text edit and JSON fallback)', async () => {
+  const root = await makeWorkspace(await scratch('pin-bom'), { pin: '0.5.0', marker: false });
+  const text = '\uFEFF' + await readFile(join(root, 'package.json'), 'utf8');
+  await writeFile(join(root, 'package.json'), text);
+  assert.equal((await readManifest(root)).manifest.dependencies.opendoc, 'npm:@ryanyahya/opendoc@0.5.0');
+  await writePin(root, '0.6.1');
+  const after = await readFile(join(root, 'package.json'), 'utf8');
+  assert.equal(after.charCodeAt(0), 0xFEFF);
+  assert.equal(after, text.replace('@0.5.0', '@0.6.1'));
+  const odd = '\uFEFF{\n  "dependencies": { "opendoc": "npm:@ryanyahya/opendoc@^0.5.0" }\n}\n';
+  const rewritten = pinnedText(odd, '0.6.1');
+  assert.equal(rewritten.charCodeAt(0), 0xFEFF);
+  assert.equal(JSON.parse(rewritten.slice(1)).dependencies.opendoc, 'npm:@ryanyahya/opendoc@0.6.1');
 });

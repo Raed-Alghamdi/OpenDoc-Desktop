@@ -203,7 +203,15 @@ test('places are validated one by one and a block can be named only once', async
     await assert.rejects(addComment(f.root, 'proof', { text: 'x', targets: [place, { blockId: 'title', quote: 7 as unknown as string }] }), /again before commenting/);
     await assert.rejects(addComment(f.root, 'proof', { text: 'x', targets: [place, { blockId: 'title', quote: 'q', anchor: { ...phrase('title:text', 'q'), end: 99 } }] }), /phrase again/);
     await assert.rejects(addComment(f.root, 'proof', { text: 'x', targets: [] }), /Select a document element/);
-    await assert.rejects(addComment(f.root, 'proof', { text: 'x', blockId: 'target', quote: 'q', targets: [place, { blockId: 'title', quote: 'q' }] }), /either one place/);
+    // A place's own fields beside a list are a type error and a runtime error, never silently ignored.
+    const second = { blockId: 'title', quote: 'q' };
+    // @ts-expect-error blockId and quote belong to a single place
+    await assert.rejects(addComment(f.root, 'proof', { text: 'x', blockId: 'target', quote: 'q', targets: [place, second] }), /either one place/);
+    // @ts-expect-error exactQuote belongs to a single place
+    await assert.rejects(addComment(f.root, 'proof', { text: 'x', exactQuote: true, targets: [place, second] }), /either one place/);
+    // @ts-expect-error anchor belongs to a single place
+    await assert.rejects(addComment(f.root, 'proof', { text: 'x', anchor: phrase('title:text', 'q'), targets: [place, second] }), /either one place/);
+    await assert.rejects(addComment(f.root, 'proof', { text: 'x', targets: Array.from({ length: 201 }, (_, i) => ({ blockId: `b${i}`, quote: 'q' })) }), /at most 200/);
     await assert.rejects(addComment(f.root, 'proof', { text: ' ', targets: [place, { blockId: 'title', quote: 'q' }] }), /between 1 and 8,000/);
     assert.deepEqual(await readComments(f.root, 'proof'), [], 'A refused comment writes nothing.');
     const long = 'w'.repeat(900);
@@ -230,5 +238,31 @@ test('saved targets that do not match the top-level fields are never silently re
       await assert.rejects(changeComment(f.root, 'proof', comment.id, 'resolved', 1), /Invalid comments file/);
       assert.equal(await readFile(file, 'utf8'), original);
     }
+  } finally { await f.cleanup(); }
+});
+
+test('the place cap and a one-entry targets list apply when a comment is made, never when the file is read', async () => {
+  const f = await fixture();
+  try {
+    const file = resolve(f.root, 'documents/proof/comments.json');
+    const [made] = await addComment(f.root, 'proof', { text: 'Two places.', targets: [{ blockId: 'target', quote: 'a' }, { blockId: 'title', quote: 'b' }] });
+    const write = (row: object) => writeFile(file, JSON.stringify([row], null, 2) + '\n');
+
+    const many = Array.from({ length: 201 }, (_, i) => ({ blockId: i ? `b${i}` : 'target', quote: i ? 'q' : 'a' }));
+    await write({ ...made, targets: many });
+    assert.equal((await readComments(f.root, 'proof'))[0].targets!.length, 201, 'A file with 201 places stays readable.');
+    const [resolved] = await changeComment(f.root, 'proof', made.id, 'resolved', 1);
+    assert.equal(resolved.targets!.length, 201, 'and writable, keeping every place.');
+
+    const one = { ...made, targets: [made.targets![0]] };
+    await write(one);
+    const bytes = await readFile(file, 'utf8');
+    assert.deepEqual((await readComments(f.root, 'proof'))[0].targets, [made.targets![0]], 'A one-place targets list is tolerated on read.');
+    await changeComment(f.root, 'proof', made.id, 'open', 1);
+    assert.equal(await readFile(file, 'utf8'), bytes, 'and rewritten byte for byte.');
+    await changeComment(f.root, 'proof', made.id, 'resolved', 1);
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8'))[0].targets, one.targets);
+    const single = (await addComment(f.root, 'proof', { text: 'Never written.', targets: [{ blockId: 'target', quote: 'a' }] })).at(-1)!;
+    assert.equal(single.targets, undefined, 'This version never writes a one-place list.');
   } finally { await f.cleanup(); }
 });

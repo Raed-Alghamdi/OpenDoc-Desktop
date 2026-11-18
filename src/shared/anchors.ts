@@ -122,13 +122,17 @@ export function worstAnchorStatus(statuses: ResolvedCommentAnchor['status'][]): 
 }
 
 /**
- * The comment's own status is the worst of its places; its `selection` is the first place's, as
- * the top-level fields are. A comment without `targets` resolves exactly as it always has.
+ * Where a comment's first place stands, as it always has: its top-level `blockId`, `quote` and
+ * `anchor` (which are `targets[0]`). Use `resolveCommentStatus` for the whole comment.
  */
-export function resolveCommentAnchor(artifact: RenderArtifact | null | undefined, comment: Pick<Comment, 'blockId' | 'anchor' | 'quote' | 'targets'>): ResolvedCommentAnchor {
-  if (!comment.targets?.length) return resolveTarget(artifact, { blockId: comment.blockId, quote: comment.quote, anchor: comment.anchor });
-  const places = resolveCommentTargets(artifact, comment);
-  return { status: worstAnchorStatus(places.map(place => place.anchorStatus)), selection: places[0].selection };
+export function resolveCommentAnchor(artifact: RenderArtifact | null | undefined, comment: Pick<Comment, 'blockId' | 'anchor' | 'quote'>): ResolvedCommentAnchor {
+  return resolveTarget(artifact, { blockId: comment.blockId, quote: comment.quote, anchor: comment.anchor });
+}
+
+/** The whole comment: each place resolved once, the status of the worst, and the first place's selection. */
+export function resolveCommentStatus(artifact: RenderArtifact | null | undefined, comment: Pick<Comment, 'blockId' | 'quote' | 'anchor' | 'targets'>): ResolvedCommentAnchor & { targets: ResolvedCommentTarget[] } {
+  const targets = resolveCommentTargets(artifact, comment);
+  return { status: worstAnchorStatus(targets.map(place => place.anchorStatus)), selection: targets[0].selection, targets };
 }
 
 /**

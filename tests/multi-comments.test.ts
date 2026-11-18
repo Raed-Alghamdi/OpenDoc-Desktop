@@ -63,9 +63,9 @@ test('current.json carries selections and selection stays the first of them', as
 
 /**
  * npm 0.6.1's own comment code reads and rewrites a file that has `targets`. The two files in
- * tests/fixtures/opendoc-0.6.1 are byte-for-byte `src/server/comments.ts` and `files.ts` from
- * the published @ryanyahya/opendoc@0.6.1 (identical to the repository at 6bf397d); only the
- * document lookup is replaced by a stub, as the real one needs the whole render stack.
+ * tests/fixtures/opendoc-0.6.1 are `src/server/comments.ts` and `files.ts` of the published
+ * @ryanyahya/opendoc@0.6.1, verified as described in that folder's README; only the document
+ * lookup is replaced by a stub, as the real one needs the whole render stack.
  */
 test('npm 0.6.1 reads, rewrites and edits a comment with targets without losing them', async () => {
   const f = await fixture();
@@ -101,7 +101,7 @@ test('npm 0.6.1 reads, rewrites and edits a comment with targets without losing 
   } finally { await rm(scratch, { recursive: true, force: true }); await f.cleanup(); }
 });
 
-test('comments on a single place read back byte for byte after a rewrite by either version', async () => {
+test('a rewrite of a single-place file by either version is byte-stable and adds no targets', async () => {
   const f = await fixture();
   const scratch = await mkdtemp(resolve(tmpdir(), 'opendoc-0.6.1-'));
   try {
@@ -116,7 +116,7 @@ test('comments on a single place read back byte for byte after a rewrite by eith
     await old.addComment(f.root, 'proof', { blockId: 'target', text: 'Block comment.', quote: 'Paragraph' });
     const written = await readFile(file, 'utf8');
     await changeComment(f.root, 'proof', first.id, 'open', 1);
-    assert.equal(await readFile(file, 'utf8'), written, 'A no-op rewrite by this version leaves a 0.6.1 file untouched.');
+    assert.equal(await readFile(file, 'utf8'), written, 'A no-op rewrite by this version reproduces a 0.6.1 file byte for byte.');
     await changeComment(f.root, 'proof', first.id, 'resolved', 1); await old.changeComment(f.root, 'proof', first.id, 'open', 2);
     assert.equal((await readFile(file, 'utf8')).includes('targets'), false);
     // Reading and writing the same rows is stable: this version serialises what 0.6.1 serialised.

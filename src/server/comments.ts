@@ -28,10 +28,14 @@ function validTarget(target: unknown): target is CommentTarget {
   const value = target as CommentTarget;
   return nonempty(value.blockId) && typeof value.quote === 'string' && (value.anchor === undefined || validAnchor(value.anchor));
 }
-/** `targets` only adds places: the first one must be the top-level block, quote and anchor older readers see. */
+/**
+ * `targets` only adds places: the first one must be the top-level block, quote and anchor older
+ * readers see. One place or many is accepted on read, and the number of places is capped only
+ * when a comment is made, so a file written elsewhere never locks the document's feedback.
+ */
 function validTargets(row: Comment) {
   if (row.targets === undefined) return true;
-  return Array.isArray(row.targets) && row.targets.length > 0 && row.targets.length <= maxSelections && row.targets.every(validTarget)
+  return Array.isArray(row.targets) && row.targets.length > 0 && row.targets.every(validTarget)
     && row.targets[0].blockId === row.blockId && row.targets[0].quote === row.quote && isDeepStrictEqual(row.targets[0].anchor, row.anchor);
 }
 export async function readComments(root: string, id: string): Promise<Comment[]> {
@@ -107,11 +111,13 @@ export interface CommentPlace { blockId: string; quote: string; anchor?: TextAnc
  * block once). Several places are saved as `targets` and the first is also written to the top-level
  * fields, so a comment on one place is stored exactly as before.
  */
-export async function addComment(root: string, id: string, input: Partial<CommentPlace> & { text: string; targets?: CommentPlace[] }, unchanged?: () => boolean) {
+type SinglePlaceComment = CommentPlace & { text: string; targets?: undefined };
+type MultiPlaceComment = { text: string; targets: CommentPlace[]; blockId?: undefined; quote?: undefined; anchor?: undefined; exactQuote?: undefined };
+export async function addComment(root: string, id: string, input: SinglePlaceComment | MultiPlaceComment, unchanged?: () => boolean) {
   if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 8000) throw new Error('Write a comment between 1 and 8,000 characters.');
-  if (input.targets !== undefined && (input.blockId !== undefined || input.quote !== undefined || input.anchor !== undefined)) throw new Error('Give either one place or a list of places, not both.');
+  if (input.targets !== undefined && (input.blockId !== undefined || input.quote !== undefined || input.anchor !== undefined || input.exactQuote !== undefined)) throw new Error('Give either one place or a list of places, not both.');
   if (input.targets !== undefined && (!Array.isArray(input.targets) || !input.targets.length)) throw new Error('Select a document element first.');
-  const places = input.targets ?? [input as CommentPlace];
+  const places = input.targets ?? [input];
   if (places.length > maxSelections) throw new Error(`Comment on at most ${maxSelections} places at once.`);
   for (const place of places) {
     if (!place || typeof place.blockId !== 'string' || !place.blockId) throw new Error('Select a document element first.');

@@ -23,6 +23,7 @@ ${edition === 'headless'
   npx opendoc history               Review and restore earlier versions
   npx opendoc packs                 Share or install themes and templates
   npx opendoc export <id...>         Export PDF or editable PowerPoint
+  npx opendoc export history         List, delete, restore, and reveal earlier exports
   npx opendoc review <id>            Generate page images, text, and review issues
   npx opendoc check                 Typecheck workspace authoring
   npx opendoc update [--check]       Explicitly update the runtime
@@ -108,7 +109,11 @@ export async function main(rawArgs = process.argv.slice(2)) {
         case 'media': await (await import('../server/media-cli')).runMediaCli(flags, root); break;
         case 'comments': await (await import('../server/comments-cli')).runCommentsCli(flags, root, { mode: identity.edition === 'headless' ? 'direct' : 'auto' }); break;
         case 'history': await (await import('../server/history-cli')).runHistoryCli(flags, root); break;
-        case 'export': await (await import('../server/export')).runExportCli(flags, root, { mode: identity.edition === 'headless' ? 'direct' : 'preview' }); break;
+        case 'export': {
+          // `export history <action>` manages saved exports; any other arguments name documents to export.
+          if (args[0] === 'history' && ['list', 'delete', 'restore', 'reveal'].includes(args[1])) { await (await import('../server/exports-cli')).runExportHistoryCli(flags, root); break; }
+          await (await import('../server/export')).runExportCli(flags, root, { mode: identity.edition === 'headless' ? 'direct' : 'preview' }); break;
+        }
         case 'review': await (await import('../server/review-cli')).runReviewCli(flags, root); break;
         case 'update': await (await import('./update')).runUpdate(flags, root); break;
         case 'status': await (await import('./status')).runStatus(flags, root); break;

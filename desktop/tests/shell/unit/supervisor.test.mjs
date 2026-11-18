@@ -105,3 +105,35 @@ test('"try again" starts a fresh service, clears the failure and reports the swa
   assert.deepEqual(swaps, [[next, first]]);
   await supervisor.stop();
 });
+
+test('stopping while a restart is starting a host cancels that start, and no host is left running', async () => {
+  const first = fake();
+  const seen = [];
+  const supervisor = superviseTransport({
+    ...options, transport: first,
+    start: signal => new Promise((accept, reject) => {
+      seen.push(signal);
+      signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+    }),
+  });
+  first.end();
+  while (seen.length === 0) await new Promise(accept => setTimeout(accept, 5));
+  await supervisor.stop();
+  assert.equal(seen[0].aborted, true);
+  assert.equal(first.stopped, 1);
+});
+
+test('a start that finishes after stop() is stopped again, and a hand restart that loses the race throws', async () => {
+  const first = fake();
+  let release;
+  const late = fake();
+  const supervisor = superviseTransport({ ...options, transport: first, start: () => new Promise(accept => { release = () => accept(late); }) });
+  const attempt = supervisor.restart().catch(error => error);
+  while (!release) await new Promise(accept => setTimeout(accept, 5));
+  const stopped = supervisor.stop();
+  release();
+  await stopped;
+  assert.match(String(await attempt), /closing/);
+  assert.equal(late.stopped, 1);
+  assert.equal(supervisor.transport, first);
+});

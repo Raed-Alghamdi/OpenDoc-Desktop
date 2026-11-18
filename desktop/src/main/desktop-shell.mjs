@@ -37,7 +37,8 @@ export class DesktopShell {
     this.sessions = new Map();
     this.current = null;
     this.picker = null;
-    this.opening = false;
+    this.opening = null; // while a workspace is being opened: { abort, lock }, so that quitting can undo it
+    this.openTask = null;
     this.stopped = false;
     this.healthInterval = Number(process.env[environment.healthInterval]) || 5000;
   }
@@ -62,10 +63,19 @@ export class DesktopShell {
     void this.commandLine.launch();
   }
 
-  /** Stop the service, remove desktop.json and release the lock. Called from will-quit, once. */
+  /**
+   * Stop the service, remove desktop.json and release the lock. Called from will-quit, once. A workspace that is still
+   * opening is cancelled (its host is killed, its lock released) and waited for, for a few seconds at most.
+   */
   async shutdown() {
     if (this.stopped) return;
     this.stopped = true;
+    const opening = this.opening;
+    if (opening) {
+      opening.abort.abort();
+      await Promise.race([this.openTask?.catch(() => {}), new Promise(accept => setTimeout(accept, 8000))]);
+      await opening.lock?.release().catch(() => {}); // Still held when the open was stuck on a question for the user
+    }
     await this.#teardown(this.current).catch(error => console.error('Shutdown problem:', error.message));
     this.current = null;
   }
@@ -112,9 +122,18 @@ export class DesktopShell {
   }
 
   /** Open a workspace. Resolves { ok: true }, { ok: false, canceled: true } or { ok: false, code, message, path }. */
-  async openWorkspace(input) {
-    if (this.opening) return { ok: false, message: 'Another workspace is opening. Wait a moment.' };
-    this.opening = true;
+  openWorkspace(input) {
+    if (this.opening) return Promise.resolve({ ok: false, message: 'Another workspace is opening. Wait a moment.' });
+    if (this.stopped) return Promise.resolve({ ok: false, canceled: true });
+    const opening = { abort: new AbortController(), lock: null };
+    this.opening = opening;
+    const task = this.#open(input, opening).finally(() => { if (this.opening === opening) this.opening = null; });
+    this.openTask = task;
+    return task;
+  }
+
+  async #open(input, opening) {
+    const { signal } = opening.abort;
     let lock = null;
     let left = false;
     const fail = async result => {
@@ -139,6 +158,8 @@ export class DesktopShell {
         if (error instanceof WorkspaceLockError) return { ok: false, code: error.code, message: error.message, path: root };
         throw error;
       }
+      opening.lock = lock;
+      if (signal.aborted) return { ok: false, canceled: true };
       if (this.current) {
         left = true;
         if (!(await this.#leaveCurrent())) return { ok: false, canceled: true };
@@ -147,13 +168,15 @@ export class DesktopShell {
 
       const log = join(this.logsDir, `workspace-${hash(root).slice(0, 8)}.log`);
       const location = serviceLocation({ runtime: this.runtime, fallbackRoot: this.fallbackRoot });
-      const start = () => startTransport({ root, location, logFile: log });
+      const start = abort => startTransport({ root, location, logFile: log, signal: abort });
       let transport;
-      try { transport = await start(); }
+      try { transport = await start(signal); }
       catch (error) {
+        if (signal.aborted) return { ok: false, canceled: true };
         const detail = error instanceof TransportError && error.tail.length ? ` ${lastLine(error.tail.join('\n'))}` : '';
         return await fail({ ok: false, code: 'start-failed', message: `${error.message}${detail} The log has details.`, path: root });
       }
+      if (signal.aborted) { await transport.stop(); return { ok: false, canceled: true }; } // The app is quitting
       const { partition, session: ses } = this.#sessionFor(root);
       const current = { root, partition, session: ses, log, crashed: null };
       this.current = current;
@@ -184,7 +207,6 @@ export class DesktopShell {
       return await fail({ ok: false, code: 'failed', message: `The workspace could not be opened: ${error.message}` });
     } finally {
       await lock?.release().catch(() => {});
-      this.opening = false;
       this.switching = false;
     }
   }
@@ -357,7 +379,9 @@ export class DesktopShell {
   #registerIpc() {
     const handle = (channel, run) => ipcMain.handle(`shell:${channel}`, (event, ...args) => {
       // Only the app's own pages, in their top frame, may call the main process.
-      if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame || !isShellUrl(event.senderFrame.url)) throw new Error('Not allowed.');
+      // The page must also be in one of the app's own windows (the picker, or the workspace window showing the crash screen).
+      const windows = [this.picker, this.current?.window?.window].filter(window => window && !window.isDestroyed());
+      if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame || !isShellUrl(event.senderFrame.url) || !windows.some(window => window.webContents === event.sender)) throw new Error('Not allowed.');
       return run(...args);
     });
     handle('recent', async () => {

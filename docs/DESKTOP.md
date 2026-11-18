@@ -83,7 +83,7 @@ On quit, the service stops (SIGTERM, then SIGKILL after 8 seconds), `desktop.jso
 
 ## Menus
 
-File: Open Workspace, New Workspace (a new or empty folder, made with the CLI's `init`), Open Recent, Reveal Workspace, Show Log, Quit. Edit: the standard roles (macOS needs them for copy and paste). View: zoom and full screen only, with no reload and no developer tools. Window. Help: a link to the original project; About opendoc-desktop shows the version, the build number and commit, and credits the original OpenDoc project with its link.
+File: Open Workspace, New Workspace (a new or empty folder, made with the CLI's `init`), Open Recent, Reveal Workspace, Show Log, Quit. Edit: the standard roles (macOS needs them for copy and paste). View: zoom and full screen only, with no reload and no developer tools. Window. Help: a link to the original project; About opendoc-desktop shows the version, the build number and commit, and credits the original OpenDoc project with its link. Where the install updates itself, the Help menu (the app menu on macOS) also has "Check for Updates…", the checkbox "Check for Updates Automatically", and "Restart to Update" while a downloaded update is waiting.
 
 ## The `opendoc` command
 
@@ -93,6 +93,33 @@ Agents run `opendoc`, not `npx opendoc`, so the app puts a command on the user's
 - **AppImage:** an AppImage's files exist only while it runs, so the app writes `~/.local/bin/opendoc` at every launch from `resources/cli/opendoc-appimage.sh`, with the AppImage's path filled in (`cli-shim.mjs`, `command-line-tool.mjs`). The file is written atomically (a temp file in the same folder, then a rename), only if it is absent or already ours (the words "opendoc-desktop agent command" mark it); a command that is not ours is never replaced, and the user is told once. Each call mounts the AppImage with its own `--appimage-mount` under `setpriv --pdeathsig TERM` (running `AppRun` fails on Ubuntu 24.04), makes the runtime copy under `~/.local/share/opendoc-desktop/runtime/<version>-<build>/` when it is missing or from another build, and runs the CLI; a moved or deleted AppImage gets a message saying to open the app once. The app checks that `~/.local/bin` is on the PATH the app has, a login shell has or an interactive shell has, and tells the user once, with the line to add, when it is on none of them.
 - **macOS:** the app menu offers "Install Command-Line Tool". It writes a small launcher into `/usr/local/bin` when that is writable without administrator rights, otherwise `~/.local/bin`, refuses to replace an `opendoc` that is not ours, refuses when the app runs translocated, and explains a PATH problem in the same dialog. At launch an installed command is pointed at the app's current place.
 - Neither the app nor the launchers use flags that start with `--appimage-` (the AppImage runtime reserves them).
+
+## Updates
+
+The app updates itself where it can (`src/main/updater/`, built on electron-updater 6.8.11). What it does depends on how it was installed, found in this order:
+
+1. `resources/update-disabled` exists (a managed install, such as a distribution package that updates through its package manager): no updater, no network, no menu items.
+2. `config.json` has `"checkForUpdates": false`: no checks and no network. The checkbox in the menu changes this value and takes effect at once (a running download is cancelled, the timer is stopped).
+3. macOS.
+4. The `APPIMAGE` variable is set: AppImage.
+5. `resources/package-type` says `deb`, `rpm` or `pacman`.
+6. Anything else (a development run, a directory build) is inactive. A development run checks only when `OPENDOC_DESKTOP_UPDATE_RESOURCES` names a folder standing in for `resources/` (tests only).
+
+**When it checks.** Once at launch and then once a day while the app is open, and when the user chooses "Check for Updates…". Nothing is sent while the app is closed. A background check is silent unless there is something to do; a manual one always answers.
+
+**Where it looks.** The address in `resources/app-update.yml` (the fork's GitHub releases) unless `config.json` has `"updateFeed"`. The value is one of: a `https://github.com/<owner>/<repo>` address, a folder address ending in `/` that holds `latest-linux.yml` (or `latest-mac.yml`) and the files, or, for tests, `http://127.0.0.1:<port>/github-like`. Only `https:` is accepted, plus `http:` for 127.0.0.1, localhost and [::1]; anything else (other schemes, an address with a user name or password) is refused, logged and never contacted.
+
+**What counts as an update.** A higher version always does. The same version does when the metadata's top-level `build:` is a whole number above the running build (`resources/runtime/build-info.json`), so a rebuilt release replaces an older build of the same version. The metadata must also list a file for this install type (`.AppImage`, `.deb`, `.rpm`, `.pacman`, or the macOS `.zip`) with a SHA-512; a release without one is not offered, and the reason goes to the log.
+
+**What happens next, by install type.**
+
+- **AppImage:** the file is downloaded in the background (a differential download when the feed supports ranges) and swapped in when the app quits, so the next launch is the new build, with no prompt. The file keeps its name (it has no version in it), so `~/.local/bin/opendoc` keeps working; if a build ever renames it, the shim is pointed at the new path. At launch the app checks that the AppImage's folder is writable; if it is not, nothing is downloaded and the user is told once.
+- **deb, rpm, pacman:** the file is downloaded in the background and "Restart to Update" is offered (a dialog, and a menu item that stays until used). It runs one asynchronous `pkexec` call, so the window never freezes behind the password prompt. The call copies the file to a root-owned folder, checks its SHA-512 again as root (the checksum comes from the metadata the app already verified), then runs `dpkg -i` (and `apt-get install -f -y` to settle dependencies), the `zypper`, `dnf`, `yum` or `rpm` equivalent, or `pacman -U --noconfirm`. A cancelled password prompt (exit 126 or 127) says "Update cancelled" and keeps the download; a failure shows the command to run by hand. The app then restarts itself.
+- **macOS:** unpacks the downloaded zip with `ditto`, checks its signature and bundle identifier, and replaces the bundle in place through a small helper that waits for the app to quit and puts the old bundle back if the swap fails. It does this only when the app is not running translocated and its folder is writable; otherwise the user gets a notice with a button to the release page. (Only its decisions are unit-tested; see "Tests".)
+
+Every download is checked against the SHA-512 in the update metadata before it is used. A file that does not match is deleted and refused.
+
+**After an update** the first launch shows "opendoc-desktop was updated to <version>, build <build>" once, with a button that opens `https://github.com/<owner>/<repo>/releases/tag/desktop-v<version>-<build>` in the browser. `config.json` keeps `lastRun` for this, and `updateNotices` for the notices that are shown once. Other code can listen for an update with `onUpdated(callback)` on the shell's updater. The updater's log is `<userData>/logs/updater.log`.
 
 ## Tests
 
@@ -111,6 +138,8 @@ The first run builds the OpenDoc package (`pnpm package:pack --edition normal`, 
 Not covered by the tests (they need a person on a real display): native Wayland and fractional scaling, the GPU, input methods, the real clipboard, the real file chooser and file manager, and dropping a file from a file manager.
 
 The agent command has its own spec, `command.spec.mjs`, run against a linux-unpacked layout (this worktree's Electron renamed `opendoc-desktop`, the test runtime in `resources/runtime`, the launchers in `resources/cli`). Point `OPENDOC_SHELL_TEST_UNPACKED` at a real `linux-unpacked` folder to test a real build instead (it is copied, never changed). Every command test uses a scratch `HOME`, and a tripwire `node`, `npm` and `npx` first on the PATH proves that no system Node is used.
+
+The updater has its own unit tests and Electron specs, a local feed server and a hand-run AppImage update (build 1 to build 2); `desktop/README.md` ("Testing updates") says how to run them. They use loopback feeds only, never GitHub. The macOS swap is covered only by tests of its decisions, because it needs a Mac.
 
 ## Moving to the service
 

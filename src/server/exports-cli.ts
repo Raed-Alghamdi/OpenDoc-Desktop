@@ -1,4 +1,5 @@
 import { parseArgs } from 'node:util';
+import { codedError } from '../cli/errors';
 import { ExportError, ExportStore } from './exports';
 import { documentEntry, validId } from './render';
 import { exportInfo, type ExportHistoryEntry } from '../shared/export';
@@ -28,12 +29,12 @@ export async function runExportHistoryCli(args: string[], root = process.cwd(), 
   } });
   if (values.help) { console.log(values.json ? JSON.stringify({ usage }, null, 2) : usage); return; }
   const [group, action, target] = positionals;
-  if (group !== 'history' || !['list', 'delete', 'restore', 'reveal'].includes(action) || !target || positionals.length !== 3) throw new Error(usage);
-  if (values.open && action !== 'reveal') throw new Error(`--open belongs to export history reveal.\n${usage}`);
+  if (group !== 'history' || !['list', 'delete', 'restore', 'reveal'].includes(action) || !target || positionals.length !== 3) throw codedError(usage, 'usage');
+  if (values.open && action !== 'reveal') throw codedError(`--open belongs to export history reveal.\n${usage}`, 'usage');
   const store = new ExportStore(root);
   const print = (value: unknown, text: string) => console.log(values.json ? JSON.stringify(value, null, 2) : text);
   if (action === 'list') {
-    if (!validId(target)) throw new Error('Invalid document ID.');
+    if (!validId(target)) throw codedError('Invalid document ID.', 'invalid-input');
     try { await documentEntry(root, target); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new ExportError('Document not found.', 404); throw error; }
     const exports = await store.list(target);

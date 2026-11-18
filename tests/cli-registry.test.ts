@@ -8,8 +8,8 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { main, readBuildInfo, usageFor, versionResult } from '../src/cli/main';
 import { commandNames, commandsFor, helpCatalogue, type CommandSpec } from '../src/cli/registry';
-import { failureCodes, failureOf, type FailureCode } from '../src/cli/errors';
-import { InvalidOwnerRecord, OwnerShuttingDown } from '../src/cli/owner';
+import { codedError, failureCodes, failureOf, type FailureCode } from '../src/cli/errors';
+import { InvalidOwnerRecord, ownerFailure, OwnerShuttingDown } from '../src/cli/owner';
 import { runUpdate } from '../src/cli/update';
 import { parseExportArgs } from '../src/server/export-batch';
 import { RenderFailure } from '../src/server/render-error';
@@ -24,7 +24,8 @@ import { ExportError } from '../src/server/exports';
 import { HistoryError } from '../src/server/history';
 import { AssetError } from '../src/assets/files';
 import { projectRoot } from './helpers';
-import './helpers-owner';
+import { acceptAsApp } from './helpers-owner';
+import { spawn } from 'node:child_process';
 
 const snapshotFile = resolve(projectRoot, 'tests/fixtures/cli-help-catalogue.json');
 
@@ -320,9 +321,12 @@ test('usage errors exit with status 2 and code usage; other failures exit with s
   await usage(inside('projects', 'frobnicate'));                               // "Unknown project command or missing arguments"
   await usage(inside('export'));                                               // export without documents
   await usage(inside('export', 'proof', '--format', 'docx'));
-  // update --json reports its own failures (see the report), so only the text form reaches main.
+  // update --json reports its failure itself, with its own status field beside the common ones.
   const update = await run(...inside('update', '--no-such-option'));
   assert.equal(update.exitCode, 2);
+  const updateJson = await run(...inside('update', '--no-such-option', '--json'));
+  assert.equal(updateJson.exitCode, 2);
+  assert.deepEqual(JSON.parse(updateJson.out.at(-1)!), { status: 'error', ok: false, error: 'Unknown update option: --no-such-option. Use update [--check] [--version <exact>] [--json].', code: 'usage' });
   await usage(inside('check', 'extra'));
   await usage(inside('--version', 'extra'));
   await usage(['--workspace', root, '--workspace', root, 'status']);          // a global option twice
@@ -340,6 +344,35 @@ test('usage errors exit with status 2 and code usage; other failures exit with s
   }
   // A command that sets its own exit status keeps it.
   assert.equal((await run(...inside('help'))).exitCode, undefined);
+});
+
+test('the owner helper and the commands that use it keep typed errors, whatever their wording', async t => {
+  // ownerFailure keeps the class and the text it always produced.
+  const wrapped = ownerFailure(new InvalidOwnerRecord('The local OpenDoc session file is invalid.'), 'Restart OpenDoc before restoring.');
+  assert.ok(wrapped instanceof InvalidOwnerRecord);
+  assert.equal(wrapped.message, 'The local OpenDoc session file is invalid. Restart OpenDoc before restoring.');
+  assert.equal(failureOf(wrapped).code, 'owner-unconfirmed');
+  const root = await installedScratch(t);
+  const { run } = recorder(t);
+  const code = async (...args: string[]) => JSON.parse((await run('--workspace', root, ...args, '--json')).out.at(-1)!).code;
+  // stop beside the desktop app: refused with its own code.
+  const child = spawn('sleep', ['300'], { stdio: 'ignore' });
+  t.after(() => { child.kill('SIGKILL'); });
+  acceptAsApp(child.pid!, t);
+  await writeFile(resolve(root, '.opendoc/desktop.json'), JSON.stringify({ pid: child.pid, startedAt: '2026-01-01T00:00:00.000Z', version: '0.6.1', build: 1 }));
+  assert.equal(await code('stop'), 'desktop-owns-workspace');
+  await rm(resolve(root, '.opendoc/desktop.json'));
+  assert.equal(await code('context'), 'not-found');
+  await writeFile(resolve(root, '.opendoc/current.json'), '[]');
+  assert.equal(await code('context'), 'invalid-record');
+  for (const name of ['status', 'stop', 'context']) assert.equal(await code(name, 'extra'), 'usage', name);
+  assert.equal(await code('export', 'history', 'list'), 'usage');
+  assert.equal(await code('export', 'history', 'list', 'x!'), 'invalid-input');
+  assert.equal(await code('export', 'history', 'delete', 'x', '--open'), 'usage');
+  await mkdir(resolve(root, 'documents/proof'), { recursive: true });
+  await writeFile(resolve(root, 'documents/proof/index.tsx'), 'export default function P(){return null}');
+  assert.equal(await code('comments', 'list', 'proof', '--expected-version', '1'), 'usage');
+  assert.equal(await code('comments', 'edit', 'proof', 'missing', 'text'), 'not-found');
 });
 
 test('no workspace is its own failure, with its text unchanged', async t => {
@@ -360,6 +393,10 @@ test('failureOf derives each code from the error\'s class, status, parse failure
   const parseFailure = (() => { try { util.parseArgs({ args: ['--nope'], options: {} }); } catch (error) { return error; } })();
   const cases: [unknown, FailureCode][] = [
     [Object.assign(new Error('x'), { failureCode: 'usage' }), 'usage'],
+    [codedError('reworded beyond any pattern', 'timeout'), 'timeout'],
+    [codedError('reworded beyond any pattern', 'invalid-record'), 'invalid-record'],
+    [new InvalidOwnerRecord('reworded beyond any pattern'), 'owner-unconfirmed'],
+    [new OwnerShuttingDown(), 'owner-shutting-down'],
     [parseFailure, 'usage'],
     [new Error('Usage: npx opendoc status [--json]\nShows whether...'), 'usage'],
     [new Error('Duplicate --all option.\nUsage: npx opendoc export <document-id>'), 'usage'],

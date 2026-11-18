@@ -11,6 +11,11 @@ const named = (error: unknown): FailureCode | undefined => {
   return typeof code === 'string' && Object.hasOwn(failureCodes, code) ? code as FailureCode : undefined;
 };
 
+/** An error that names its own code, for command files that know exactly what went wrong; the message stays whatever the command says. */
+export function codedError(message: string, failureCode: FailureCode): Error {
+  return Object.assign(new Error(message), { failureCode });
+}
+
 /** Every code a `--json` failure can carry, with when it applies. The registry's tests keep this list and `failureOf` in step. */
 export const failureCodes = {
   usage: 'The command line is wrong: an unknown or misused option, a missing argument, an unknown command. Exit status 2.',
@@ -25,6 +30,8 @@ export const failureCodes = {
   'service-unavailable': 'The recorded service did not answer.',
   'owner-shutting-down': 'The previous OpenDoc session is still finishing its shutdown.',
   'owner-unconfirmed': 'A session record (.opendoc/server.json or desktop.json) is unreadable, or its owner could not be confirmed.',
+  timeout: 'The command waited for something that did not happen in time.',
+  'invalid-record': 'A workspace file the command reads, such as .opendoc/current.json, is not valid.',
   'not-found': 'A document, comment, version, theme, template, asset, export or file does not exist.',
   conflict: 'The item changed since it was read (a version or revision mismatch), or it already exists.',
   'invalid-input': 'A value was refused: bad ID, bad option value, a refused change.',

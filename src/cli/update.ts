@@ -329,7 +329,8 @@ export async function runUpdate(args: string[], root: string): Promise<void> {
     if (!json) throw error;
     const message = error instanceof Error ? error.message : 'Update failed.';
     console.error(message);
-    console.log(JSON.stringify({ status: 'error', error: message }));
-    if (!process.exitCode) process.exitCode = 1;
+    const { code, exitCode } = (await import('./errors')).failureOf(error);
+    console.log(JSON.stringify({ status: 'error', ok: false, error: message, code }));
+    if (!process.exitCode) process.exitCode = exitCode;
   }
 }

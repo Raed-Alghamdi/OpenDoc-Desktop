@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { codedError } from './errors';
 import { workspaceSession } from './owner';
 
 const usage = `Usage: npx opendoc context [--json]
@@ -30,16 +31,16 @@ async function current(root: string, context: { documentId?: unknown; revision?:
 export async function runContext(args: string[], root: string) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { json: { type: 'boolean' }, help: { type: 'boolean', short: 'h' } } });
   if (values.help) { console.log(values.json ? JSON.stringify({ usage }) : usage); return; }
-  if (positionals.length) throw new Error(usage);
+  if (positionals.length) throw codedError(usage, 'usage');
   let text: string;
   try { text = await readFile(resolve(root, '.opendoc/current.json'), 'utf8'); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('There is no current context yet. Open this workspace in OpenDoc and open a document, then try again.');
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw codedError('There is no current context yet. Open this workspace in OpenDoc and open a document, then try again.', 'not-found');
     throw error;
   }
   let context: Record<string, unknown> | null;
   try { context = JSON.parse(text); } catch { context = null; }
-  if (!context || typeof context !== 'object' || Array.isArray(context)) throw new Error('.opendoc/current.json is not a valid context record. Open this workspace in OpenDoc to write it again.');
+  if (!context || typeof context !== 'object' || Array.isArray(context)) throw codedError('.opendoc/current.json is not a valid context record. Open this workspace in OpenDoc to write it again.', 'invalid-record');
   // Everything the app wrote passes through as it is; only stale is added.
   const result = { ...context, stale: !(await current(root, context)) };
   if (values.json) { console.log(JSON.stringify(result, null, 2)); return; }

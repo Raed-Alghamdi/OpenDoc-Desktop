@@ -1,4 +1,5 @@
 import { readComments, changeComment, editComment, addComment, deleteComment, restoreComment, recentlyDeletedComments } from './comments';
+import { codedError } from '../cli/errors';
 import { ownerFailure, workspaceSession } from '../cli/owner';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -80,7 +81,7 @@ export async function runCommentsCli(args: string[], root = process.cwd(), optio
   if (!doc || !validId(doc)) throw new Error(usage);
   if ((values.phrase !== undefined || values.target !== undefined) && action !== 'add') throw new Error(`--phrase and --target belong to comments add.\n${usage}`);
   if (values.target !== undefined && values.phrase === undefined) throw new Error('Use --target with --phrase.');
-  if (values['expected-version'] !== undefined && action !== 'edit') throw new Error(`--expected-version belongs to comments edit.\n${usage}`);
+  if (values['expected-version'] !== undefined && action !== 'edit') throw codedError(`--expected-version belongs to comments edit.\n${usage}`, 'usage');
   if ((values.anchors || values.deleted) && action !== 'list') throw new Error(`--anchors and --deleted belong to comments list.\n${usage}`);
   if (values.anchors && values.deleted) throw new Error('Choose --anchors or --deleted, not both.');
   // Agents read and resolve feedback around their edits; keep those edits as their own version.
@@ -106,9 +107,9 @@ export async function runCommentsCli(args: string[], root = process.cwd(), optio
   } else if (action === 'edit' && target && words.length) {
     // A deleted comment cannot be edited; it has to be restored first.
     const comment = (await readComments(root, doc)).find(c => c.id === target && c.status !== 'deleted');
-    if (!comment) throw new Error('Comment not found.');
+    if (!comment) throw codedError('Comment not found.', 'not-found');
     const expected = values['expected-version'];
-    if (expected !== undefined && !/^[1-9]\d{0,9}$/.test(expected)) throw new Error('Use --expected-version with a whole comment version, such as 2.');
+    if (expected !== undefined && !/^[1-9]\d{0,9}$/.test(expected)) throw codedError('Use --expected-version with a whole comment version, such as 2.', 'usage');
     const comments = await editComment(root, doc, target, words.join(' '), expected === undefined ? comment.version : Number(expected));
     console.log(values.json ? JSON.stringify(comments.find(c => c.id === target), null, 2) : `Edited ${target}`);
   } else if (action === 'delete' && target && positionals.length === 3) {

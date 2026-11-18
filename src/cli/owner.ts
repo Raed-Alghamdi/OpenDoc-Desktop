@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { promisify } from 'node:util';
+import { codedError } from './errors';
 
 /**
  * Who has a workspace open: the browser edition's service (`.opendoc/server.json`), the
@@ -13,6 +14,7 @@ export interface WorkspaceOwner { mode: 'service' | 'desktop' | null; pid?: numb
 
 /** An unreadable or malformed session file. Unless its message already says what to do (advice ''), the caller adds that. */
 export class InvalidOwnerRecord extends Error {
+  readonly failureCode = 'owner-unconfirmed';
   constructor(message = 'The local OpenDoc session file is invalid.', public advice?: string) { super(message); }
 }
 
@@ -21,11 +23,12 @@ export const desktopRecordAdvice = 'If opendoc-desktop is not running, delete .o
 
 /** An error from the owner helper, as the message a command shows: the record's own advice, or the command's. */
 export function ownerFailure(error: unknown, advice: string) {
-  return error instanceof InvalidOwnerRecord ? new Error([error.message, error.advice ?? advice].filter(Boolean).join(' ')) : error;
+  return error instanceof InvalidOwnerRecord ? new InvalidOwnerRecord([error.message, error.advice ?? advice].filter(Boolean).join(' '), '') : error;
 }
 
 /** The recorded service refuses connections but its process still runs: it is finishing shutdown. */
 export class OwnerShuttingDown extends Error {
+  readonly failureCode = 'owner-shutting-down';
   constructor() { super('OpenDoc is still finishing its previous session. Wait for its terminal to stop, then retry.'); }
 }
 
@@ -117,8 +120,8 @@ async function verifiedService(root: string): Promise<{ origin: string; token: s
     if (text === null) return null;
     session = JSON.parse(text);
   }
-  catch { throw new Error('Cannot read the OpenDoc session. Check .opendoc/server.json before starting another server.'); }
-  if (!origins.test(session?.origin ?? '') || typeof session.token !== 'string' || !session.token) throw new Error('The OpenDoc session record is invalid. Check .opendoc/server.json before starting another server.');
+  catch { throw codedError('Cannot read the OpenDoc session. Check .opendoc/server.json before starting another server.', 'owner-unconfirmed'); }
+  if (!origins.test(session?.origin ?? '') || typeof session.token !== 'string' || !session.token) throw codedError('The OpenDoc session record is invalid. Check .opendoc/server.json before starting another server.', 'owner-unconfirmed');
   // A recorded process that is gone left the file behind, whatever now answers at its address.
   if (validPid(session.pid) && !alive(session.pid)) return null;
   let response;
@@ -128,11 +131,11 @@ async function verifiedService(root: string): Promise<{ origin: string; token: s
       if (validPid(session.pid)) throw new OwnerShuttingDown();
       return null;
     }
-    throw new Error('Cannot verify whether OpenDoc is running. Check its terminal before starting another server.');
+    throw codedError('Cannot verify whether OpenDoc is running. Check its terminal before starting another server.', 'owner-unconfirmed');
   }
   const live = await response.json().catch(() => null);
   if (response.ok && live?.token === session.token) return { origin: session.origin, token: session.token, pid: validPid(session.pid) ? session.pid : undefined };
-  throw new Error('The recorded OpenDoc session no longer matches the server at its address. Stop the previous server and remove the stale .opendoc/server.json before retrying.');
+  throw codedError('The recorded OpenDoc session no longer matches the server at its address. Stop the previous server and remove the stale .opendoc/server.json before retrying.', 'owner-unconfirmed');
 }
 
 /**

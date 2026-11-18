@@ -9,7 +9,8 @@ How the app works, what it reads and writes, and how it is hardened: [docs/DESKT
 ## Layout
 
 - `src/main/`: the Electron main process (the shell).
-- `src/preload/`: the preload script. It exposes an API to the app's own pages only.
+- `src/host/`: the service host, the code that runs in the child process beside the OpenDoc service and carries requests over its IPC channel (no port).
+- `src/preload/`: the preload script. It gives the app's own pages their calls to the main process, and the workspace page its two bridge functions (`onChange`, `onHostState`).
 - `src/renderer/`: the app's own pages (workspace picker, crash screen).
 - `resources/cli/`: the `opendoc` command for agents: `opendoc` (installed as `/usr/bin/opendoc` by the Linux packages) and `opendoc-appimage.sh` (the template the app fills in and writes to `~/.local/bin/opendoc` for an AppImage).
 - `tests/shell/`: the shell tests. Run them with `node tests/shell/run.mjs`; they open Electron windows only on a virtual display (Xvfb), never on your screen. `--unit` runs the unit tests without Electron.

@@ -1,14 +1,16 @@
 // The updater wired to Electron: the real dialog, the real electron-updater instance, the app's own quit and relaunch, and a log file.
 // desktop-shell.mjs calls createUpdates() once; everything else is in controller.mjs.
 import { app, dialog } from 'electron';
+import { readFileSync } from 'node:fs';
 import { appendFile, mkdir, rename, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { openExternal } from '../session-policy.mjs';
 import { createUpdaterClass } from './classes.mjs';
 import { UpdateController } from './controller.mjs';
-import { isLoopbackHost } from './feed.mjs';
-import { guardRedirects } from './http-guard.mjs';
+import { readHelperLogs } from './mac-install.mjs';
+import { isLoopbackHost, updateConfigIsLoopback } from './feed.mjs';
+import { guardRedirects, guardSession } from './http-guard.mjs';
 
 /**
  * Environment variables that tests and development builds read.
@@ -25,7 +27,7 @@ const logLimit = 512 * 1024;
 // through the adapter. Passing an adapter also means passing the HTTP executor, which the constructor otherwise creates.
 const require = createRequire(import.meta.url);
 const { ElectronAppAdapter } = require('electron-updater/out/ElectronAppAdapter');
-const { ElectronHttpExecutor } = require('electron-updater/out/electronHttpExecutor');
+const { ElectronHttpExecutor, getNetSession } = require('electron-updater/out/electronHttpExecutor');
 
 class VersionedAppAdapter extends ElectronAppAdapter {
   constructor(version) {
@@ -71,10 +73,14 @@ export function createUpdates({ config, getVersion, getBuild, parent, onChange, 
     createUpdater: (type, { feed, logger }) => {
       const Updater = createUpdaterClass(type, { getBuild: () => getBuild() ?? 0 });
       const updater = new Updater(null, new VersionedAppAdapter(getVersion()));
-      // Redirects stay on https (loopback http only for a loopback feed), for the metadata and for every download.
-      const loopbackFeed = Boolean(feed) && isLoopbackHost(new URL(feed.url ?? `${feed.protocol ?? 'https'}://${feed.host ?? 'github.com'}`).hostname);
+      // Requests and redirects stay on https (loopback http only when the feed, or the test app-update.yml, is on loopback). Three layers:
+      // the redirect handlers, createRequest (the differential download), and a catch-all on the session's webRequest.
+      let loopbackFeed = Boolean(feed) && isLoopbackHost(new URL(feed.url ?? `${feed.protocol ?? 'https'}://${feed.host ?? 'github.com'}`).hostname);
+      if (!feed && testResources) { try { loopbackFeed = updateConfigIsLoopback(readFileSync(join(testResources, 'app-update.yml'), 'utf8')); } catch { /* none */ } }
       const GuardedExecutor = guardRedirects(ElectronHttpExecutor, { loopbackFeed: () => loopbackFeed, log: line => logger.warn(line) });
       updater.httpExecutor = new GuardedExecutor((authInfo, callback) => updater.emit('login', authInfo, callback));
+      updater.httpExecutor.cachedSession = getNetSession();
+      guardSession(updater.httpExecutor.cachedSession, { loopbackFeed: () => loopbackFeed, log: line => logger.warn(line) });
       updater.logger = logger;
       updater.forceDevUpdateConfig = !app.isPackaged; // a test switch on a development Electron
       if (testResources) updater.updateConfigPath = join(testResources, 'app-update.yml'); // before setFeedURL: the setter clears the client
@@ -90,6 +96,7 @@ export function createUpdates({ config, getVersion, getBuild, parent, onChange, 
     quit: () => app.quit(),
     onChange,
     onAppImageMoved,
+    helperLogs: () => (process.platform === 'darwin' ? readHelperLogs() : Promise.resolve([])),
     log: fileLogger(join(app.getPath('userData'), 'logs')),
   });
   return controller;

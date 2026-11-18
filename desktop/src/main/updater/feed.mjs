@@ -66,3 +66,11 @@ export function releasePageUrl(repository, version, build) {
 
 /** The repository's releases list, for a notice when the build number is not known. */
 export const releasesListUrl = repository => `https://github.com/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repo)}/releases`;
+
+/** True when the text of resources/app-update.yml names a loopback address (a generic `url:` or a github `host:`): tests only. */
+export function updateConfigIsLoopback(text) {
+  if (typeof text !== 'string') return false;
+  const value = text.match(/^(?:url|host):\s*['"]?([^\s'"]+)['"]?\s*$/m)?.[1];
+  if (!value) return false;
+  try { return isLoopbackHost(new URL(value.includes('://') ? value : `http://${value}`).hostname); } catch { return false; }
+}

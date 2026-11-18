@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { copyFile, link, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { withWorkspaceLock } from './lock.js';
-import { OwnerShuttingDown, workspaceOwner } from './owner.js';
+import { desktopRecordAdvice, InvalidOwnerRecord, OwnerShuttingDown, workspaceOwner } from './owner.js';
 import { dependencyPin, isStableVersion, packageIdentity, packageMetadata, readWorkspaceMarker, workspaceIdentity, type PackageIdentity } from './workspace.js';
 
 interface Version { major: number; minor: number; patch: number }
@@ -76,9 +76,11 @@ async function assertServerStopped(root: string) {
   catch (error) {
     // Shutdown closes the listener before draining pending document writes.
     if (error instanceof OwnerShuttingDown) throw new Error(`The recorded OpenDoc process is still running or finishing shutdown. Wait for its terminal process to exit completely before updating. ${stopInstruction}`);
-    throw new Error(`Could not confirm that the local OpenDoc server has stopped (${error instanceof Error ? error.message : String(error)}) ${stopInstruction}`);
+    // The app's own record says what to do about it; any other failure is a service that cannot be confirmed stopped.
+    if (error instanceof InvalidOwnerRecord) throw new Error([error.message, error.advice].filter(Boolean).join(' '));
+    throw new Error(`OpenDoc could not confirm that its local server has stopped. Check .opendoc/server.json. ${stopInstruction}`);
   }
-  if (owner.mode === 'desktop') throw new Error('This workspace is open in opendoc-desktop. Update the app instead.');
+  if (owner.mode === 'desktop') throw new Error(`This workspace is open in opendoc-desktop. Update the app instead. ${desktopRecordAdvice}`);
   if (owner.mode === 'service') throw new Error(`OpenDoc is still running. ${stopInstruction}`);
 }
 

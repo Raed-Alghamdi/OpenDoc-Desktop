@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import type { DocumentState } from '../shared/types';
 import { exportInfo } from '../shared/export';
-import { InvalidOwnerRecord, workspaceSession } from '../cli/owner';
+import { ownerFailure, workspaceSession } from '../cli/owner';
 import type { ExportOptions, ExportResult } from './export-batch';
 import { ExportResponseLost } from './export-errors';
 
@@ -29,7 +29,7 @@ async function readStates(connection: Connection, timeout: number) {
 export async function currentSession(root: string, timeout: number): Promise<Session | null> {
   let owned;
   try { owned = await workspaceSession(root, { verify: false }); }
-  catch (error) { throw error instanceof InvalidOwnerRecord ? new Error(`${error.message} Restart OpenDoc before exporting.`) : error; }
+  catch (error) { throw ownerFailure(error, 'Restart OpenDoc before exporting.'); }
   // Beside the desktop app the export renders on its own, as with no owner at all.
   if (owned.owner.mode !== 'service') return null;
   const connection: Connection = { origin: owned.owner.origin!, token: owned.token! };

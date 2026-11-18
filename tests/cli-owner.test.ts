@@ -1,6 +1,6 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { cp, mkdir, symlink, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -15,13 +15,14 @@ import { runCommentsCli } from '../src/server/comments-cli';
 import { readComments } from '../src/server/comments';
 import { exportDocuments } from '../src/server/export-batch';
 import { HistoryStore } from '../src/server/history';
-import { recordAgentChanges } from '../src/server/history-capture';
+import { historyService, recordAgentChanges } from '../src/server/history-capture';
 import { runHistoryCli } from '../src/server/history-cli';
 import { collectPack } from '../src/packs/collect';
 import { writeArchive } from '../src/packs/archive';
 import { digest, type PackManifest } from '../src/packs/manifest';
 import { installPack } from '../src/packs/packs';
 import { fixture, projectRoot, source } from './helpers';
+import { acceptAsApp } from './helpers-owner';
 
 const desktopJson = (pid: number) => JSON.stringify({ pid, startedAt: '2026-01-01T00:00:00.000Z', version: '0.6.1', build: 1 });
 
@@ -34,7 +35,7 @@ async function control(root: string, file: string, contents: string) {
 function alive(t: TestContext) {
   const child = spawn('sleep', ['300'], { stdio: 'ignore' });
   t.after(() => { child.kill('SIGKILL'); });
-  return child.pid!;
+  return acceptAsApp(child.pid!, t);
 }
 
 /** A pid that belonged to a process that has exited. */
@@ -103,10 +104,8 @@ test('stale records mean no owner, whichever file holds them', async t => {
   const gone = await dead();
   await control(root, 'desktop.json', desktopJson(gone));
   assert.deepEqual(await workspaceOwner(root), { mode: null }, 'A dead desktop pid is stale.');
-  for (const junk of ['not json', '{}', JSON.stringify({ pid: 'abc' }), JSON.stringify({ pid: -4 }), JSON.stringify({ pid: 1.5 })]) {
-    await control(root, 'desktop.json', junk);
-    assert.deepEqual(await workspaceOwner(root), { mode: null }, `An unusable desktop record is stale: ${junk}`);
-  }
+  await rm(resolve(root, '.opendoc/desktop.json'));
+  assert.deepEqual(await workspaceOwner(root), { mode: null }, 'No file is no owner.');
 
   const origin = await closedOrigin();
   await control(root, 'server.json', JSON.stringify({ origin, token: 'old', pid: gone }));
@@ -155,14 +154,20 @@ test('status reports the owner without the session token', async t => {
   await assert.rejects(runStatus(['extra'], root), /Usage/);
 });
 
-test('status and stop are registered commands of the opendoc CLI', async t => {
+/** A scratch workspace whose installed application is this checkout, so the real dispatcher accepts it. */
+async function installedScratch(t: TestContext) {
   const root = await scratch(t);
-  const lines = printed(t);
   const { version } = JSON.parse(await readFile(resolve(projectRoot, 'package.json'), 'utf8'));
   await writeFile(resolve(root, 'package.json'), JSON.stringify({ name: 'scratch', private: true, dependencies: { opendoc: `npm:@ryanyahya/opendoc@${version}` } }));
   await writeFile(resolve(root, '.opendoc/workspace.json'), '{"formatVersion":1}\n');
   await mkdir(resolve(root, 'node_modules'));
   await symlink(projectRoot, resolve(root, 'node_modules/opendoc'), 'dir');
+  return root;
+}
+
+test('status and stop are registered commands of the opendoc CLI', async t => {
+  const root = await installedScratch(t);
+  const lines = printed(t);
   const run = async (...args: string[]) => { process.exitCode = undefined; await main(['--workspace', root, ...args]); assert.equal(process.exitCode, undefined); return lines.splice(0); };
   assert.deepEqual((await run('status', '--json')).map(line => JSON.parse(line)), [{ running: false, mode: null }]);
   assert.deepEqual((await run('stop', '--json')).map(line => JSON.parse(line)), [{ stopped: false, running: false }]);
@@ -175,6 +180,25 @@ test('status and stop are registered commands of the opendoc CLI', async t => {
   process.exitCode = undefined;
   assert.match(JSON.parse(lines.splice(0).at(-1)!).error, /Close opendoc-desktop/);
   assert.match((await run('--help'))[0], /opendoc status[\s\S]*opendoc stop/);
+});
+
+test('status names a damaged record in one line, as JSON when asked, instead of a stack', async t => {
+  const root = await installedScratch(t);
+  const lines = printed(t);
+  const fails = async (file: string, pattern: RegExp) => {
+    process.exitCode = undefined;
+    await main(['--workspace', root, 'status', '--json']);
+    assert.equal(process.exitCode, 1);
+    process.exitCode = undefined;
+    const { error } = JSON.parse(lines.splice(0).at(-1)!);
+    assert.match(error, pattern);
+    assert.ok(error.includes(file) && !error.includes('\n') && !/\bat .*\(/.test(error), error);
+  };
+  await control(root, 'server.json', 'garbage');
+  await fails('.opendoc/server.json', /Cannot read the OpenDoc session/);
+  await rm(resolve(root, '.opendoc/server.json'));
+  await control(root, 'desktop.json', 'garbage');
+  await fails('.opendoc/desktop.json', /delete .opendoc\/desktop\.json/);
 });
 
 test('stop ends a browser-edition service, leaves the desktop app alone, and ignores stale records', async t => {
@@ -207,7 +231,7 @@ process.on('SIGTERM', () => { rmSync('.opendoc/server.json', { force: true }); p
 
   const app = alive(t);
   await control(root, 'desktop.json', desktopJson(app));
-  await assert.rejects(runStop([], root), /Close opendoc-desktop/);
+  await assert.rejects(runStop([], root), /Close opendoc-desktop.*delete \.opendoc\/desktop\.json/);
   process.kill(app, 0);
 
   await control(root, 'desktop.json', desktopJson(await dead()));
@@ -219,7 +243,7 @@ test('C3: start refuses beside the desktop app before validating the installatio
   const f = await fixture();
   try {
     await control(f.root, 'desktop.json', desktopJson(alive(t)));
-    await assert.rejects(runStart(['--no-open'], f.root), /open in opendoc-desktop/);
+    await assert.rejects(runStart(['--no-open'], f.root), /open in opendoc-desktop.*delete \.opendoc\/desktop\.json/);
     await assert.rejects(readFile(resolve(f.root, '.opendoc/server.json')), { code: 'ENOENT' });
     await assert.rejects(readFile(resolve(f.root, '.opendoc/update.lock')), { code: 'ENOENT' }, 'The lock is released.');
   } finally { await f.cleanup(); }
@@ -275,7 +299,7 @@ test('C3: history is not recorded by CLI commands beside the desktop app, and is
   } finally { await f.cleanup(); }
 });
 
-test('C3: history restore refuses unsaved text edits beside the desktop app or the service, and not beside nobody', { timeout: 60_000 }, async t => {
+test('C3: history restore refuses unsaved text edits beside the desktop app or the service, and passes with no owner or a stale record', { timeout: 60_000 }, async t => {
   const f = await fixture();
   printed(t);
   try {
@@ -299,8 +323,15 @@ test('C3: history restore refuses unsaved text edits beside the desktop app or t
     await assert.rejects(restore(), /unsaved text edits/);
     assert.equal(await readFile(f.entry, 'utf8'), before);
 
-    // A record whose process is gone is no owner: the guard stands down.
+    // With no owner at all, no file of either kind, the guard stands down.
+    await rm(resolve(f.root, '.opendoc/server.json'));
+    await restore();
+    assert.match(await readFile(f.entry, 'utf8'), /A stable paragraph/);
+    await writeFile(f.entry, before);
+
+    // A record whose process is gone is no owner either.
     await control(f.root, 'server.json', JSON.stringify({ origin: 'http://127.0.0.1:45678', token: 'test-token', pid: await dead() }));
+    await control(f.root, 'desktop.json', desktopJson(await dead()));
     await restore();
     assert.match(await readFile(f.entry, 'utf8'), /A stable paragraph/);
   } finally { await f.cleanup(); }
@@ -339,7 +370,7 @@ test('C3: packs install refuses beside the desktop app, after taking the lock, a
   const f = await packFixture(t);
   await control(f.recipient, 'desktop.json', desktopJson(alive(t)));
   const before = await snapshot(f.recipient);
-  await assert.rejects(installPack(f.recipient, f.file, { trust: true }), /open in opendoc-desktop.*Use Import in the app, or close it/);
+  await assert.rejects(installPack(f.recipient, f.file, { trust: true }), /open in opendoc-desktop.*Use Import in the app, or close it.*delete \.opendoc\/desktop\.json/);
   assert.deepEqual(await snapshot(f.recipient), before, 'Neither catalog files nor the lock are left behind.');
   // A dry run only inspects the pack, so it still works.
   assert.equal((await installPack(f.recipient, f.file, { dryRun: true })).installed, false);
@@ -350,4 +381,125 @@ test('C3: packs install still refuses beside a service with the stop-first messa
   const live = await sessionServer(t);
   await control(f.recipient, 'server.json', JSON.stringify({ origin: live.origin, token: live.token, pid: process.pid }));
   await assert.rejects(installPack(f.recipient, f.file, { trust: true }), /Stop OpenDoc with Ctrl\+C/);
+});
+
+test('an invalid recorded pid is never signalled, and stop refuses it', async t => {
+  const root = await scratch(t);
+  printed(t);
+  const live = await sessionServer(t);
+  const kills: unknown[][] = [];
+  // Only the liveness probe of pid 1 may reach process.kill, and it never reaches the real one.
+  t.mock.method(process, 'kill', (pid: unknown, signal?: unknown) => {
+    kills.push([pid, signal]);
+    if (pid === 1 && signal === 0) return true;
+    throw new Error(`process.kill must not be called with ${String(pid)}`);
+  });
+  for (const pid of [-1, 0, '123', 1.5, 1]) {
+    await control(root, 'server.json', JSON.stringify({ origin: live.origin, token: live.token, pid }));
+    const owner = await workspaceOwner(root);
+    assert.equal(owner.mode, 'service');
+    assert.equal(owner.pid, pid === 1 ? 1 : undefined, `pid ${JSON.stringify(pid)} is only reported when it is valid`);
+    await assert.rejects(runStop([], root), /no valid process to stop/);
+  }
+  assert.deepEqual(kills.filter(([pid, signal]) => !(pid === 1 && signal === 0)), [], 'Nothing else was signalled.');
+});
+
+test('a service that exits between the check and the signal counts as stopped', async t => {
+  const root = await scratch(t);
+  const lines = printed(t);
+  const live = await sessionServer(t);
+  await control(root, 'server.json', JSON.stringify({ origin: live.origin, token: live.token, pid: 424242 }));
+  const kills: unknown[][] = [];
+  t.mock.method(process, 'kill', (pid: unknown, signal?: unknown) => {
+    kills.push([pid, signal]);
+    if (signal === 0) return true;
+    throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+  });
+  await runStop(['--json'], root);
+  assert.deepEqual(JSON.parse(lines.pop()!), { stopped: true, running: false, pid: 424242 });
+  assert.deepEqual(kills, [[424242, 0], [424242, 'SIGTERM']]);
+});
+
+test('a dead recorded pid is stale even when another server now answers at its address', async t => {
+  const root = await scratch(t);
+  const other = await sessionServer(t, 'another-programs-token');
+  await control(root, 'server.json', JSON.stringify({ origin: other.origin, token: 'the-old-services-token', pid: await dead() }));
+  assert.deepEqual(await workspaceOwner(root), { mode: null });
+  // With a live pid the same mismatch still refuses: whatever answers is not the recorded service.
+  await control(root, 'server.json', JSON.stringify({ origin: other.origin, token: 'the-old-services-token', pid: process.pid }));
+  await assert.rejects(workspaceOwner(root), /no longer matches/);
+});
+
+test('a live pid counts as the app only when the process is opendoc-desktop', { skip: process.platform !== 'linux' }, async t => {
+  const root = await scratch(t);
+  const start = async (name: string) => {
+    // A copy of sleep under another name: the kernel reports the executable's name as the process name.
+    const path = resolve(root, name);
+    await cp(execFileSync('which', ['sleep'], { encoding: 'utf8' }).trim(), path);
+    const child = spawn(path, ['300'], { stdio: 'ignore' });
+    t.after(() => { child.kill('SIGKILL'); });
+    await once(child, 'spawn');
+    return child.pid!;
+  };
+  assert.deepEqual(await workspaceOwner(root), { mode: null });
+  const other = await start('sleep-stand-in');
+  await control(root, 'desktop.json', desktopJson(other));
+  assert.deepEqual(await workspaceOwner(root), { mode: null }, 'A live pid that is some other program is stale.');
+  for (const name of ['opendoc-desktop', 'Electron', 'electron']) {
+    const pid = await start(name);
+    await control(root, 'desktop.json', desktopJson(pid));
+    assert.deepEqual(await workspaceOwner(root), { mode: 'desktop', pid }, name);
+  }
+});
+
+test('a desktop record that cannot be read is refused with advice, never ignored', async t => {
+  const root = await scratch(t);
+  for (const junk of ['not json', '', '{}', JSON.stringify({ pid: 'abc' }), JSON.stringify({ pid: -4 }), JSON.stringify({ pid: 1.5 }), 'null']) {
+    await control(root, 'desktop.json', junk);
+    await assert.rejects(workspaceOwner(root), error => {
+      assert.ok(error instanceof InvalidOwnerRecord, `junk ${JSON.stringify(junk)}`);
+      assert.match(error.message, /\.opendoc\/desktop\.json/);
+      assert.match(error.message, /delete \.opendoc\/desktop\.json/);
+      return true;
+    });
+  }
+  await rm(resolve(root, '.opendoc/desktop.json'));
+  await mkdir(resolve(root, '.opendoc/desktop.json'));
+  await assert.rejects(workspaceOwner(root), InvalidOwnerRecord, 'A folder in place of the file.');
+  await rm(resolve(root, '.opendoc/desktop.json'), { recursive: true });
+  assert.deepEqual(await workspaceOwner(root), { mode: null }, 'Only a missing file is no record.');
+});
+
+test('a record the app is still writing is read again before it is refused', async t => {
+  const root = await scratch(t);
+  const pid = alive(t);
+  await control(root, 'desktop.json', '{"pid":');
+  setTimeout(() => { void control(root, 'desktop.json', desktopJson(pid)); }, 30);
+  assert.deepEqual(await workspaceOwner(root), { mode: 'desktop', pid });
+});
+
+test('C3: start and packs install refuse beside an unreadable desktop record instead of running under the app', { timeout: 60_000 }, async t => {
+  const f = await fixture();
+  try {
+    await control(f.root, 'desktop.json', 'not json');
+    await assert.rejects(runStart(['--no-open'], f.root), /desktop\.json.*delete \.opendoc\/desktop\.json/);
+    await assert.rejects(readFile(resolve(f.root, '.opendoc/update.lock')), { code: 'ENOENT' });
+    const pack = await packFixture(t);
+    await control(pack.recipient, 'desktop.json', 'not json');
+    const before = await snapshot(pack.recipient);
+    await assert.rejects(installPack(pack.recipient, pack.file, { trust: true }), /desktop\.json.*delete \.opendoc\/desktop\.json/);
+    assert.deepEqual(await snapshot(pack.recipient), before);
+  } finally { await f.cleanup(); }
+});
+
+test('history recording stays off beside a service whose process lives, even if its record is damaged', async t => {
+  const root = await scratch(t);
+  for (const record of [{ pid: process.pid }, { pid: process.pid, origin: 'not an address' }, { origin: 'http://127.0.0.1:1', token: 't', pid: process.pid }]) {
+    await control(root, 'server.json', JSON.stringify(record));
+    assert.equal(await historyService(root), true, JSON.stringify(record));
+  }
+  await control(root, 'server.json', JSON.stringify({ origin: 'http://127.0.0.1:1', token: 't', pid: await dead() }));
+  assert.equal(await historyService(root), false);
+  await control(root, 'server.json', 'garbage');
+  assert.equal(await historyService(root), false);
 });

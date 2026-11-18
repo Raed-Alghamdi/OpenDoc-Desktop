@@ -14,9 +14,8 @@ export async function historyService(root: string) {
   // Headless never runs a service, so a stale or copied session file cannot suppress recording.
   if ((await read('workspace.json'))?.edition === 'headless') return false;
   try {
-    const owner = await workspaceOwner(root, { verify: false });
-    // A service counts only with a live recorded process; the app's own record is a live pid by definition.
-    return owner.mode === 'desktop' || (owner.mode === 'service' && owner.pid !== undefined);
+    // A service counts by its recorded process alone, even when the rest of its record is damaged.
+    return (await workspaceOwner(root, { pidOnly: true })).mode !== null;
   } catch { return false; }
 }
 

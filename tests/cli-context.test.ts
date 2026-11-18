@@ -9,6 +9,7 @@ import { resolve } from 'node:path';
 import { main } from '../src/cli/main';
 import { runContext } from '../src/cli/context';
 import { projectRoot } from './helpers';
+import { acceptAsApp } from './helpers-owner';
 
 const desktopJson = (pid: number) => JSON.stringify({ pid, startedAt: '2026-01-01T00:00:00.000Z', version: '0.6.1', build: 1 });
 const selections = [{ blockId: 'target', quote: 'A phrase', targetId: 'body', start: 2, end: 10 }, { blockId: 'title', quote: 'Title' }];
@@ -34,7 +35,7 @@ function printed(t: TestContext) {
 function alive(t: TestContext) {
   const child = spawn('sleep', ['300'], { stdio: 'ignore' });
   t.after(() => { child.kill('SIGKILL'); });
-  return child.pid!;
+  return acceptAsApp(child.pid!, t);
 }
 
 /** A stand-in service that reports the given revision for the document, or none. */

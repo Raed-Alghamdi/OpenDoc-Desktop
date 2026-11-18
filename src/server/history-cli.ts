@@ -9,7 +9,7 @@ import { blockHistory, compareVersion, restoreVersion } from './history-restore'
 import { describeVersions, groupVersions, historyChangeLabels, summaryText, type HistoryBlockChange, type HistoryVersionSummary, type RestoreScope } from '../shared/history';
 import { formatTime, formatTimeRange, formatWhen } from '../shared/dates';
 import { changedPassages } from '../shared/word-diff';
-import { InvalidOwnerRecord, workspaceOwner } from '../cli/owner';
+import { ownerFailure, workspaceOwner } from '../cli/owner';
 
 const usage = `Usage: npx opendoc history list <doc> [--json]
        npx opendoc history show <doc> <version> [--json]
@@ -113,7 +113,7 @@ export async function runHistoryCli(args: string[], root = process.cwd()): Promi
     // A running service or the desktop app may hold unsaved drafts against the current source.
     let owner;
     try { owner = await workspaceOwner(root, { verify: false }); }
-    catch (error) { throw error instanceof InvalidOwnerRecord ? new Error(`${error.message} Restart OpenDoc before restoring.`) : error; }
+    catch (error) { throw ownerFailure(error, 'Restart OpenDoc before restoring.'); }
     if (owner.mode) {
       const current = await readJSON<{ documentId?: string; manualEdit?: { pendingEdits?: number } } | null>(resolve(root, '.opendoc/current.json'), null);
       if (current?.documentId === doc && (current.manualEdit?.pendingEdits ?? 0) > 0) throw new Error('This document has unsaved text edits in OpenDoc. Save or discard them before restoring.');

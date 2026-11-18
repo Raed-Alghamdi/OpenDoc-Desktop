@@ -5,7 +5,7 @@ import { runtimeResolve, runtimeSource } from '../runtime/paths';
 import { packageIdentity, packageMetadata } from './workspace';
 import { withWorkspaceLock } from './lock';
 import { validateInstallation } from './check';
-import { workspaceOwner } from './owner';
+import { desktopRecordAdvice, workspaceOwner } from './owner';
 
 async function openBrowser(origin: string) {
   const command = process.platform === 'darwin' ? 'open' : 'xdg-open';
@@ -33,7 +33,7 @@ export async function runStart(args: string[], root: string) {
   try {
     const ready = await withWorkspaceLock(root, async () => {
       const existing = await workspaceOwner(root);
-      if (existing.mode === 'desktop') throw new Error('This workspace is open in opendoc-desktop. Close the app before running opendoc start.');
+      if (existing.mode === 'desktop') throw new Error(`This workspace is open in opendoc-desktop. Close the app before running opendoc start. ${desktopRecordAdvice}`);
       if (existing.mode === 'service') return { origin: existing.origin!, pid: existing.pid!, reused: true };
       await validateInstallation();
       child = spawn(process.execPath, ['--import', runtimeResolve('tsx'), runtimeSource('server/index.ts'), '--production'], { cwd: root, stdio: ['inherit', values.json ? 'pipe' : 'inherit', 'inherit'] });

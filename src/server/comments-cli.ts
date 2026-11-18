@@ -1,5 +1,5 @@
 import { readComments, changeComment, editComment, addComment, deleteComment, restoreComment, recentlyDeletedComments } from './comments';
-import { InvalidOwnerRecord, workspaceSession } from '../cli/owner';
+import { ownerFailure, workspaceSession } from '../cli/owner';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -40,7 +40,7 @@ type Session = { origin: string; token: string };
 async function liveSession(root: string): Promise<{ server: Session; docs: DocumentState[] } | null> {
   let session;
   try { session = await workspaceSession(root, { verify: false }); }
-  catch (error) { throw error instanceof InvalidOwnerRecord ? new Error(`${error.message} Restart OpenDoc before adding a comment.`) : error; }
+  catch (error) { throw ownerFailure(error, 'Restart OpenDoc before adding a comment.'); }
   // Beside the desktop app the target is verified directly, as with no owner at all.
   if (session.owner.mode !== 'service') return null;
   const server = { origin: session.owner.origin!, token: session.token! };

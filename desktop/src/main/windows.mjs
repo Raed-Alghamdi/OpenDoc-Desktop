@@ -3,7 +3,7 @@
 import { BrowserWindow, app, dialog, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { appName } from './identity.mjs';
-import { classifyNavigation, classifyWindowOpen, parseUrl } from './policy.mjs';
+import { classifyNavigation, classifyWindowOpen, originOf } from './policy.mjs';
 import { openExternal } from './session-policy.mjs';
 import { defaultSize, loadWindowState, restoreBounds, saveWindowState } from './window-state.mjs';
 
@@ -45,7 +45,7 @@ export function guardAllContents(allowedOrigins) {
     contents.on('will-redirect', navigation);
 
     contents.setWindowOpenHandler(({ url }) => {
-      const verdict = classifyWindowOpen(url, parseUrl(contents.getURL())?.origin ?? '');
+      const verdict = classifyWindowOpen(url, originOf(contents.getURL()));
       if (verdict === 'external') openExternal(url);
       if (verdict !== 'file-window') return { action: 'deny' };
       // A file the service serves (an exported PDF, a specimen) opens in a small window with Chromium's viewer.

@@ -11,7 +11,7 @@ const pages = new Set(['picker.html', 'picker.js', 'crash.html', 'crash.js', 'sh
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 const rendererFolder = new URL('../renderer/', import.meta.url);
 
-/** Must run before the app is ready. The same scheme will carry the service once U3 merges (app://opendoc). */
+/** Must run before the app is ready. The same scheme carries the shell's pages (app://shell) and the service (app://opendoc). */
 export function registerSchemes() {
   protocol.registerSchemesAsPrivileged([{ scheme: shellScheme, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }]);
 }

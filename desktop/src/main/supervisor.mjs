@@ -5,11 +5,12 @@ import { setTimeout as sleep } from 'node:timers/promises';
 const failuresBeforeRestart = 3;
 
 /**
- * @param start async (preferredPort) => a transport (see transport.mjs)
+ * @param start async () => a transport (see transport.mjs)
  * @param transport the transport that is running now
- * Callbacks: onReplaced(newTransport, oldTransport) after a restart; onFailed(reason) when restarting stops.
+ * Callbacks: onState('restarting' | 'running' | 'failed') as the host's state changes (the page shows it);
+ * onReplaced(newTransport, oldTransport) after a restart; onFailed(reason) when restarting stops.
  */
-export function superviseTransport({ start, transport, healthInterval = 5000, restartLimit = 3, restartWindow = 120_000, backoff = 400, onReplaced, onFailed, log = () => {} }) {
+export function superviseTransport({ start, transport, healthInterval = 5000, restartLimit = 3, restartWindow = 120_000, backoff = 400, onState, onReplaced, onFailed, log = () => {} }) {
   let current = transport;
   let stopping = false;
   let busy = false;
@@ -25,25 +26,23 @@ export function superviseTransport({ start, transport, healthInterval = 5000, re
       const old = current;
       const now = Date.now();
       history = history.filter(time => now - time < restartWindow);
-      if (history.length >= restartLimit) { failed = true; log(`giving up after ${history.length} restarts (${reason})`); onFailed?.(`The OpenDoc service stopped ${history.length + 1} times in a row (${reason}).`); return; }
+      if (history.length >= restartLimit) { failed = true; log(`giving up after ${history.length} restarts (${reason})`); onState?.('failed'); onFailed?.(`The OpenDoc service stopped ${history.length + 1} times in a row (${reason}).`); return; }
       history.push(now);
       log(`restarting the service (${reason})`);
+      onState?.('restarting');
       old.kill();
       await old.exited;
       await sleep(backoff * history.length);
       if (stopping) return;
       let next;
-      try { next = await start(old.port); }
-      catch (error) {
-        // The old port may have been taken in the meantime: any port will do.
-        try { next = await start(0); }
-        catch (second) { failed = true; onFailed?.(second.message || error.message); return; }
-      }
+      try { next = await start(); }
+      catch (error) { failed = true; log(`the service did not start again: ${error.message}`); onState?.('failed'); onFailed?.(error.message); return; }
       if (stopping) { await next.stop(); return; }
       current = next;
       misses = 0;
       watch(next);
       onReplaced?.(next, old);
+      onState?.('running');
     } finally { busy = false; }
   }
 
@@ -72,11 +71,14 @@ export function superviseTransport({ start, transport, healthInterval = 5000, re
       try {
         history = []; misses = 0; failed = false;
         const old = current;
+        onState?.('restarting');
         old.kill();
         await old.exited;
-        const next = await start(0);
+        const next = await start();
         current = next;
         watch(next);
+        onReplaced?.(next, old);
+        onState?.('running');
         return next;
       } finally { busy = false; }
     },

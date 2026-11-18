@@ -7,9 +7,15 @@ export function parseUrl(value) {
   try { return new URL(value); } catch { return null; }
 }
 
-/** The Content-Security-Policy for the workspace pages: the service's own origin and nothing else. */
-export function contentSecurityPolicy(origin) {
-  const socket = origin.replace(/^http/, 'ws');
+/** `app://opendoc`, `https://example.com`: the origin as the browser writes it. (URL.origin is "null" for app: addresses.) */
+export function originOf(value) {
+  const url = parseUrl(value);
+  if (!url) return '';
+  return url.protocol === `${shellScheme}:` ? `${url.protocol}//${url.host}` : url.origin;
+}
+
+/** The Content-Security-Policy for the workspace pages: the service's own address and nothing else. */
+export function contentSecurityPolicy() {
   return [
     "default-src 'none'",
     // pdf.js compiles WebAssembly for some image formats.
@@ -17,7 +23,7 @@ export function contentSecurityPolicy(origin) {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    `connect-src 'self' ${socket}`,
+    "connect-src 'self'",
     "media-src 'self' blob:",
     "worker-src 'self' blob:",
     "object-src 'none'",
@@ -47,7 +53,7 @@ export function isWebLink(value) {
 export function classifyNavigation(value, origins) {
   const url = parseUrl(value);
   if (!url) return 'deny';
-  if (origins.includes(url.origin) || isShellUrl(value)) return 'allow';
+  if (origins.includes(originOf(value)) || isShellUrl(value)) return 'allow';
   return webSchemes.has(url.protocol) ? 'external' : 'deny';
 }
 
@@ -58,16 +64,8 @@ export function classifyNavigation(value, origins) {
 export function classifyWindowOpen(value, origin) {
   const url = parseUrl(value);
   if (!url) return 'deny';
-  if (url.origin === origin) return url.pathname.startsWith('/api/') ? 'file-window' : 'deny';
+  if (originOf(value) === origin) return url.pathname.startsWith('/api/') ? 'file-window' : 'deny';
   return webSchemes.has(url.protocol) ? 'external' : 'deny';
-}
-
-/** `/api/exports/<id>/reveal`: the request the main process answers with showItemInFolder. */
-export function revealRequest(request, origin) {
-  const url = parseUrl(request.url);
-  if (!url || url.origin !== origin || request.method !== 'POST') return null;
-  const match = url.pathname.match(/^\/api\/exports\/([a-f0-9-]+)\/reveal$/);
-  return match ? match[1] : null;
 }
 
 /**
@@ -83,16 +81,12 @@ export function crossOriginMutation({ url, method, initiatorOrigin }, origins) {
   return !origins.includes(initiatorOrigin ?? '');
 }
 
-/** Requests a page may make: its own origin, the app's own pages, and inline data. Everything else is refused. */
+/** Requests a page may make: the open workspace's address, the app's own pages, and inline data. Everything else is refused. */
 export function requestAllowed(value, origins) {
   const url = parseUrl(value);
   if (!url) return false;
   if (['data:', 'blob:', 'devtools:', 'chrome-extension:'].includes(url.protocol)) return true;
-  if (url.protocol === `${shellScheme}:`) return url.host === shellHost;
-  if (['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)) {
-    const origin = url.origin.replace(/^ws/, 'http');
-    return origins.includes(origin);
-  }
+  if (url.protocol === `${shellScheme}:`) return url.host === shellHost || origins.includes(originOf(value));
   return false;
 }
 

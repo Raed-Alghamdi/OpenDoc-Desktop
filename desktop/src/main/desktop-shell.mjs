@@ -3,21 +3,21 @@ import { app, dialog, ipcMain, session, shell } from 'electron';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { showAbout } from './about.mjs';
 import { CommandLineTool } from './command-line-tool.mjs';
 import { createConfig, forgetWorkspace, rememberWorkspace } from './config.mjs';
 import { clearStaleDesktopRecord, inspectDesktopRecord, removeDesktopRecord, writeDesktopRecord } from './desktop-record.mjs';
-import { appVersion, environment } from './identity.mjs';
+import { appVersion, environment, serviceOrigin } from './identity.mjs';
 import { acquireWorkspaceLock, clearStaleWorkspaceLock, WorkspaceLockError } from './lock.mjs';
 import { installMenu } from './menu.mjs';
-import { isShellUrl } from './policy.mjs';
+import { isShellUrl, originOf } from './policy.mjs';
 import { cliPath, readBuildInfo, runCli } from './runtime.mjs';
 import { inspectService } from './service-session.mjs';
 import { applySessionPolicy, openExternal } from './session-policy.mjs';
 import { shellPageUrl } from './shell-pages.mjs';
 import { superviseTransport } from './supervisor.mjs';
-import { startTransport, TransportError } from './transport.mjs';
+import { serviceLocation, startTransport, TransportError } from './transport.mjs';
 import { WorkspaceWindow, createPickerWindow, guardAllContents } from './windows.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -26,9 +26,10 @@ const ask = (name, parent, options) => parent && !parent.isDestroyed() ? dialog[
 const lastLine = text => String(text).split('\n').map(line => line.trim()).filter(Boolean).at(-1) ?? '';
 
 export class DesktopShell {
-  constructor({ runtime, templatePath }) {
+  constructor({ runtime, templatePath, fallbackRoot }) {
     const userData = app.getPath('userData');
     this.runtime = runtime;
+    this.fallbackRoot = fallbackRoot; // Development: the repository, when the runtime folder has no service
     this.config = createConfig(join(userData, 'config.json'));
     this.commandLine = new CommandLineTool({ config: this.config, runtime, templatePath, home: app.getPath('home'), parent: () => this.#parent() });
     this.windowStateFile = join(userData, 'window-state.json');
@@ -71,6 +72,7 @@ export class DesktopShell {
 
   async #teardown(current) {
     if (!current) return;
+    current.unfollow?.();
     await current.supervisor?.stop();
     await removeDesktopRecord(current.root);
     await current.lock?.release();
@@ -94,7 +96,6 @@ export class DesktopShell {
       applySessionPolicy(ses, {
         origins: () => this.current?.session === ses ? this.#origins() : [],
         transport: () => this.current?.session === ses ? this.current.supervisor?.transport ?? null : null,
-        revealPath: id => this.#exportPath(id),
       });
       this.sessions.set(partition, ses);
     }
@@ -104,22 +105,10 @@ export class DesktopShell {
   #shellSession() {
     if (!this.sessions.has('shell')) {
       const ses = session.fromPartition('shell');
-      applySessionPolicy(ses, { origins: () => [], transport: () => null, revealPath: async () => null });
+      applySessionPolicy(ses, { origins: () => [], transport: () => null });
       this.sessions.set('shell', ses);
     }
     return this.sessions.get('shell');
-  }
-
-  /** Where an exported file is, for "Show in folder"; only files inside the workspace's folder. */
-  async #exportPath(id) {
-    const current = this.current;
-    const transport = current?.supervisor?.transport;
-    if (!transport) return null;
-    try {
-      const response = await transport.handle(new Request(`${transport.origin}/api/exports/${id}`));
-      const path = (await response.json())?.result?.path;
-      return typeof path === 'string' && resolve(path).startsWith(current.root + sep) ? path : null;
-    } catch { return null; }
   }
 
   /** Open a workspace. Resolves { ok: true }, { ok: false, canceled: true } or { ok: false, code, message, path }. */
@@ -157,9 +146,10 @@ export class DesktopShell {
       await clearStaleDesktopRecord(root);
 
       const log = join(this.logsDir, `workspace-${hash(root).slice(0, 8)}.log`);
-      const start = port => startTransport({ root, port, logFile: log });
+      const location = serviceLocation({ runtime: this.runtime, fallbackRoot: this.fallbackRoot });
+      const start = () => startTransport({ root, location, logFile: log });
       let transport;
-      try { transport = await start(0); }
+      try { transport = await start(); }
       catch (error) {
         const detail = error instanceof TransportError && error.tail.length ? ` ${lastLine(error.tail.join('\n'))}` : '';
         return await fail({ ok: false, code: 'start-failed', message: `${error.message}${detail} The log has details.`, path: root });
@@ -172,15 +162,18 @@ export class DesktopShell {
         transport,
         healthInterval: this.healthInterval,
         log: line => console.log(`[service] ${line}`),
-        onReplaced: (next, old) => { const shown = current.crashed; current.crashed = null; if (next.origin !== old.origin || shown) void this.#load(current, next.origin); },
+        onState: state => this.#hostState(current, state),
+        // The address does not change, so the page keeps working; only the crash screen needs the workspace loaded again.
+        onReplaced: next => { this.#follow(current, next); const shown = current.crashed; current.crashed = null; if (shown) void this.#load(current); },
         onFailed: reason => void this.#showCrash(current, reason),
       });
+      this.#follow(current, transport);
       await writeDesktopRecord(root, { version: this.version, build: this.build?.build ?? null });
       await rememberWorkspace(this.config, root);
       current.window = new WorkspaceWindow({ session: ses, stateFile: this.windowStateFile });
       await current.window.ready;
       current.window.closed.then(() => this.#windowClosed(current));
-      await this.#load(current, transport.origin);
+      await this.#load(current);
       await lock.release();
       lock = null;
       this.#closePicker();
@@ -196,10 +189,30 @@ export class DesktopShell {
     }
   }
 
-  async #load(current, origin) {
+  async #load(current) {
     const window = current.window?.window;
     if (!window || window.isDestroyed()) return;
-    try { await window.loadURL(origin); } catch (error) { console.error('Could not load the workspace window:', error.message); }
+    try { await window.loadURL(`${serviceOrigin}/`); } catch (error) { console.error('Could not load the workspace window:', error.message); }
+  }
+
+  /** Send the workspace page (its main frame, and only while it is at app://opendoc) one of the bridge's events. */
+  #toPage(current, channel, ...args) {
+    const window = current.window?.window;
+    if (!window || window.isDestroyed()) return;
+    const frame = window.webContents.mainFrame;
+    if (originOf(frame.url) !== serviceOrigin) return;
+    try { frame.send(channel, ...args); } catch { /* the frame is going away */ }
+  }
+
+  /** Forward the service's changes to the page. Called for each host the workspace has, the first and every restart. */
+  #follow(current, transport) {
+    current.unfollow?.();
+    current.unfollow = transport.onChange(() => this.#toPage(current, 'opendoc:changed'));
+  }
+
+  /** 'restarting', 'running' or 'failed': the host's state, for the page's short message. */
+  #hostState(current, state) {
+    if (this.current === current) this.#toPage(current, 'opendoc:host-state', state);
   }
 
   async #showCrash(current, reason) {
@@ -365,9 +378,7 @@ export class DesktopShell {
       const current = this.current;
       if (!current) return { ok: false, message: 'No workspace is open.' };
       try {
-        const next = await current.supervisor.restart();
-        current.crashed = null;
-        await this.#load(current, next.origin);
+        await current.supervisor.restart(); // Its replacement loads the workspace again (onReplaced above).
         return { ok: true };
       } catch (error) { return { ok: false, message: `The service did not start again: ${error.message}` }; }
     });

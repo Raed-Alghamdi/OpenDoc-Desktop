@@ -4,8 +4,10 @@
 import { createRequire } from 'node:module';
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
+import { statSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { withBuildCompare } from './build-compare.mjs';
+import { enoughSpace, swapAppImage } from './appimage-swap.mjs';
+import { parseBuild, withBuildCompare } from './build-compare.mjs';
 import { installMacUpdate, macBundleState, decideMacInstall } from './mac-install.mjs';
 import { packageTypes } from './install-type.mjs';
 import { installPackage } from './privileged-install.mjs';
@@ -52,7 +54,7 @@ const writable = path => access(path, constants.W_OK).then(() => true, () => fal
  * Every class gets `preflight()` (can this install replace itself where it stands? { ok } or { ok: false, reason, message }) and,
  * for the types that need a click, `installDownloaded()` (resolves { outcome: 'installed' | 'cancelled' | 'failed' | 'blocked', message? }).
  * @param options.getBuild the running build number
- * @param options.seams for tests: install (replaces installPackage), appImagePath, macState, macInstall
+ * @param options.seams for tests: install (replaces installPackage), appImagePath, statfs, swapOps, macState, macInstall
  */
 export function createUpdaterClass(type, { getBuild, seams = {} }) {
   const Base = bases[type];
@@ -61,16 +63,46 @@ export function createUpdaterClass(type, { getBuild, seams = {} }) {
 
   if (type === 'appimage') {
     return class extends Checked {
-      /** The swap at quit needs the AppImage's folder: unlink and move happen there. EACCES at quit would lose the update silently. */
+      /**
+       * The swap at quit stages a copy in the AppImage's own folder, so that folder must be writable and have room (about the size of
+       * the AppImage itself until the real size is known). Either problem would lose the update at quit, so nothing is downloaded.
+       */
       async preflight() {
         const file = (seams.appImagePath ?? (() => process.env.APPIMAGE))();
         if (!file) return { ok: false, reason: 'no-appimage', message: 'The APPIMAGE variable is not set.' };
         const folder = dirname(file);
-        if (await writable(folder)) return { ok: true };
-        return { ok: false, reason: 'not-writable', folder, message: `opendoc-desktop is an AppImage in ${folder}, a folder you cannot write to, so it cannot replace itself there. Move the AppImage to a folder of yours (for example ~/Applications) and start it from there, or update it by hand.` };
+        if (!(await writable(folder))) return { ok: false, reason: 'not-writable', folder, message: `opendoc-desktop is an AppImage in ${folder}, a folder you cannot write to, so it cannot replace itself there. Move the AppImage to a folder of yours (for example ~/Applications) and start it from there, or update it by hand.` };
+        let size = 0;
+        try { size = statSync(file).size; } catch { /* the file is gone: the swap will say so */ }
+        const space = enoughSpace(folder, size, seams.statfs);
+        return space.ok ? { ok: true } : { ok: false, reason: 'no-space', folder, message: space.message };
       }
 
-      /** Swap the AppImage now (the app is quitting). electron-updater unlinks the old file and moves the new one in. */
+      /**
+       * Replaces electron-updater's swap (unlink, then mv from the cache, then run the new AppImage): the file is staged beside the
+       * AppImage, checked, and renamed over it, and the new AppImage is never run. Runs while the app quits, so it is synchronous.
+       */
+      doInstall() {
+        const appImage = (seams.appImagePath ?? (() => process.env.APPIMAGE))();
+        const installerPath = this.installerPath;
+        const sha512 = this.downloadedUpdateHelper?.downloadedFileInfo?.sha512;
+        if (installerPath == null) {
+          this.dispatchError(new Error("No update filepath provided, can't quit and install"));
+          return false;
+        }
+        try {
+          const { destination, renamed } = swapAppImage({ appImage, installerPath, sha512, ops: seams.swapOps, log: message => this._logger.warn(message) });
+          this._logger.info(`The AppImage was replaced: ${destination}`);
+          if (renamed) this.emit('appimage-filename-updated', destination);
+          return true;
+        } catch (error) {
+          this._logger.error(`The AppImage was not replaced, the current one is untouched: ${error.message}`);
+          this.dispatchError(error);
+          return false;
+        }
+      }
+
+      /** Swap the AppImage now (the app is quitting). */
       installAtQuit() { return this.install(true, false); }
     };
   }
@@ -103,6 +135,7 @@ export function createUpdaterClass(type, { getBuild, seams = {} }) {
   return class extends Checked {
     async updateDownloaded(zipFileInfo, event) {
       this.downloadedZip = event.downloadedFile;
+      this.downloadedRelease = { version: event.version, build: parseBuild(event.build) }; // what the unzipped bundle must say it is
       this.dispatchUpdateDownloaded(event);
       return [];
     }
@@ -117,7 +150,7 @@ export function createUpdaterClass(type, { getBuild, seams = {} }) {
       if (!this.downloadedZip) return { outcome: 'failed', message: 'There is no downloaded update to install.' };
       try {
         const state = await (seams.macState ?? macBundleState)();
-        const result = await (seams.macInstall ?? installMacUpdate)({ zipFile: this.downloadedZip, state, log: message => this._logger.info(message) });
+        const result = await (seams.macInstall ?? installMacUpdate)({ zipFile: this.downloadedZip, state, expected: this.downloadedRelease ?? null, log: message => this._logger.info(message) });
         return { outcome: 'installed', info: result.info };
       } catch (error) {
         if (error.code === 'MOVE_TO_APPLICATIONS' || error.code === 'NOT_WRITABLE') return { outcome: 'blocked', reason: error.code === 'MOVE_TO_APPLICATIONS' ? 'translocated' : 'not-writable', message: error.message };

@@ -17,7 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Fork only: macos-15 (Apple Silicon) while macos-latest gives this fork no runner (2026-11-18). Revert before upstreaming.
+        os: [ubuntu-latest, macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     env:

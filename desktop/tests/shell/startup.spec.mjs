@@ -2,7 +2,7 @@
 // app does with a stale desktop.json, a stale or live lock and a workspace whose browser service is running.
 import { expect, test } from '@playwright/test';
 import { spawn } from 'node:child_process';
-import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { launchApp, nativeCalls, newProfile, newWorkspace, readConfig, setNative, stubNative } from './support/app.mjs';
 import { deadPid, desktopRecord, libraryReady, serverRecord, slow, waitFor } from './support/helpers.mjs';
@@ -24,6 +24,8 @@ test.describe('startup', () => {
       expect(Object.keys(record).sort()).toEqual(['build', 'pid', 'startedAt', 'version']);
       expect(record).toMatchObject({ version: '0.6.1', build: 7 });
       expect(record.pid).toBe(app.process().pid);
+      // The host runs with the workspace as its working directory (theme modules are read relative to it).
+      expect(await realpath(`/proc/${(await serverRecord(workspace)).pid}/cwd`)).toBe(await realpath(workspace));
       const config = await readConfig(profile);
       expect(config.defaultWorkspace).toBe(workspace);
       expect(config.recentWorkspaces).toEqual([workspace]);

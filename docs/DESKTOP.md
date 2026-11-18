@@ -107,3 +107,14 @@ When `createOpenDocService` merges (U3), `transport.mjs` is the only file that c
 - The host child imports the service and answers requests over its IPC channel (`serialization: 'advanced'`); `origin` becomes `app://opendoc`, `scheme` becomes `app`, `handle(request)` forwards over IPC and `onChange` events are sent to the window.
 - `session-policy.mjs` already registers one handler for `app://` (the shell pages) and one for the transport's scheme, and adds the policy headers to everything the transport returns. The `app://opendoc` host check is added there.
 - The page's WebSocket (`/api/events`) is replaced by a preload event, as S3's prototype did; that needs a small change in `src/app/main.tsx`.
+
+What the shell must still do around `createOpenDocService().handle()` (the U3 review), and where each point stands:
+
+- Any host other than `app://opendoc` answers 403. Already true: `forward` compares the request's origin with the transport's, so the change is the transport's `origin` value.
+- Only the app's own page may change things: the `initiatorOrigin` rule above applies unchanged to `app://opendoc`.
+- `onChange` pushes go only to the workspace window's main frame (`webContents.mainFrame.send`), and only while that frame's origin is `app://opendoc`. To do with the service transport.
+- No cookies and no token in a URL: already true (header only; the shell's own pages carry no token).
+- Each `handle()` call is wrapped (a throw answers 500) and a stopped transport answers 503. Already true.
+- `close()` runs once, in `will-quit` (`shutdown()` is guarded), and nothing is sent to a closed transport. Already true for `stop()`; the service transport keeps the same rule.
+- The host runs with the workspace as its working directory. Already true and tested.
+- The renderer needs a "service gone" signal. The page has no "Connection lost" state today; the bridge should offer one (`window.opendocDesktop.onHostState`) and `src/app/main.tsx` should show its own message while the shell restarts the host. Until then the shell shows its crash screen when restarting stops helping, and reloads the window when the address changes.

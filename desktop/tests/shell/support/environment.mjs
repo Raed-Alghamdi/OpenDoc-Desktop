@@ -1,7 +1,7 @@
 // Every Electron launch of these tests runs on a virtual display (xvfb-run) with the Claude app's display and
 // Electron variables removed, so no window can ever reach the real screen. run.mjs sets the marker below.
 export const virtualDisplayMarker = 'OPENDOC_SHELL_TESTS_XVFB';
-export const strippedVariables = ['ELECTRON_FORCE_IS_PACKAGED', 'ELECTRON_RUN_AS_NODE', 'ELECTRON_OZONE_PLATFORM_HINT', 'ELECTRON_PA_APP_NAME', 'WAYLAND_DISPLAY', 'OZONE_PLATFORM', 'XDG_BACKEND', 'HYPRLAND_INSTANCE_SIGNATURE', 'XDG_CURRENT_DESKTOP', 'GDK_SCALE', 'GDK_DPI_SCALE', 'QT_SCALE_FACTOR'];
+export const strippedVariables = ['ELECTRON_FORCE_IS_PACKAGED', 'ELECTRON_RUN_AS_NODE', 'ELECTRON_OZONE_PLATFORM_HINT', 'ELECTRON_PA_APP_NAME', 'WAYLAND_DISPLAY', 'OZONE_PLATFORM', 'XDG_BACKEND', 'HYPRLAND_INSTANCE_SIGNATURE', 'XDG_CURRENT_DESKTOP', 'GDK_SCALE', 'GDK_DPI_SCALE', 'QT_SCALE_FACTOR', 'APPIMAGE', 'APPDIR', 'ARGV0', 'OWD'];
 
 export function assertVirtualDisplay(env = process.env) {
   if (env[virtualDisplayMarker] !== '1' || env.WAYLAND_DISPLAY) {

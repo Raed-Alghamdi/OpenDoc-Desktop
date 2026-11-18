@@ -14,3 +14,8 @@ export const cache = process.env.OPENDOC_SHELL_TEST_CACHE ?? join(repo, 'tmp', '
 export const runtimeDir = join(cache, 'runtime');
 export const goldenWorkspace = join(cache, 'golden');
 export const workDir = join(cache, 'work');
+// A linux-unpacked layout (the app's executable, resources/runtime, resources/cli) the agent command is tested against:
+// the Electron of this worktree with the test runtime, or a copy of a real build named by OPENDOC_SHELL_TEST_UNPACKED.
+export const unpackedDir = join(cache, 'unpacked');
+export const unpackedExecutable = join(unpackedDir, 'opendoc-desktop');
+export const cliResources = join(desktopDir, 'resources', 'cli');

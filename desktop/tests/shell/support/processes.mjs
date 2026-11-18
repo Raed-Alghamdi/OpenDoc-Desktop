@@ -1,7 +1,7 @@
 // Processes of this worktree's Electron, found by executable path (never by name or by the shell's job list).
 import { readdirSync, readlinkSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { electronExecutable } from './paths.mjs';
+import { electronExecutable, unpackedDir } from './paths.mjs';
 
 const electronFolder = dirname(electronExecutable);
 
@@ -17,7 +17,7 @@ function readProcess(pid) {
 /** Every process whose executable is this worktree's Electron binary, or a helper that ships beside it. */
 export function electronProcesses() {
   return readdirSync('/proc').filter(name => /^\d+$/.test(name)).map(name => readProcess(Number(name)))
-    .filter(info => info && (info.exe === electronExecutable || dirname(info.exe) === electronFolder) && info.state !== 'Z');
+    .filter(info => info && (info.exe === electronExecutable || dirname(info.exe) === electronFolder || dirname(info.exe) === unpackedDir) && info.state !== 'Z');
 }
 
 export function killElectronProcesses() {

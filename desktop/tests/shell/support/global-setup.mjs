@@ -3,10 +3,10 @@
 // Never a real workspace: everything lives under the cache folder (tmp/shell-tests in the repository).
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { copyFile, chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { assertVirtualDisplay } from './environment.mjs';
-import { cache, desktopDir, goldenWorkspace, repo, runtimeDir, workDir } from './paths.mjs';
+import { cache, cliResources, desktopDir, electronExecutable, goldenWorkspace, repo, runtimeDir, unpackedDir, workDir } from './paths.mjs';
 import { killElectronProcesses } from './processes.mjs';
 
 const gentle = ['nice', '-n', '19', 'ionice', '-c', '3'];
@@ -29,6 +29,34 @@ async function tarball() {
   return file;
 }
 
+/** The linux-unpacked layout for the agent command tests; the launchers inside it are refreshed on every run. */
+async function unpackedApp(runtimeMarker) {
+  const source = process.env.OPENDOC_SHELL_TEST_UNPACKED;
+  const wanted = `${source ?? `${electronExecutable}\n${runtimeMarker}`}`;
+  const marker = join(unpackedDir, '.built-from');
+  if (!existsSync(marker) || await readFile(marker, 'utf8') !== wanted) {
+    await rm(unpackedDir, { recursive: true, force: true });
+    if (source) run('cp', ['-a', '--reflink=auto', source, unpackedDir]);
+    else {
+      run('cp', ['-a', '--reflink=auto', dirname(electronExecutable), unpackedDir]);
+      await rename(join(unpackedDir, 'electron'), join(unpackedDir, 'opendoc-desktop'));
+      await rm(join(unpackedDir, 'resources', 'runtime'), { recursive: true, force: true });
+      run('cp', ['-a', '--reflink=auto', runtimeDir, join(unpackedDir, 'resources', 'runtime')]);
+    }
+    await writeFile(marker, wanted);
+  }
+  // The packaging's runtime folder names the OpenDoc version in its package.json (the AppImage command names its copy by it).
+  const runtimePackage = join(unpackedDir, 'resources', 'runtime', 'package.json');
+  const packaged = JSON.parse(await readFile(runtimePackage, 'utf8'));
+  const { version } = JSON.parse(await readFile(join(unpackedDir, 'resources', 'runtime', 'node_modules', 'opendoc', 'package.json'), 'utf8'));
+  if (packaged.version !== version) await writeFile(runtimePackage, JSON.stringify({ ...packaged, version }, null, 2));
+  await mkdir(join(unpackedDir, 'resources', 'cli'), { recursive: true });
+  for (const name of ['opendoc', 'opendoc-appimage.sh']) {
+    await copyFile(join(cliResources, name), join(unpackedDir, 'resources', 'cli', name));
+    await chmod(join(unpackedDir, 'resources', 'cli', name), 0o755);
+  }
+}
+
 export default async function globalSetup() {
   assertVirtualDisplay();
   killElectronProcesses(); // Leftovers of an interrupted run.
@@ -44,6 +72,7 @@ export default async function globalSetup() {
     await writeFile(join(runtimeDir, 'build-info.json'), JSON.stringify({ build: 7, commit: '0123456789abcdef0123456789abcdef01234567', builtAt: '2026-01-01T00:00:00.000Z' }));
     await writeFile(marker, file);
   }
+  await unpackedApp(await readFile(marker, 'utf8'));
   if (!existsSync(join(goldenWorkspace, '.opendoc', 'workspace.json'))) {
     await rm(goldenWorkspace, { recursive: true, force: true });
     run(process.execPath, [join(runtimeDir, 'node_modules', 'opendoc', 'bin', 'opendoc.mjs'), 'init', goldenWorkspace, '--no-start', '--json'], { env: { ...process.env, OPENDOC_PACKAGE_TARBALL: file } });

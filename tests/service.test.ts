@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { fixture, projectRoot, source, until } from './helpers';
-import { createOpenDocService, type OpenDocService } from '../src/server/service';
+import { createOpenDocService, prepareOpenDocService, type OpenDocService } from '../src/server/service';
 
 const run = promisify(execFile);
 const tsx = import.meta.resolve('tsx'); // an absolute URL, so a child in an empty folder can load it
@@ -18,7 +18,7 @@ const client = (_req: IncomingMessage, res: ServerResponse) => { res.writeHead(2
 
 // A plain Node listener over the service, as `index.ts` and the desktop host's adapter both provide.
 async function listen(service: OpenDocService) {
-  const server = createServer((req, res) => { void service.handle(req, res); });
+  const server = createServer((req, res) => { service.handle(req, res).catch(() => {}); });
   await new Promise<void>(accept => server.listen(0, '127.0.0.1', accept));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   return { origin, close: () => new Promise<void>(accept => { server.close(() => accept()); server.closeAllConnections(); }) };
@@ -132,7 +132,7 @@ test('a process that creates and closes a service exits by itself', { timeout: 1
   } finally { await f.cleanup(); }
 });
 
-test('the listener closes the service when it cannot bind its port', { timeout: 120_000 }, async () => {
+test('a second instance that loses a pinned port never starts a service', { timeout: 120_000 }, async () => {
   const f = await fixture();
   const taken = createServer();
   await new Promise<void>(accept => taken.listen(0, '127.0.0.1', accept));
@@ -140,8 +140,99 @@ test('the listener closes the service when it cannot bind its port', { timeout: 
     const port = (taken.address() as AddressInfo).port;
     // OPENDOC_PORT pins the port, so there is no fallback to a free one and start-up fails.
     const result = await run(process.execPath, ['--import', 'tsx', resolve(projectRoot, 'src/server/index.ts')], { cwd: f.root, env: { ...process.env, OPENDOC_PORT: String(port) }, timeout: 60_000, killSignal: 'SIGKILL' }).then(() => ({ code: 0, stderr: '' }), error => ({ code: error.code as number, stderr: String(error.stderr) }));
-    assert.equal(result.code, 1, 'The process ends instead of staying up without a listener.');
+    assert.equal(result.code, 1);
     assert.match(result.stderr, /EADDRINUSE/);
-    await assert.rejects(readFile(resolve(f.root, '.opendoc/server.json'), 'utf8'), { code: 'ENOENT' });
+    // As in 0.6.1 the port is claimed before the workspace is touched: no server.json, no renders, no history.
+    await assert.rejects(readdir(resolve(f.root, '.opendoc')), { code: 'ENOENT' });
+    await assert.rejects(readdir(resolve(f.root, 'documents/proof/.history')), { code: 'ENOENT' });
   } finally { await new Promise(accept => taken.close(accept)); await f.cleanup(); }
+});
+
+test('a prepared service watches nothing until it is started', { timeout: 120_000 }, async () => {
+  const f = await fixture();
+  const { service, start } = await prepareOpenDocService({ root: f.root, production: false, client });
+  const server = await listen(service);
+  let changes = 0;
+  service.onChange(() => { changes++; });
+  try {
+    assert.deepEqual(await fetch(`${server.origin}/api/session`).then(r => r.json()), { token: service.token }, 'It answers before it starts.');
+    await writeFile(f.entry, (await readFile(f.entry, 'utf8')).replace('A first draft', 'An early draft'));
+    await new Promise(accept => setTimeout(accept, 1_000));
+    assert.equal(changes, 0);
+    await assert.rejects(readdir(resolve(f.root, '.opendoc')), { code: 'ENOENT' }, 'Nothing is written before start.');
+    await start();
+    await start(); // Starting twice is harmless.
+    const seen = changes;
+    await writeFile(f.entry, (await readFile(f.entry, 'utf8')).replace('An early draft', 'A started draft'));
+    await until(() => changes > seen);
+  } finally { await server.close(); await service.close(); await f.cleanup(); }
+});
+
+test('a prepared service that is closed without starting leaves nothing running', { timeout: 60_000 }, async () => {
+  const f = await fixture();
+  try {
+    const script = `
+      const { prepareOpenDocService } = await import(${JSON.stringify(servicePath)});
+      const { service } = await prepareOpenDocService({ root: process.cwd(), production: false, client: (_req, res) => res.end('client') });
+      await service.close();
+      console.log('closed');
+    `;
+    const { stdout } = await run(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { cwd: f.root, timeout: 30_000, killSignal: 'SIGKILL' });
+    assert.equal(stdout.trim(), 'closed');
+  } finally { await f.cleanup(); }
+});
+
+test('a failed start releases everything it started, then rethrows', { timeout: 60_000 }, async () => {
+  const f = await fixture();
+  try {
+    await writeFile(resolve(f.root, 'projects.json'), '{ not json');
+    // A leaked watcher or timer would keep this process alive until the timeout kills it.
+    const script = `
+      const { createOpenDocService } = await import(${JSON.stringify(servicePath)});
+      try { await createOpenDocService({ root: process.cwd(), production: false, client: (_req, res) => res.end('client') }); console.log('started'); }
+      catch (error) { console.log('rejected'); }
+    `;
+    const { stdout } = await run(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { cwd: f.root, timeout: 30_000, killSignal: 'SIGKILL' });
+    assert.equal(stdout.trim(), 'rejected');
+  } finally { await f.cleanup(); }
+});
+
+test('handle() reports a failing route to its caller only, with no unhandled rejection', { timeout: 30_000 }, async () => {
+  const f = await fixture();
+  // The client sends a whole response and then fails, so the error reply itself cannot be written.
+  const failing = (_req: IncomingMessage, res: ServerResponse) => { res.writeHead(200); res.end('done'); throw new Error('stream failed'); };
+  const service = await createOpenDocService({ root: f.root, production: false, client: failing });
+  const unhandled: unknown[] = [];
+  const record = (reason: unknown) => { unhandled.push(reason); };
+  process.on('unhandledRejection', record);
+  const caught: unknown[] = [];
+  const server = createServer((req, res) => { service.handle(req, res).catch(error => caught.push(error)); });
+  await new Promise<void>(accept => server.listen(0, '127.0.0.1', accept));
+  try {
+    await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/`).then(r => r.text());
+    await until(() => caught.length === 1);
+    await new Promise(accept => setTimeout(accept, 200)); // unhandled rejections are reported after the microtask queue drains
+    assert.equal(caught.length, 1);
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off('unhandledRejection', record);
+    server.closeAllConnections(); await new Promise(accept => server.close(accept));
+    await service.close(); await f.cleanup();
+  }
+});
+
+test('handle() after close() answers 503 and does no work', { timeout: 60_000 }, async () => {
+  const f = await fixture();
+  const service = await createOpenDocService({ root: f.root, production: false, client });
+  const server = await listen(service);
+  try {
+    assert.equal((await fetch(`${server.origin}/api/documents?view=summary`)).status, 200);
+    await service.close();
+    const read = await fetch(`${server.origin}/api/documents?view=summary`);
+    assert.equal(read.status, 503);
+    assert.deepEqual(await read.json(), { error: 'OpenDoc is closing.' });
+    // A write without the token gets the same answer: the request is not routed at all.
+    assert.equal((await fetch(`${server.origin}/api/context`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 503);
+    assert.equal((await fetch(`${server.origin}/`)).status, 503, 'The client is not served either.');
+  } finally { await server.close(); await f.cleanup(); }
 });

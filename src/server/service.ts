@@ -8,7 +8,7 @@ import { handleAssetRequest } from './assets-http';
 import { ownedFile, readMedia, mediaDirectory, localPath } from '../media/files';
 import type { Materials } from '../shared/media';
 import { randomBytes } from 'node:crypto';
-import { watch } from 'chokidar';
+import { watch, type FSWatcher } from 'chokidar';
 import { GuideError, readGuide } from './guides';
 import { Workspace } from './workspace';
 import { addComment, changeComment, editComment, deleteComment, restoreComment, readComments, recentlyDeletedComments, Conflict, withCommentLock } from './comments';
@@ -75,12 +75,18 @@ async function body(req: IncomingMessage, limit = 32_000) {
   return value;
 }
 
+export interface PreparedOpenDocService {
+  service: OpenDocService;
+  /** Starts the watcher, the first refresh and history capture; until then the service answers requests but watches nothing. */
+  start(): Promise<void>;
+}
+
 /**
  * One workspace's service: every route, the source watcher, history and renders. Importing this module starts nothing;
  * the caller owns the transport (an HTTP listener, or the desktop app's request channel) and the process.
  * Workspace code (themes, documents) runs in this process, so its working directory must be `root`.
  */
-export async function createOpenDocService(options: { root: string; production: boolean; client?: Handler }): Promise<OpenDocService> {
+export async function prepareOpenDocService(options: { root: string; production: boolean; client?: Handler }): Promise<PreparedOpenDocService> {
   const { root, production } = options;
   const workspace = new Workspace(root);
   const edits = new TextEditService(root);
@@ -432,46 +438,71 @@ export async function createOpenDocService(options: { root: string; production: 
     } catch (error) { json(res, { error: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'That local file is missing. Restore it or reload the library.' : error instanceof Error ? error.message : String(error) }, error instanceof CreateDocumentError || error instanceof ProjectError || error instanceof ThemeFoldersError || error instanceof TagsError || error instanceof ExportError || error instanceof AssetError || error instanceof GuideError || error instanceof HistoryError ? error.status : error instanceof RestoreRefusal ? 422 : error instanceof Conflict || error instanceof ExportChangedError ? 409 : (error as NodeJS.ErrnoException).code === 'ENOENT' ? 404 : 400); }
   }
   const active = new Set<Promise<void>>();
+  let closed = false;
   function handle(req: IncomingMessage, res: ServerResponse) {
-    const done = route(req, res); active.add(done); void done.finally(() => active.delete(done));
+    if (closed) { json(res, { error: 'OpenDoc is closing.' }, 503); return Promise.resolve(); }
+    const done = route(req, res);
+    // One chain, observed here, so a failure reaches only the caller that holds `done`.
+    const release = () => { active.delete(done); };
+    active.add(done); done.then(release, release);
     return done;
   }
 
   workspace.on('change', () => { materialsVersion++; });
-  // One source watcher feeds the catalogs, history and the workspace. Pack installs (P1) pause and resume it from here.
-  const watcher = watch([...new Set([root, resolve(applicationRoot, 'src'), resolve(applicationRoot, 'package.json'), resolve(applicationRoot, 'pnpm-lock.yaml'), resolve(applicationRoot, 'tsconfig.workspace.json')])], { ignoreInitial: true, ignored: path => ignoredByWatcher(applicationRoot, root, path) });
-  watcher.on('all', (_event, path) => {
-    if (relative(root, path) === 'projects.json') {
-      void workspace.refreshProjects().catch(error => workspace.emit('workspace-error', error)); return;
-    }
-    // Folders and tags only regroup and filter; they never change a document, theme, or specimen.
-    if ([themeFoldersFile, tagsFile].includes(relative(root, path))) { workspace.changed(); return; }
-    // Catalogs follow their own imports and asset bindings, including local data files.
-    void Promise.all([templates.noteChange(path), themes.noteChange(path)])
-      .then(() => workspace.changed()).catch(error => workspace.emit('workspace-error', error));
-    if (/^themes\/.*\.md$/.test(relative(root, path))) return;
-    if (path.endsWith('comments.json')) { workspace.changed(); return; }
-    // Debounced, so one save or one burst of agent writes becomes one version.
-    history.noteChange(path);
-    // Documents may import modules or read local assets in any format (CSV, text,
-    // diagrams, and fonts included). Dependency handling decides what is affected.
-    workspace.noteChange(path);
-  });
-  workspace.on('workspace-error', error => console.error('Workspace refresh failed:', error));
-  await workspace.refresh();
-  // Record any change made while OpenDoc was closed, and apply the retention period.
-  void (async () => { for (const id of workspace.states.keys()) await history.record(id, 'external').catch(error => console.error('Could not record document history:', error)); })();
+  let watcher: FSWatcher | undefined;
+  let started: Promise<void> | undefined;
+  /** Starts the source watcher, the first refresh and history capture. A failure releases everything already started. */
+  function start() {
+    started ??= (async () => {
+      if (closed) throw new Error('OpenDoc is closing.');
+      try {
+        // One source watcher feeds the catalogs, history and the workspace. Pack installs (P1) pause and resume it from here.
+        watcher = watch([...new Set([root, resolve(applicationRoot, 'src'), resolve(applicationRoot, 'package.json'), resolve(applicationRoot, 'pnpm-lock.yaml'), resolve(applicationRoot, 'tsconfig.workspace.json')])], { ignoreInitial: true, ignored: path => ignoredByWatcher(applicationRoot, root, path) });
+        watcher.on('all', (_event, path) => {
+          if (relative(root, path) === 'projects.json') {
+            void workspace.refreshProjects().catch(error => workspace.emit('workspace-error', error)); return;
+          }
+          // Folders and tags only regroup and filter; they never change a document, theme, or specimen.
+          if ([themeFoldersFile, tagsFile].includes(relative(root, path))) { workspace.changed(); return; }
+          // Catalogs follow their own imports and asset bindings, including local data files.
+          void Promise.all([templates.noteChange(path), themes.noteChange(path)])
+            .then(() => workspace.changed()).catch(error => workspace.emit('workspace-error', error));
+          if (/^themes\/.*\.md$/.test(relative(root, path))) return;
+          if (path.endsWith('comments.json')) { workspace.changed(); return; }
+          // Debounced, so one save or one burst of agent writes becomes one version.
+          history.noteChange(path);
+          // Documents may import modules or read local assets in any format (CSV, text,
+          // diagrams, and fonts included). Dependency handling decides what is affected.
+          workspace.noteChange(path);
+        });
+        workspace.on('workspace-error', error => console.error('Workspace refresh failed:', error));
+        await workspace.refresh();
+        // Record any change made while OpenDoc was closed, and apply the retention period.
+        void (async () => { for (const id of workspace.states.keys()) await history.record(id, 'external').catch(error => console.error('Could not record document history:', error)); })();
+      } catch (error) { await close(); throw error; }
+    })();
+    return started;
+  }
 
   let closing: Promise<void> | undefined;
   async function close() {
+    closed = true;
     closing ??= (async () => {
       // Complete accepted saves while their preview files and source watcher are still available.
       await Promise.allSettled([...active]);
-      await watcher.close();
+      await watcher?.close();
       await history.close();
       await workspace.close(); await edits.close(); await templates.close(); await themes.close();
     })();
     return closing;
   }
-  return { handle, token, close, onChange: listener => { workspace.on('change', listener); return () => { workspace.off('change', listener); }; } };
+  const service: OpenDocService = { handle, token, close, onChange: listener => { workspace.on('change', listener); return () => { workspace.off('change', listener); }; } };
+  return { service, start };
+}
+
+/** The usual way in: a service that is already watching, with its first refresh done. */
+export async function createOpenDocService(options: { root: string; production: boolean; client?: Handler }): Promise<OpenDocService> {
+  const { service, start } = await prepareOpenDocService(options);
+  await start();
+  return service;
 }

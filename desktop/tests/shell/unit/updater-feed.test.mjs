@@ -1,8 +1,8 @@
 // The release address rules (contracts, "Update rules"), the release page link and the files a release must list.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { builtInRepository, feedProviderOptions, parseFeedAddress, releasePageUrl, releaseRepository, repositoryFromUpdateConfig, releaseTag } from '../../../src/main/updater/feed.mjs';
-import { isAbsoluteUrl, metadataFiles, releaseFileFor } from '../../../src/main/updater/release-files.mjs';
+import { builtInRepository, feedProviderOptions, parseFeedAddress, releasePageUrl, releaseRepository, repositoryFromUpdateConfig, releaseTag, updateConfigIsLoopback } from '../../../src/main/updater/feed.mjs';
+import { isForeignUrl, metadataFiles, releaseFileFor } from '../../../src/main/updater/release-files.mjs';
 
 test('https addresses are accepted', () => {
   for (const address of ['https://github.com/Raed-Alghamdi/OpenDoc-Desktop', 'https://updates.example.org/opendoc/', 'https://example.org:8443/feed']) assert.equal(parseFeedAddress(address).ok, true, address);
@@ -107,6 +107,27 @@ test('a release that names a file by an absolute address is not offered, whateve
   const mixed = files('opendoc-desktop_0.6.1-2_amd64.deb', 'https://example.org/evil.AppImage');
   assert.equal(releaseFileFor('deb', mixed).reason, 'foreign-url');
   assert.equal(releaseFileFor('deb', { version: '0.6.1', path: 'https://example.org/x.deb', sha512: sha }).reason, 'foreign-url');
-  assert.equal(isAbsoluteUrl('opendoc-desktop-x86_64.AppImage'), false);
-  assert.equal(isAbsoluteUrl('sub/folder/x.deb'), false);
+  assert.equal(isForeignUrl('opendoc-desktop-x86_64.AppImage'), false);
+  assert.equal(isForeignUrl('sub/folder/x.deb'), false);
+});
+
+test('the bypasses that new URL() forgives are foreign too: leading space, tab or newline inside, any whitespace or control character, a backslash', () => {
+  for (const url of [' http://evil.example/x.deb', 'ht\ttps://evil.example/x.deb', '\nhttps://evil.example/x.deb', 'https://evil.example/x.deb\n', '\u00a0http://evil.example/x.deb', 'h\rttp://evil.example/x.deb', 'a\u0000b.deb', 'x\u007f.deb', 'dir/a b.deb', 'a\\..\\b.deb', '/\\evil.example/x.deb', '', '   ', null, undefined, 42]) {
+    assert.equal(isForeignUrl(url), true, JSON.stringify(url));
+    if (typeof url === 'string' && url) assert.equal(releaseFileFor('deb', files(url)).reason, 'foreign-url', JSON.stringify(url));
+  }
+  for (const url of ['//evil.example/x.deb', 'HTTPS://EVIL.EXAMPLE/x.deb', 'http:/evil.example/x.deb'.replace('http:/', 'ftp://'), 'file:///tmp/x.deb', 'data:text/plain,x', 'javascript:alert(1)', 'blob:https://evil.example/uuid']) assert.equal(isForeignUrl(url), true, url);
+});
+
+test('plain names are accepted: nested paths, percent escapes, a query, a dot-dot that stays on the feed origin, and a colon in the name (an rpm epoch)', () => {
+  for (const url of ['x.deb', 'dir/x.deb', 'OpenDoc%20Desktop.deb', 'x.deb?v=1', '../x.deb', 'pkg-1:2.rpm', 'opendoc-desktop-1:0.6.1-2.x86_64.rpm']) assert.equal(isForeignUrl(url), false, url);
+  assert.equal(releaseFileFor('rpm', files('opendoc-desktop-1:0.6.1-2.x86_64.rpm')).ok, true);
+});
+
+test('a test app-update.yml on the loopback address is recognised (the generic url, or the github host)', () => {
+  assert.equal(updateConfigIsLoopback('provider: generic\nurl: http://127.0.0.1:8099/generic/\n'), true);
+  assert.equal(updateConfigIsLoopback('provider: github\nowner: a\nrepo: b\nhost: localhost:8099\nprotocol: http\n'), true);
+  assert.equal(updateConfigIsLoopback('provider: generic\nurl: https://updates.example.org/x/\n'), false);
+  assert.equal(updateConfigIsLoopback('provider: github\nowner: a\nrepo: b\n'), false);
+  assert.equal(updateConfigIsLoopback(undefined), false);
 });

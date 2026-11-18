@@ -16,7 +16,7 @@ integrations/
 
 ## The router skill
 
-`SKILL.md` is deliberately thin. It reads `defaultWorkspace` from the app's `config.json` (Linux `~/.config/opendoc-desktop/config.json`, macOS `~/Library/Application Support/opendoc-desktop/config.json`) and asks the user when there is none. It then tells the agent to run `opendoc --workspace <path>`, read that workspace's `AGENTS.md`, follow the version-matched skills under `<workspace>/node_modules/opendoc/.agents/skills/`, and run `opendoc` wherever those skills say `npx opendoc`. It never copies them.
+`SKILL.md` is deliberately thin. It reads `defaultWorkspace` from the app's `config.json` (Linux `${XDG_CONFIG_HOME:-$HOME/.config}/opendoc-desktop/config.json`, which the agent expands in the shell, macOS `~/Library/Application Support/opendoc-desktop/config.json`) and asks the user when there is none. It then tells the agent to run `opendoc --workspace <path>`, read that workspace's `AGENTS.md`, follow the version-matched skills under `<workspace>/node_modules/opendoc/.agents/skills/`, and run `opendoc` wherever those skills say `npx opendoc`. It never copies them.
 
 The skill exists three times (the plugin for each vendor plus the plain copy) because each plugin folder must be self-contained and the app copies the folder as plain files, so symbolic links are not used. `check.mjs` keeps the copies identical: edit one, then copy it over the other two.
 

@@ -9,7 +9,7 @@ This skill only locates the user's OpenDoc workspace and points you at the guida
 
 The OpenDoc desktop app records the workspace it uses in its config file:
 
-- Linux: `~/.config/opendoc-desktop/config.json`
+- Linux: `${XDG_CONFIG_HOME:-$HOME/.config}/opendoc-desktop/config.json` (let the shell expand it, for example `cat "${XDG_CONFIG_HOME:-$HOME/.config}/opendoc-desktop/config.json"`)
 - macOS: `~/Library/Application Support/opendoc-desktop/config.json`
 
 Read it with a shell command such as `cat`, and take the `defaultWorkspace` key: an absolute folder path. Never edit the file; the app owns it. If the user's request names a different workspace, use that one instead.
@@ -38,4 +38,8 @@ If `<workspace>/node_modules/opendoc` is missing, tell the user the workspace is
 
 ## 4. When the app has the workspace open
 
-The desktop app may have the workspace open. Authoring, `check`, `review`, `export`, `comments` and `history` commands work regardless. `start`, `update` and `packs install` refuse while the app owns the workspace: that is expected. Tell the user to use the app for those (open the workspace, update the app, Import), and do not try to stop the app or work around the refusal.
+The desktop app may have the workspace open. Authoring, `check`, `review`, `export` and `comments` commands work regardless. `start`, `update` and `packs install` refuse while the app owns the workspace: that is expected. Tell the user to use the app for those (open the workspace, update the app, Import), and do not try to stop the app or work around the refusal.
+
+Before `start`, `update` or `packs install`, you can check instead of learning from a refusal: `opendoc --workspace <path> status --json` reports `{ running, mode }`, and `mode: "desktop"` means the app has the workspace open. If that command is not available in this version, just run the command you need and read any refusal the same way.
+
+`history restore` also refuses while the app holds unsaved text edits for the workspace. Tell the user to save in the app first, then run it again.

@@ -1,0 +1,2067 @@
+{
+  "version": "<version>",
+  "edition": "normal",
+  "commands": [
+    {
+      "path": [
+        "help"
+      ],
+      "summary": "Print the commands, or with --json the catalogue of every command, its arguments and options.",
+      "args": [],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "init"
+      ],
+      "summary": "Create a workspace and open OpenDoc.",
+      "args": [
+        {
+          "name": "folder",
+          "required": false,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "no-start",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Create the workspace without starting OpenDoc."
+        },
+        {
+          "name": "no-open",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Start OpenDoc without opening a browser."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "start"
+      ],
+      "summary": "Start the workspace's installed runtime and open it in the browser.",
+      "args": [
+        {
+          "name": "folder",
+          "required": false,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "no-open",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Do not open a browser."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "create"
+      ],
+      "summary": "Create a document or presentation, or list the starters with --list.",
+      "args": [
+        {
+          "name": "id",
+          "required": false,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "project",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Project to create the document in. Required to create."
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Document title. Required to create."
+        },
+        {
+          "name": "theme",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Theme ID."
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "document or presentation."
+        },
+        {
+          "name": "template",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Create from a reusable template ID."
+        },
+        {
+          "name": "starter",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Create from an example starter."
+        },
+        {
+          "name": "list",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "List the starters instead of creating."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "projects",
+        "list"
+      ],
+      "summary": "List projects and their theme defaults.",
+      "args": [],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "projects",
+        "create"
+      ],
+      "summary": "Create a project.",
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "name",
+          "type": "string",
+          "repeatable": false,
+          "required": true,
+          "description": "Project name."
+        },
+        {
+          "name": "theme",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Default theme for new documents and presentations."
+        },
+        {
+          "name": "document-theme",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Default theme for new documents."
+        },
+        {
+          "name": "presentation-theme",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Default theme for new presentations."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "projects",
+        "update"
+      ],
+      "summary": "Rename a project or change its theme defaults.",
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "name",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "New project name."
+        },
+        {
+          "name": "theme",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Default theme for both formats, or none to clear it."
+        },
+        {
+          "name": "document-theme",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Default theme for new documents, or none to clear it."
+        },
+        {
+          "name": "presentation-theme",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Default theme for new presentations, or none to clear it."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "projects",
+        "assign"
+      ],
+      "summary": "Move a document into a project.",
+      "args": [
+        {
+          "name": "document-id",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "project-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "projects",
+        "delete"
+      ],
+      "summary": "Delete an empty project.",
+      "args": [
+        {
+          "name": "project-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "documents",
+        "rename"
+      ],
+      "summary": "Change the name OpenDoc shows for a document.",
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "title",
+          "required": true,
+          "repeatable": true
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "documents",
+        "duplicate"
+      ],
+      "summary": "Copy a document into a new one with its own history.",
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "id",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "ID of the copy."
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Name of the copy."
+        },
+        {
+          "name": "project",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Project for the copy; the original's project by default."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "documents",
+        "delete"
+      ],
+      "summary": "Move a document to Trash and print its restore command.",
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "documents",
+        "trash"
+      ],
+      "summary": "List deleted documents, most recent first.",
+      "args": [],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "documents",
+        "restore"
+      ],
+      "summary": "Restore a document from Trash.",
+      "args": [
+        {
+          "name": "restore-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "templates",
+        "list"
+      ],
+      "summary": "List templates.",
+      "args": [],
+      "options": [
+        {
+          "name": "type",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Only templates of this type."
+        },
+        {
+          "name": "language",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "english, arabic, or bilingual."
+        },
+        {
+          "name": "tag",
+          "type": "string",
+          "repeatable": true,
+          "required": false,
+          "description": "Only templates with this tag."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "templates",
+        "inspect"
+      ],
+      "summary": "Show a template's descriptor, paths and guide.",
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "templates",
+        "check"
+      ],
+      "summary": "Render a template's preview and report issues.",
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "templates",
+        "preview"
+      ],
+      "summary": "Write a template's preview PDF.",
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "themes",
+        "list"
+      ],
+      "summary": "List themes.",
+      "args": [],
+      "options": [
+        {
+          "name": "folder",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Only themes in this folder, or none for themes outside every folder."
+        },
+        {
+          "name": "tag",
+          "type": "string",
+          "repeatable": true,
+          "required": false,
+          "description": "Only themes with this tag."
+        },
+        {
+          "name": "language",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "english, arabic, or bilingual."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "themes",
+        "inspect"
+      ],
+      "summary": "Show a theme's description, palette, paths and guide size.",
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "themes",
+        "check"
+      ],
+      "summary": "Render a theme's preview and report issues.",
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "themes",
+        "preview"
+      ],
+      "summary": "Write a theme's preview PDF.",
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "themes",
+        "folders",
+        "list"
+      ],
+      "summary": "List theme folders and the themes in them.",
+      "args": [],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "themes",
+        "folders",
+        "create"
+      ],
+      "summary": "Create a theme folder.",
+      "args": [
+        {
+          "name": "name",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "themes",
+        "folders",
+        "rename"
+      ],
+      "summary": "Rename a theme folder.",
+      "args": [
+        {
+          "name": "name",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "new-name",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "themes",
+        "folders",
+        "delete"
+      ],
+      "summary": "Delete a theme folder; its themes become unfiled.",
+      "args": [
+        {
+          "name": "name",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "themes",
+        "assign"
+      ],
+      "summary": "File a theme in a folder, or none to unfile it.",
+      "args": [
+        {
+          "name": "theme-id",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "folder",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "themes",
+        "tags"
+      ],
+      "summary": "Show or change a theme's tags (kept for scripts; opendoc tags covers every kind).",
+      "args": [
+        {
+          "name": "theme-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "set",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Replace the tags with this comma-separated list."
+        },
+        {
+          "name": "add",
+          "type": "string",
+          "repeatable": true,
+          "required": false,
+          "description": "Add this tag."
+        },
+        {
+          "name": "remove",
+          "type": "string",
+          "repeatable": true,
+          "required": false,
+          "description": "Remove this tag."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "tags",
+        "list"
+      ],
+      "summary": "List the types, statuses, languages and custom tags in use, with counts.",
+      "args": [],
+      "options": [
+        {
+          "name": "kind",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Count one kind only: document, presentation, theme, or template."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "tags",
+        "show"
+      ],
+      "summary": "Show one item's type, status, language and tags.",
+      "args": [
+        {
+          "name": "kind",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "tags",
+        "add"
+      ],
+      "summary": "Add types or custom tags to an item.",
+      "args": [
+        {
+          "name": "kind",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "tag",
+          "required": true,
+          "repeatable": true
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "tags",
+        "remove"
+      ],
+      "summary": "Remove tags from an item.",
+      "args": [
+        {
+          "name": "kind",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "tag",
+          "required": true,
+          "repeatable": true
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "tags",
+        "set"
+      ],
+      "summary": "Replace an item's tags.",
+      "args": [
+        {
+          "name": "kind",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "tag",
+          "required": false,
+          "repeatable": true
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "tags",
+        "status"
+      ],
+      "summary": "Show or set a document's status: draft, in-review, final or archived.",
+      "args": [
+        {
+          "name": "document-id",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "status",
+          "required": false,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "clear",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Clear the status."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "tags",
+        "find"
+      ],
+      "summary": "Find documents, presentations, themes and templates by tag, type, status or language.",
+      "args": [
+        {
+          "name": "tag",
+          "required": false,
+          "repeatable": true
+        }
+      ],
+      "options": [
+        {
+          "name": "kind",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Only this kind: document, presentation, theme, or template."
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Only this type."
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Only this status, or none."
+        },
+        {
+          "name": "language",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "english, arabic, or bilingual."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "tags",
+        "create"
+      ],
+      "summary": "Create a custom tag.",
+      "args": [
+        {
+          "name": "custom-tag",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "tags",
+        "delete"
+      ],
+      "summary": "Delete a custom tag.",
+      "args": [
+        {
+          "name": "custom-tag",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "untag",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Also remove it from the items that carry it."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "assets",
+        "list"
+      ],
+      "summary": "List logos and fonts.",
+      "args": [
+        {
+          "name": "kind",
+          "required": false,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "archived",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "List archived assets."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "assets",
+        "inspect"
+      ],
+      "summary": "Show an asset and its current revision.",
+      "args": [
+        {
+          "name": "kind",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "revision",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Inspect this revision."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "assets",
+        "import",
+        "logo"
+      ],
+      "summary": "Import a logo from an SVG or PNG file.",
+      "args": [],
+      "options": [
+        {
+          "name": "file",
+          "type": "string",
+          "repeatable": false,
+          "required": true,
+          "description": "SVG or PNG file."
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "repeatable": false,
+          "required": true,
+          "description": "Logo name."
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Logo ID."
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Guidance on using it."
+        },
+        {
+          "name": "variation-name",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Name of the first variation."
+        },
+        {
+          "name": "variation-description",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "When to use the first variation."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "assets",
+        "import",
+        "font"
+      ],
+      "summary": "Import a font family from TTF or OTF files.",
+      "args": [],
+      "options": [
+        {
+          "name": "file",
+          "type": "string",
+          "repeatable": true,
+          "required": true,
+          "description": "TTF or OTF face."
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Font ID."
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Font name."
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Guidance on using it."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "assets",
+        "revise"
+      ],
+      "summary": "Change an asset's metadata from a JSON file.",
+      "args": [
+        {
+          "name": "kind",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "metadata",
+          "type": "string",
+          "repeatable": false,
+          "required": true,
+          "description": "JSON file with expectedRevision and the fields to change."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "assets",
+        "add-variation"
+      ],
+      "summary": "Add a variation to a logo.",
+      "args": [
+        {
+          "name": "logo-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "file",
+          "type": "string",
+          "repeatable": false,
+          "required": true,
+          "description": "SVG or PNG file."
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "repeatable": false,
+          "required": true,
+          "description": "Variation name."
+        },
+        {
+          "name": "expected-revision",
+          "type": "string",
+          "repeatable": false,
+          "required": true,
+          "description": "The revision this change is based on."
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Variation ID."
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "When to use it."
+        },
+        {
+          "name": "replace",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Replace this variation."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "assets",
+        "add-faces"
+      ],
+      "summary": "Add faces to a font family.",
+      "args": [
+        {
+          "name": "font-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "file",
+          "type": "string",
+          "repeatable": true,
+          "required": true,
+          "description": "TTF or OTF face."
+        },
+        {
+          "name": "expected-revision",
+          "type": "string",
+          "repeatable": false,
+          "required": true,
+          "description": "The revision this change is based on."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "assets",
+        "archive"
+      ],
+      "summary": "Archive an asset.",
+      "args": [
+        {
+          "name": "kind",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "expected-revision",
+          "type": "string",
+          "repeatable": false,
+          "required": true,
+          "description": "The revision this change is based on."
+        },
+        {
+          "name": "clear-defaults",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Also clear it from theme defaults."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "assets",
+        "restore"
+      ],
+      "summary": "Restore an archived asset.",
+      "args": [
+        {
+          "name": "kind",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "expected-revision",
+          "type": "string",
+          "repeatable": false,
+          "required": true,
+          "description": "The revision this change is based on."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "assets",
+        "defaults"
+      ],
+      "summary": "Show or change a theme's default assets.",
+      "args": [
+        {
+          "name": "theme-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "metadata",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "JSON file with the complete defaults."
+        },
+        {
+          "name": "expected-revision",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "The revision this change is based on; with --metadata."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "assets",
+        "bind"
+      ],
+      "summary": "Bind an asset to a document's logo, body font or heading font.",
+      "args": [
+        {
+          "name": "document-id",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "slot",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "asset-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "revision",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Bind this revision."
+        },
+        {
+          "name": "variation",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Logo variation ID."
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Name of the logo binding."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "assets",
+        "unbind"
+      ],
+      "summary": "Remove a binding from a document.",
+      "args": [
+        {
+          "name": "document-id",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "slot",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "name",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Name of the logo binding."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "media",
+        "list"
+      ],
+      "summary": "List the media of one document, or of every document.",
+      "args": [
+        {
+          "name": "document",
+          "required": false,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "media",
+        "import"
+      ],
+      "summary": "Import an image into a document.",
+      "args": [
+        {
+          "name": "document",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "media-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "file",
+          "type": "string",
+          "repeatable": false,
+          "required": true,
+          "description": "PNG or JPEG file."
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "repeatable": false,
+          "required": true,
+          "description": "Title."
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "repeatable": false,
+          "required": true,
+          "description": "Description."
+        },
+        {
+          "name": "kind",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "photo, illustration, chart, diagram, or image."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "media",
+        "record"
+      ],
+      "summary": "Record the generation inputs of reviewed media.",
+      "args": [
+        {
+          "name": "document",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "media-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "media",
+        "check"
+      ],
+      "summary": "Report whether recorded media is fresh, stale or unrecorded.",
+      "args": [
+        {
+          "name": "document",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "media-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "comments",
+        "list"
+      ],
+      "summary": "List a document's comments.",
+      "args": [
+        {
+          "name": "doc",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "anchors",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Check each comment against the current render."
+        },
+        {
+          "name": "deleted",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "List only comments deleted in the last 90 days."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "comments",
+        "resolve"
+      ],
+      "summary": "Resolve a comment.",
+      "args": [
+        {
+          "name": "doc",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "comment-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "comments",
+        "reopen"
+      ],
+      "summary": "Reopen a resolved comment.",
+      "args": [
+        {
+          "name": "doc",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "comment-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "comments",
+        "delete"
+      ],
+      "summary": "Delete a comment; it stays restorable for 90 days.",
+      "args": [
+        {
+          "name": "doc",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "comment-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "comments",
+        "restore"
+      ],
+      "summary": "Restore a deleted comment.",
+      "args": [
+        {
+          "name": "doc",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "comment-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "comments",
+        "add"
+      ],
+      "summary": "Add a comment on a block, or on exact words in it.",
+      "args": [
+        {
+          "name": "doc",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "block-id",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "text",
+          "required": true,
+          "repeatable": true
+        }
+      ],
+      "options": [
+        {
+          "name": "phrase",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Anchor the comment to these exact words in the block."
+        },
+        {
+          "name": "target",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "The text field, when the words appear in more than one; with --phrase."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "comments",
+        "edit"
+      ],
+      "summary": "Replace the text of an open or resolved comment.",
+      "args": [
+        {
+          "name": "doc",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "comment-id",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "text",
+          "required": true,
+          "repeatable": true
+        }
+      ],
+      "options": [
+        {
+          "name": "expected-version",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Refuse the edit when the comment is no longer at this version."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "history",
+        "list"
+      ],
+      "summary": "List a document's versions, newest first.",
+      "args": [
+        {
+          "name": "doc",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "history",
+        "show"
+      ],
+      "summary": "Show what a version changed compared with the current source.",
+      "args": [
+        {
+          "name": "doc",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "version",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "history",
+        "block"
+      ],
+      "summary": "Show one block's earlier versions.",
+      "args": [
+        {
+          "name": "doc",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "block-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "history",
+        "restore"
+      ],
+      "summary": "Restore a version, one block, or one section.",
+      "args": [
+        {
+          "name": "doc",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "version",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "block",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Restore only this block's own content."
+        },
+        {
+          "name": "section",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Restore this block together with everything inside it."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "packs",
+        "export"
+      ],
+      "summary": "Export themes and templates as a pack file.",
+      "args": [],
+      "options": [
+        {
+          "name": "theme",
+          "type": "string",
+          "repeatable": true,
+          "required": false,
+          "description": "Theme to include."
+        },
+        {
+          "name": "template",
+          "type": "string",
+          "repeatable": true,
+          "required": false,
+          "description": "Template to include."
+        },
+        {
+          "name": "include",
+          "type": "string",
+          "repeatable": true,
+          "required": false,
+          "description": "Additional workspace asset file or folder."
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Pack ID."
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Pack display name."
+        },
+        {
+          "name": "pack-version",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Pack version; default 1.0.0."
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Attribution."
+        },
+        {
+          "name": "license",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Redistribution terms."
+        },
+        {
+          "name": "output",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Output file, ending in .opendoc.zip."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "packs",
+        "inspect"
+      ],
+      "summary": "Inspect a pack without running its code.",
+      "args": [
+        {
+          "name": "file",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "previews",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Write the pack's preview files to this new folder."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "packs",
+        "install"
+      ],
+      "summary": "Check or install a pack's themes and templates.",
+      "args": [
+        {
+          "name": "file",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "dry-run",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Report what would be installed."
+        },
+        {
+          "name": "trust",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Install it; only for an author you trust."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "export"
+      ],
+      "summary": "Export documents as PDF or editable PowerPoint.",
+      "args": [
+        {
+          "name": "document-id",
+          "required": false,
+          "repeatable": true
+        }
+      ],
+      "options": [
+        {
+          "name": "all",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Export every document."
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "pdf or pptx; default pdf."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "export",
+        "history",
+        "list"
+      ],
+      "summary": "List a document's earlier exports, newest first.",
+      "args": [
+        {
+          "name": "doc",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "export",
+        "history",
+        "delete"
+      ],
+      "summary": "Delete an earlier export and its file.",
+      "args": [
+        {
+          "name": "export-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "export",
+        "history",
+        "restore"
+      ],
+      "summary": "Undo the deletion of an earlier export.",
+      "args": [
+        {
+          "name": "export-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "export",
+        "history",
+        "reveal"
+      ],
+      "summary": "Print an earlier export's file path.",
+      "args": [
+        {
+          "name": "export-id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "open",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Also show the file in the system file manager."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "review"
+      ],
+      "summary": "Generate page images, text and review issues for a document, theme or template.",
+      "args": [
+        {
+          "name": "document-id",
+          "required": false,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "export",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Also typecheck and prepare PDF and, for presentations, editable PPTX from one render."
+        },
+        {
+          "name": "theme",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Review this theme instead of a document."
+        },
+        {
+          "name": "template",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Review this template instead of a document."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "check"
+      ],
+      "summary": "Typecheck workspace documents, themes and templates.",
+      "args": [],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "update"
+      ],
+      "summary": "Check for, or explicitly install, a compatible OpenDoc version.",
+      "args": [],
+      "options": [
+        {
+          "name": "check",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Only report what is available."
+        },
+        {
+          "name": "version",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Install this exact stable version, including a breaking update or downgrade."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "context"
+      ],
+      "summary": "Show what the OpenDoc app has selected.",
+      "args": [],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "status"
+      ],
+      "summary": "Show whether OpenDoc is running for this workspace.",
+      "args": [],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "stop"
+      ],
+      "summary": "Stop the OpenDoc service started with opendoc start; it does not stop opendoc-desktop.",
+      "args": [],
+      "options": [],
+      "json": true
+    }
+  ],
+  "globalOptions": [
+    {
+      "name": "json",
+      "type": "boolean",
+      "repeatable": false,
+      "required": false,
+      "description": "Structured output. A failure prints {\"ok\": false, \"error\", \"code\"} on stdout."
+    },
+    {
+      "name": "workspace",
+      "type": "string",
+      "repeatable": false,
+      "required": false,
+      "description": "The workspace folder; otherwise found from the current folder or an ancestor."
+    }
+  ]
+}

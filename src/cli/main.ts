@@ -1,12 +1,19 @@
 import { resolve } from 'node:path';
-import { realpath } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { applicationRoot } from '../runtime/paths';
 import { discoverWorkspace, explicitWorkspace, installedApplication, packageIdentity, packageMetadata, packageNames, type Edition } from './workspace';
 import { runProcess } from './process';
 import { withWorkspaceLock } from './lock';
 import { RenderFailure } from '../server/render-error';
 
-const usageFor = (edition: Edition) => `OpenDoc${edition === 'headless' ? ' Headless — remote document production for agents' : ' — local documents and editable presentations'}
+/**
+ * An error that names its own failure code. errors.ts derives a code for every other error, but it is
+ * loaded only when a failure is reported, so the errors raised here carry theirs without importing it.
+ */
+const failing = (message: string, failureCode: string) => Object.assign(new Error(message), { failureCode });
+const usageError = (message: string) => failing(message, 'usage');
+
+export const usageFor = (edition: Edition) => `OpenDoc${edition === 'headless' ? ' Headless — remote document production for agents' : ' — local documents and editable presentations'}
 
 ${edition === 'headless'
     ? `  npx --yes ${packageNames.headless} init <folder>\n                                   Create a workspace without a server`
@@ -26,10 +33,10 @@ ${edition === 'headless'
   npx opendoc export history         List, delete, restore, and reveal earlier exports
   npx opendoc review <id>            Generate page images, text, and review issues
   npx opendoc check                 Typecheck workspace authoring
-  npx opendoc update [--check]       Explicitly update the runtime
+  npx opendoc update [--check]       Explicitly update the runtime${edition === 'headless' ? '' : `
   npx opendoc context                Show what the OpenDoc app has selected
   npx opendoc status                 Show whether OpenDoc is running here
-  npx opendoc stop                   Stop the OpenDoc service
+  npx opendoc stop                   Stop the OpenDoc service`}
 
 Commands discover the workspace from this folder or an ancestor.
 Use --workspace <folder> to select one and --json for structured results.
@@ -43,29 +50,57 @@ export function parseGlobalArgs(args: string[]) {
     const arg = args[index];
     if (arg === '--') { rest.push(...args.slice(index)); break; }
     if (arg === '--workspace' || arg.startsWith('--workspace=')) {
-      if (workspace !== undefined) throw new Error('Provide --workspace only once.');
+      if (workspace !== undefined) throw usageError('Provide --workspace only once.');
       workspace = arg === '--workspace' ? args[++index] : arg.slice('--workspace='.length);
-      if (!workspace || workspace.startsWith('--')) throw new Error('Provide a folder after --workspace.');
+      if (!workspace || workspace.startsWith('--')) throw usageError('Provide a folder after --workspace.');
     } else if (arg === '--json') json = true;
     else rest.push(arg);
   }
   return { args: rest, workspace, json };
 }
 
+/**
+ * The build the desktop runtime was made from, when it says so. The runtime build writes
+ * `build-info.json` beside the runtime's package.json; npm packages don't have it.
+ * A missing or unreadable file means no build to report, never a failure.
+ */
+export async function readBuildInfo(root = applicationRoot): Promise<{ build?: number | string; commit?: string; builtAt?: string } | undefined> {
+  let info: Record<string, unknown>;
+  try { info = JSON.parse(await readFile(resolve(root, 'build-info.json'), 'utf8')); } catch { return undefined; }
+  if (!info || typeof info !== 'object' || Array.isArray(info)) return undefined;
+  const { build, commit, builtAt } = info;
+  const result = {
+    ...(typeof build === 'number' || typeof build === 'string' ? { build } : {}),
+    ...(typeof commit === 'string' ? { commit } : {}),
+    ...(typeof builtAt === 'string' ? { builtAt } : {}),
+  };
+  return Object.keys(result).length ? result : undefined;
+}
+
+/** What `--version --json` prints: the version, plus the runtime's build when it has one. */
+export async function versionResult(root = applicationRoot) {
+  const { version } = await packageMetadata(root);
+  const build = await readBuildInfo(root);
+  return { version, ...(build ? { build } : {}) };
+}
+
 export async function main(rawArgs = process.argv.slice(2)) {
   let json = rawArgs.includes('--json');
   try {
-    if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('OpenDoc requires Node.js 24 or newer. Install Node.js 24, then retry.');
+    if (Number(process.versions.node.split('.')[0]) < 24) throw failing('OpenDoc requires Node.js 24 or newer. Install Node.js 24, then retry.', 'unsupported-runtime');
     const parsed = parseGlobalArgs(rawArgs);
     json = parsed.json;
     const identity = packageIdentity(await packageMetadata());
     const usage = usageFor(identity.edition);
     const [command, ...args] = parsed.args;
     if (!command || ['--help', '-h', 'help'].includes(command)) {
-      console.log(json ? JSON.stringify({ usage }) : usage); return;
+      // `help --json` is the catalogue of every command; --help --json keeps printing the usage text.
+      if (json && command === 'help') console.log(JSON.stringify((await import('./registry')).helpCatalogue(identity.version, identity.edition)));
+      else console.log(json ? JSON.stringify({ usage }) : usage);
+      return;
     }
     if (command === 'init') {
-      if (parsed.workspace) throw new Error('Use init <folder> to choose the new workspace.');
+      if (parsed.workspace) throw usageError('Use init <folder> to choose the new workspace.');
       const { runInit } = await import('./init');
       await runInit([...(json ? ['--json'] : []), ...args]); return;
     }
@@ -73,7 +108,7 @@ export async function main(rawArgs = process.argv.slice(2)) {
     if (command === 'start') {
       const index = args.findIndex(arg => !arg.startsWith('-'));
       if (index >= 0) startFolder = args.splice(index, 1)[0];
-      if (startFolder && parsed.workspace) throw new Error('Choose start <folder> or --workspace <folder>, not both.');
+      if (startFolder && parsed.workspace) throw usageError('Choose start <folder> or --workspace <folder>, not both.');
     }
     const root = parsed.workspace || startFolder
       ? await explicitWorkspace(parsed.workspace ?? startFolder!)
@@ -87,14 +122,14 @@ export async function main(rawArgs = process.argv.slice(2)) {
       }
     }
     if (command === '--version' || command === '-v') {
-      if (args.length) throw new Error('Use --version without other arguments.');
-      const { version } = await packageMetadata();
-      console.log(json ? JSON.stringify({ version }) : version); return;
+      if (args.length) throw usageError('Use --version without other arguments.');
+      const result = await versionResult();
+      console.log(json ? JSON.stringify(result) : result.version); return;
     }
     if (!root && command === 'packs') {
       await (await import('../packs/cli')).runPacksCli([...(json ? ['--json'] : []), ...args]); return;
     }
-    if (!root) throw new Error(`No OpenDoc workspace found. Run npx --yes ${identity.name} init <folder>, or use --workspace <folder> for an existing workspace.`);
+    if (!root) throw failing(`No OpenDoc workspace found. Run npx --yes ${identity.name} init <folder>, or use --workspace <folder> for an existing workspace.`, 'no-workspace');
     const flags = [...(json ? ['--json'] : []), ...args];
     const dispatch = async () => {
       switch (command) {
@@ -122,7 +157,7 @@ export async function main(rawArgs = process.argv.slice(2)) {
         case 'stop': await (await import('./stop')).runStop(flags, root); break;
         case 'check': {
           if (args.includes('--help') || args.includes('-h')) { const help = 'Usage: npx opendoc check [--json]\nTypechecks workspace documents, themes, and templates.'; console.log(json ? JSON.stringify({ usage: help }) : help); break; }
-          if (args.length) throw new Error('Usage: npx opendoc check [--json]');
+          if (args.length) throw usageError('Usage: npx opendoc check [--json]');
           const { checkWorkspace, validateInstallation } = await import('./check');
           await validateInstallation();
           // Agents check after editing; without a running service this is where their edits are versioned.
@@ -131,15 +166,15 @@ export async function main(rawArgs = process.argv.slice(2)) {
           await recordAgentChanges(root, await discoverDocumentIds(root));
           await checkWorkspace(root, json); break;
         }
-        default: throw new Error(`Unknown command: ${command}. Use npx opendoc --help.`);
+        default: throw usageError(`Unknown command: ${command}. Use npx opendoc --help.`);
       }
     };
     if (identity.edition === 'headless' && !['update', 'start', 'packs', 'status', 'stop', 'context'].includes(command)) await withWorkspaceLock(root, dispatch);
     else await dispatch();
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const { message, code, exitCode } = (await import('./errors')).failureOf(error);
     console.error(message);
-    if (json) console.log(JSON.stringify({ error: message, ...(error instanceof RenderFailure ? { issues: error.issues } : {}) }));
-    if (!process.exitCode) process.exitCode = 1;
+    if (json) console.log(JSON.stringify({ ok: false, error: message, code, ...(error instanceof RenderFailure ? { issues: error.issues } : {}) }));
+    if (!process.exitCode) process.exitCode = exitCode;
   }
 }

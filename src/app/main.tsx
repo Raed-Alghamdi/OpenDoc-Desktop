@@ -152,6 +152,7 @@ function App() {
     requestAbort.current = new AbortController();
     void refresh();
     let events: WebSocket;
+    let stopDesktop: (() => void) | undefined;
     let stopped = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let reconnectDelay = 500;
@@ -173,10 +174,15 @@ function App() {
         reconnectDelay = Math.min(reconnectDelay * 2, 5_000);
       };
     };
-    connect();
+    // The desktop app pushes changes through its preload bridge, so it needs no socket.
+    const desktop = (window as { opendocDesktop?: { onChange(listener: () => void): () => void } }).opendocDesktop;
+    if (desktop) {
+      live.current = true; setConnected(true);
+      stopDesktop = desktop.onChange(() => { if (stopped) return; clearTimeout(refreshTimer); refreshTimer = setTimeout(() => void refresh(), 80); });
+    } else connect();
     const change = () => setCurrent(route());
     window.addEventListener("hashchange", change);
-    return () => { stopped = true; clearTimeout(reconnectTimer); events.close(); clearTimeout(refreshTimer); clearTimeout(retryTimer.current); requestAbort.current?.abort(); window.removeEventListener("hashchange", change); };
+    return () => { stopped = true; clearTimeout(reconnectTimer); events?.close(); stopDesktop?.(); clearTimeout(refreshTimer); clearTimeout(retryTimer.current); requestAbort.current?.abort(); window.removeEventListener("hashchange", change); };
   }, [refresh]);
   const activeSummary = current.view === "document" ? documents.find(document => document.id === current.id) : undefined;
   const [detail, setDetail] = useState<{ key: string; state: DocumentState }>();

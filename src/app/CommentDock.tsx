@@ -143,7 +143,7 @@ export function CommentDock({
           {places.map((place, index) => <li key={index}>
             <Button static className="comment-place" disabled={!place.canJump || busy} onClick={() => onJump(comment, place.target)}
               aria-label={place.page !== undefined ? `Go to ${pageLabel.toLowerCase()} ${place.page}, ${place.kind}${place.textChanged ? ', text changed' : ''}` : 'Place unavailable'}>
-              {place.page !== undefined ? <><span>{pageLabel} {place.page}</span><span aria-hidden="true">·</span><span className="comment-kind">{place.kind}</span></> : <span>Unavailable</span>}
+              {place.page !== undefined ? <><span>{pageLabel} {place.page}</span><span aria-hidden="true">·</span><span className="comment-kind">{place.kind}</span>{place.textChanged && <><span aria-hidden="true">·</span><span className="comment-anchor-changed">Text changed</span></>}</> : <span>Unavailable</span>}
             </Button>
           </li>)}
         </ul>}

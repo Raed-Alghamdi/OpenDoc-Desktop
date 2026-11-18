@@ -76,6 +76,26 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
+  # The agent plugin files (desktop/integrations/, stream I). Needs Node 24 only: no install. The check script arrives with that
+  # stream's branch; the step does nothing until the file exists, so remove the guard once it has merged.
+  integrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Check the plugin files
+        run: |
+          if [ -f desktop/integrations/check.mjs ]; then
+            node desktop/integrations/check.mjs
+          else
+            echo "desktop/integrations/check.mjs is not here yet; skipped."
+          fi
+
   mac:
     strategy:
       fail-fast: false

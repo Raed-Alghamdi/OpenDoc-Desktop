@@ -151,3 +151,42 @@ test.describe('what changed, shown once', () => {
     } finally { await again.app.close(); }
   });
 });
+
+test.describe('what the updater refuses to follow', () => {
+  let feed;
+  test.beforeEach(async () => { feed = await startFeed(join(workDir, `feed-refuse-${Date.now()}`)); });
+  test.afterEach(async () => { await feed?.stop(); });
+
+  test('a download that is redirected to plain http is refused: the redirect is not followed, nothing is installed', async () => {
+    const deb = { name: 'opendoc-desktop_0.6.1-8_amd64.deb', bytes: fakePackage(50_000) };
+    await publish(feed, { version: '0.6.1', build: 8, files: [deb] });
+    await writeFile(join(feed.root, 'redirects.json'), JSON.stringify({ [`/generic/${deb.name}`]: `http://example.invalid/${deb.name}` }));
+    const tools = await fakeTools(['pkexec', 'dpkg', 'apt-get']);
+    const run = await updaterApp({ config: { updateFeed: feed.url }, resources: { 'package-type': 'deb' }, path: [tools.bin] });
+    try {
+      await run.app.firstWindow();
+      await waitFor(async () => /refused a redirect/.test(await run.updaterLog()), { what: 'the refused redirect in the updater log' });
+      expect(await run.updaterLog()).toMatch(/redirected to http:\/\/example\.invalid.*not https/);
+      expect(await menuLabels(run.app, ['Help'])).not.toContain('Restart to Update');
+      expect(await run.dialogs()).toEqual([]);
+      expect(await tools.calls('pkexec')).toEqual([]);
+      const asked = await feed.requests();
+      expect(asked.map(request => request.path.split('?')[0])).toEqual(['/generic/latest-linux.yml', `/generic/${deb.name}`]);
+      expect(asked.at(-1).status).toBe(302);
+    } finally { await run.app.close().catch(() => {}); }
+  });
+
+  test('a release whose file is named by an absolute address is not offered, and that address is never requested', async () => {
+    const deb = { name: 'opendoc-desktop_0.6.1-8_amd64.deb', bytes: fakePackage(50_000) };
+    await publish(feed, { version: '0.6.1', build: 8, files: [deb] });
+    const yml = join(feed.root, 'generic', 'latest-linux.yml');
+    await writeFile(yml, (await readFile(yml, 'utf8')).replace(`url: ${deb.name}`, `url: http://127.0.0.1:1/${deb.name}`));
+    const run = await updaterApp({ config: { updateFeed: feed.url }, resources: { 'package-type': 'deb' } });
+    try {
+      await run.app.firstWindow();
+      await waitFor(async () => /outside the feed/.test(await run.updaterLog()), { what: 'the reason in the updater log' });
+      expect(await run.dialogs()).toEqual([]);
+      expect((await feed.requests()).map(request => request.path.split('?')[0])).toEqual(['/generic/latest-linux.yml']);
+    } finally { await run.app.close().catch(() => {}); }
+  });
+});

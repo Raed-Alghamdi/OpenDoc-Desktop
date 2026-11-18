@@ -13,6 +13,9 @@ export function metadataFiles(info) {
   return [];
 }
 
+/** A file address that is not a plain name or path next to the metadata: a scheme (http:, https:, file:) or a host (//host/...). */
+export const isAbsoluteUrl = url => /^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//') || url.includes('\\');
+
 const pathOf = url => { try { return decodeURIComponent(new URL(url, 'https://example.invalid/').pathname); } catch { return url; } };
 
 /**
@@ -22,6 +25,10 @@ const pathOf = url => { try { return decodeURIComponent(new URL(url, 'https://ex
 export function releaseFileFor(type, info, { arch = process.arch } = {}) {
   const extension = releaseExtension(type);
   if (!extension) return { ok: false, reason: 'unsupported-type', message: `Install type ${type} has no release file.` };
+  // electron-updater resolves each entry with new URL(url, feedBase), so an absolute address would be fetched from anywhere, over any
+  // scheme, and the checksum only proves the file is the one the metadata names. A release with any such entry is not offered.
+  const foreign = metadataFiles(info).find(file => isAbsoluteUrl(file.url));
+  if (foreign) return { ok: false, reason: 'foreign-url', message: `The release names a file by an address outside the feed (${String(foreign.url).slice(0, 80)}), so it is not offered.` };
   let candidates = metadataFiles(info).filter(file => pathOf(file.url).toLowerCase().endsWith(`.${extension.toLowerCase()}`));
   if (type === 'mac' && arch !== 'arm64') candidates = candidates.filter(file => !pathOf(file.url).includes('arm64'));
   if (!candidates.length) return { ok: false, reason: 'no-file', message: `The release lists no .${extension} file for this install.` };

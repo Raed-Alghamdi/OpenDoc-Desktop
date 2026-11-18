@@ -12,6 +12,8 @@ It serves two layouts from one root folder:
   /api/v3/repos/<owner>/<repo>/releases/latest      -> {"tag_name": ...} (the tag named in <root>/LATEST)
   /<owner>/<repo>/releases/download/<tag>/<file>    -> <root>/tags/<tag>/<file>
 
+A <root>/redirects.json of {"/request/path": "location"} answers those paths with a 302 to the location (to test what the app does with a redirect).
+
 Range requests work (one range or several, as electron-updater's differential AppImage download sends). Every request is appended to
 <root>/requests.log as one JSON line with the bytes sent, so a test can show what the app asked for and what it did not.
 """
@@ -88,6 +90,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split('?')[0]
+        redirects_file = os.path.join(ROOT, 'redirects.json')
+        redirects = json.load(open(redirects_file)) if os.path.exists(redirects_file) else {}
+        if path in redirects:
+            self.send_response(302)
+            self.send_header('Location', redirects[path])
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            self.sent = 0
+            return self.record(302)
         tags_dir = os.path.join(ROOT, 'tags')
         latest_file = os.path.join(ROOT, 'LATEST')
         latest = open(latest_file).read().strip() if os.path.exists(latest_file) else None

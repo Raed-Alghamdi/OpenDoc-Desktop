@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { openExternal } from '../session-policy.mjs';
 import { createUpdaterClass } from './classes.mjs';
 import { UpdateController } from './controller.mjs';
+import { isLoopbackHost } from './feed.mjs';
+import { guardRedirects } from './http-guard.mjs';
 
 /**
  * Environment variables that tests and development builds read.
@@ -69,7 +71,10 @@ export function createUpdates({ config, getVersion, getBuild, parent, onChange, 
     createUpdater: (type, { feed, logger }) => {
       const Updater = createUpdaterClass(type, { getBuild: () => getBuild() ?? 0 });
       const updater = new Updater(null, new VersionedAppAdapter(getVersion()));
-      updater.httpExecutor = new ElectronHttpExecutor((authInfo, callback) => updater.emit('login', authInfo, callback));
+      // Redirects stay on https (loopback http only for a loopback feed), for the metadata and for every download.
+      const loopbackFeed = Boolean(feed) && isLoopbackHost(new URL(feed.url ?? `${feed.protocol ?? 'https'}://${feed.host ?? 'github.com'}`).hostname);
+      const GuardedExecutor = guardRedirects(ElectronHttpExecutor, { loopbackFeed: () => loopbackFeed, log: line => logger.warn(line) });
+      updater.httpExecutor = new GuardedExecutor((authInfo, callback) => updater.emit('login', authInfo, callback));
       updater.logger = logger;
       updater.forceDevUpdateConfig = !app.isPackaged; // a test switch on a development Electron
       if (testResources) updater.updateConfigPath = join(testResources, 'app-update.yml'); // before setFeedURL: the setter clears the client

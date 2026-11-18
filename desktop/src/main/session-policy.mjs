@@ -75,7 +75,9 @@ export function applySessionPolicy(ses, workspace) {
       return new Response('The OpenDoc service failed to answer.', { status: 500 });
     }
     const headers = new Headers(response.headers);
-    headers.set('Content-Security-Policy', contentSecurityPolicy());
+    // The app's policy is added next to the service's own (for example default-src 'none'; sandbox on SVG assets). Several
+    // policies all apply, and the stricter one wins, so the service's policy is never replaced. Other headers pass through.
+    headers.append('Content-Security-Policy', contentSecurityPolicy());
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   };
   // One handler for the app's scheme: app://shell is the shell's own pages, app://opendoc is the service. Any other host is refused.

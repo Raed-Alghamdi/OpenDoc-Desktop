@@ -35,7 +35,7 @@ export function guardAllContents(allowedOrigins) {
     contents.on('will-attach-webview', event => event.preventDefault());
 
     const navigation = (event, url) => {
-      const verdict = classifyNavigation(url, allowedOrigins());
+      const verdict = classifyNavigation(url, allowedOrigins(), contents.getURL());
       if (verdict === 'allow') return;
       event.preventDefault();
       if (verdict === 'external') openExternal(url);

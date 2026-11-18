@@ -34,7 +34,7 @@ export function contentSecurityPolicy() {
 }
 
 /** The policy for the app's own pages (workspace picker, crash screen). */
-export const shellContentSecurityPolicy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+export const shellContentSecurityPolicy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; worker-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 export function isShellUrl(value) {
   const url = parseUrl(value);
@@ -47,13 +47,17 @@ export function isWebLink(value) {
 }
 
 /**
- * A navigation inside a window: `allow` for the app's own origin and its own pages, `external` for a web link
- * (the system browser opens it), `deny` for everything else (file:, data:, javascript:, other app hosts).
+ * A navigation a page starts inside a window (the main process's own loadURL never comes here): `allow` for the
+ * workspace's own address, and for the app's own pages only when the page is itself one of them (so a link in the
+ * workspace page cannot turn the window into the picker, which has calls to the main process); `external` for a web
+ * link (the system browser opens it); `deny` for everything else (file:, data:, javascript:, other app hosts).
+ * `from` is the address of the page the navigation starts from.
  */
-export function classifyNavigation(value, origins) {
+export function classifyNavigation(value, origins, from = '') {
   const url = parseUrl(value);
   if (!url) return 'deny';
-  if (origins.includes(originOf(value)) || isShellUrl(value)) return 'allow';
+  if (isShellUrl(value)) return isShellUrl(from) ? 'allow' : 'deny';
+  if (origins.includes(originOf(value))) return 'allow';
   return webSchemes.has(url.protocol) ? 'external' : 'deny';
 }
 

@@ -13,12 +13,22 @@ test('the origin of an app address is app://host (URL.origin says null for it)',
 
 test('navigation stays on the app origin; web links go out; everything else is refused', () => {
   assert.equal(classifyNavigation(`${origin}/#library`, [origin]), 'allow');
-  assert.equal(classifyNavigation('app://shell/picker.html', [origin]), 'allow');
+  assert.equal(classifyNavigation('app://shell/picker.html', [origin], 'app://shell/picker.html'), 'allow'); // shell pages link to each other
   assert.equal(classifyNavigation('https://example.com/', [origin]), 'external');
   assert.equal(classifyNavigation('mailto:someone@example.com', [origin]), 'external');
   assert.equal(classifyNavigation('http://127.0.0.1:9999/', [origin]), 'external');
   assert.equal(classifyNavigation('app://opendoc/', []), 'deny'); // no workspace is open
   for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'data:text/html,hi', 'app://other/x', 'not a url', 'ftp://example.com/']) assert.equal(classifyNavigation(url, [origin]), 'deny', url);
+});
+
+test('the shell\'s own pages cannot be navigated to from the OpenDoc page, a file window or a blank page', () => {
+  for (const from of [`${origin}/`, `${origin}/#library`, `${origin}/api/exports/x/open`, 'about:blank', '', 'https://example.com/', 'app://other/x']) {
+    assert.equal(classifyNavigation('app://shell/picker.html', [origin], from), 'deny', `from ${from || '(none)'}`);
+    assert.equal(classifyNavigation('app://shell/crash.html', [origin], from), 'deny');
+    assert.equal(classifyNavigation('APP://SHELL/picker.html', [origin], from), 'deny');
+  }
+  assert.equal(classifyNavigation('app://shell/picker.html', [origin]), 'deny'); // no page given: refused
+  assert.equal(classifyNavigation(`${origin}/#library`, [origin], `${origin}/`), 'allow'); // the page's own navigation is unchanged
 });
 
 test('window.open: only files the service serves open in an app window', () => {

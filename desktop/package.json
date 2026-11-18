@@ -1,0 +1,21 @@
+{
+  "name": "opendoc-desktop",
+  "productName": "opendoc-desktop",
+  "version": "0.6.1",
+  "private": true,
+  "description": "A self-contained desktop app for OpenDoc on Linux and macOS, built on the original OpenDoc project.",
+  "license": "MIT",
+  "type": "module",
+  "homepage": "https://github.com/RyanYahya/OpenDoc#readme",
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "electron": "45.3.3",
+    "electron-builder": "26.18.1"
+  }
+}

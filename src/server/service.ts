@@ -75,7 +75,11 @@ async function body(req: IncomingMessage, limit = 32_000) {
   return value;
 }
 
-/** One workspace's service. Workspace code (themes, documents) runs in this process, so its working directory must be `root`. */
+/**
+ * One workspace's service: every route, the source watcher, history and renders. Importing this module starts nothing;
+ * the caller owns the transport (an HTTP listener, or the desktop app's request channel) and the process.
+ * Workspace code (themes, documents) runs in this process, so its working directory must be `root`.
+ */
 export async function createOpenDocService(options: { root: string; production: boolean; client?: Handler }): Promise<OpenDocService> {
   const { root, production } = options;
   const workspace = new Workspace(root);
@@ -101,9 +105,11 @@ export async function createOpenDocService(options: { root: string; production: 
     try {
       const url = new URL(req.url ?? '/', 'http://localhost');
       if (!url.pathname.startsWith('/api/')) { await client(req, res); return; }
+      // Write guard: every non-GET request needs the session token. Read-only mode adds its refusal here.
       if (!['GET', 'HEAD'].includes(req.method ?? 'GET') && req.headers['x-opendoc-token'] !== token) { json(res, { error: 'This write must come from the local OpenDoc session.' }, 403); return; }
       if (req.method === 'GET' && url.pathname === '/api/session') { json(res, { token }); return; }
       if (req.method === 'GET' && url.pathname === '/api/guides') { json(res, await readGuide(root, url.searchParams.get('path'))); return; }
+      // Pack routes (/api/packs/...) are hooked in here.
       if (await handleAssetRequest(root, assets, req, res, url, json, body, () => workspace.changed())) return;
       if (req.method === 'GET' && url.pathname === '/api/exports/capabilities') { json(res, { copyFile: canCopyFile }); return; }
       const exportRoute = url.pathname.match(/^\/api\/exports\/([a-f0-9-]+)(?:\/(download|open|reveal|copy|restore))?$/);
@@ -265,6 +271,7 @@ export async function createOpenDocService(options: { root: string; production: 
         // Stop older clients from reconnecting their HTTP-slot-consuming SSE stream.
         res.writeHead(204, { 'Cache-Control': 'no-store' }); res.end(); return;
       }
+      // Context route: the reader's selection is written to .opendoc/current.json.
       if (req.method === 'POST' && url.pathname === '/api/context') {
         const value = await body(req);
         if (value.documentId !== null && !workspace.states.has(value.documentId)) throw new Error('Unknown document.');
@@ -357,6 +364,7 @@ export async function createOpenDocService(options: { root: string; production: 
         }
         json(res, { error: 'Not found.' }, 404); return;
       }
+      // Comment routes live in the block below (the `comments` action), after the document lookup.
       const match = url.pathname.match(/^\/api\/documents\/([^/]+)\/(pdf|cover|export|comments)(?:\/([^/]+)(?:\/(restore))?)?$/);
       if (!match || !validId(match[1])) { json(res, { error: 'Not found.' }, 404); return; }
       const [, id, action, commentId, commentAction] = match;
@@ -430,6 +438,7 @@ export async function createOpenDocService(options: { root: string; production: 
   }
 
   workspace.on('change', () => { materialsVersion++; });
+  // One source watcher feeds the catalogs, history and the workspace. Pack installs (P1) pause and resume it from here.
   const watcher = watch([...new Set([root, resolve(applicationRoot, 'src'), resolve(applicationRoot, 'package.json'), resolve(applicationRoot, 'pnpm-lock.yaml'), resolve(applicationRoot, 'tsconfig.workspace.json')])], { ignoreInitial: true, ignored: path => ignoredByWatcher(applicationRoot, root, path) });
   watcher.on('all', (_event, path) => {
     if (relative(root, path) === 'projects.json') {

@@ -47,10 +47,16 @@ if (!production) {
   client = (req, res) => vite!.middlewares(req, res);
 }
 service = await createOpenDocService({ root, production, client });
-while (true) {
-  try {
-    await new Promise<void>((accept, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', () => { server.off('error', reject); accept(); }); }); break;
-  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE' || process.env.OPENDOC_PORT || port >= 4320) throw error; port++; }
+try {
+  while (true) {
+    try {
+      await new Promise<void>((accept, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', () => { server.off('error', reject); accept(); }); }); break;
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE' || process.env.OPENDOC_PORT || port >= 4320) throw error; port++; }
+  }
+} catch (error) {
+  // The service is already watching and recording history; do not leave it running without a listener.
+  await Promise.allSettled([service.close(), vite?.close()]);
+  throw error;
 }
 const address = server.address();
 if (address && typeof address === 'object') port = address.port;

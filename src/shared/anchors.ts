@@ -1,5 +1,5 @@
-import { getBlock, type Comment, type RenderArtifact } from './types';
-import type { DocumentSelection, TextAnchor, TextTarget } from './selection';
+import { getBlock, type Comment, type CommentTarget, type RenderArtifact } from './types';
+import { selectionListError, type DocumentSelection, type TextAnchor, type TextTarget } from './selection';
 
 export function getTextTarget(artifact: RenderArtifact | null | undefined, id: string | null | undefined): TextTarget | undefined {
   return typeof id === 'string' ? artifact?.textTargets?.find(target => target.id === id) : undefined;
@@ -78,7 +78,7 @@ export interface ResolvedCommentAnchor {
 }
 
 /** Reflow does not alter a target. Content changes require an unambiguous quote. */
-export function resolveCommentAnchor(artifact: RenderArtifact | null | undefined, comment: Pick<Comment, 'blockId' | 'anchor' | 'quote'>): ResolvedCommentAnchor {
+function resolveTarget(artifact: RenderArtifact | null | undefined, comment: CommentTarget): ResolvedCommentAnchor {
   if (!getBlock(artifact, comment.blockId)) return { status: 'missing' };
   const page = (artifact?.pages.findIndex(item => item.fragments.some(fragment => fragment.id === comment.blockId)) ?? -1) + 1;
   const blockSelection: DocumentSelection = { blockId: comment.blockId, page: Math.max(1, page), quote: comment.quote, renderHash: artifact?.hash };
@@ -95,4 +95,55 @@ export function resolveCommentAnchor(artifact: RenderArtifact | null | undefined
   const end = start + anchor.quote.length;
   const line = target.lines.find(item => item.start <= start && item.end > start);
   return { status: 'attached', selection: { ...blockSelection, targetId: target.id, start, end, quote: anchor.quote, page: line?.page ?? blockSelection.page } };
+}
+
+/** Every place a comment is about: its `targets`, or the one place its top-level fields describe. */
+export function commentTargets(comment: Pick<Comment, 'blockId' | 'quote' | 'anchor' | 'targets'>): CommentTarget[] {
+  return comment.targets?.length ? comment.targets : [{ blockId: comment.blockId, quote: comment.quote, ...(comment.anchor ? { anchor: comment.anchor } : {}) }];
+}
+
+export interface ResolvedCommentTarget extends CommentTarget {
+  anchorStatus: ResolvedCommentAnchor['status'];
+  targetAvailable: boolean;
+  selection?: DocumentSelection;
+}
+
+/** Each place resolves on its own: removing one block leaves the others attached. */
+export function resolveCommentTargets(artifact: RenderArtifact | null | undefined, comment: Pick<Comment, 'blockId' | 'quote' | 'anchor' | 'targets'>): ResolvedCommentTarget[] {
+  return commentTargets(comment).map(target => {
+    const { status, selection } = resolveTarget(artifact, target);
+    return { ...target, anchorStatus: status, targetAvailable: status !== 'missing', selection };
+  });
+}
+
+const severity = { attached: 0, changed: 1, missing: 2 } as const;
+export function worstAnchorStatus(statuses: ResolvedCommentAnchor['status'][]): ResolvedCommentAnchor['status'] {
+  return statuses.reduce((worst, status) => severity[status] > severity[worst] ? status : worst, 'attached' as ResolvedCommentAnchor['status']);
+}
+
+/**
+ * The comment's own status is the worst of its places; its `selection` is the first place's, as
+ * the top-level fields are. A comment without `targets` resolves exactly as it always has.
+ */
+export function resolveCommentAnchor(artifact: RenderArtifact | null | undefined, comment: Pick<Comment, 'blockId' | 'anchor' | 'quote' | 'targets'>): ResolvedCommentAnchor {
+  if (!comment.targets?.length) return resolveTarget(artifact, { blockId: comment.blockId, quote: comment.quote, anchor: comment.anchor });
+  const places = resolveCommentTargets(artifact, comment);
+  return { status: worstAnchorStatus(places.map(place => place.anchorStatus)), selection: places[0].selection };
+}
+
+/**
+ * Turn a selection list into the places of a new comment against the current render. The list
+ * must follow the selection rules, and every place must still exist; a phrase that no longer
+ * matches is refused so the comment never attaches to a guessed occurrence.
+ */
+export function commentTargetsForSelections(artifact: RenderArtifact | null | undefined, selections: DocumentSelection[]): (CommentTarget & { exactQuote: boolean })[] {
+  const problem = selectionListError(selections);
+  if (problem) throw new Error(problem);
+  return selections.map(selection => {
+    const block = getBlock(artifact, selection.blockId);
+    if (!block) throw new Error('The selected block is no longer available.');
+    const anchor = anchorForSelection(artifact, selection);
+    if (selection.targetId && !anchor && getTextTarget(artifact, selection.targetId)?.stable !== false) throw new Error('Select the phrase again before commenting.');
+    return { blockId: block.id, quote: selection.quote ?? block.text, ...(anchor ? { anchor } : {}), exactQuote: !!selection.quote };
+  });
 }

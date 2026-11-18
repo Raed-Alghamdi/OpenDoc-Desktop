@@ -146,3 +146,89 @@ test('feedback recovers abandoned locks from interrupted and dead sessions', asy
     assert.equal((await readComments(f.root, 'proof')).length, 3);
   } finally { await f.cleanup(); }
 });
+
+const phrase = (targetId: string, quote: string) => ({ targetId, start: 3, end: 3 + quote.length, quote, prefix: 'An ', suffix: ' follows.' });
+
+test('a comment on one place is stored exactly as before, with no targets field', async () => {
+  const f = await fixture();
+  try {
+    const [single] = await addComment(f.root, 'proof', { blockId: 'target', text: 'One place.', quote: 'Paragraph' });
+    const rows = await addComment(f.root, 'proof', { text: 'A list of one place.', targets: [{ blockId: 'title', quote: 'Heading' }] });
+    assert.equal('targets' in single, false);
+    assert.deepEqual(Object.keys(single), ['id', 'blockId', 'text', 'quote', 'status', 'createdAt', 'updatedAt', 'version', 'history']);
+    assert.equal(rows.length, 2);
+    assert.equal('targets' in rows[1], false, 'A list of one place is the single-place shape.');
+    const file = resolve(f.root, 'documents/proof/comments.json');
+    const before = await readFile(file, 'utf8');
+    await changeComment(f.root, 'proof', single.id, 'resolved', 1);
+    await changeComment(f.root, 'proof', single.id, 'open', 2);
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).map((row: { targets?: unknown }) => row.targets), [undefined, undefined]);
+    assert.equal(before.includes('targets'), false);
+  } finally { await f.cleanup(); }
+});
+
+test('a comment on three places round-trips and keeps them through every whole-comment change', async () => {
+  const f = await fixture();
+  try {
+    const quote = 'exact phrase';
+    const anchor = phrase('title:text', quote);
+    const places = [{ blockId: 'title', quote, anchor }, { blockId: 'target', quote: 'A stable paragraph' }, { blockId: 'last', quote: 'Closing line' }];
+    const rows = await addComment(f.root, 'proof', { text: 'Make these three agree.', targets: places });
+    const [made] = rows;
+    assert.deepEqual(made.targets, places);
+    assert.equal(made.blockId, 'title'); assert.equal(made.quote, quote); assert.deepEqual(made.anchor, anchor);
+    assert.deepEqual(await readComments(f.root, 'proof'), rows);
+    const file = resolve(f.root, 'documents/proof/comments.json');
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8'))[0].targets, places);
+
+    let [row] = await changeComment(f.root, 'proof', made.id, 'resolved', 1);
+    assert.equal(row.status, 'resolved'); assert.deepEqual(row.targets, places);
+    [row] = await changeComment(f.root, 'proof', made.id, 'open', 2);
+    [row] = await editComment(f.root, 'proof', made.id, 'Make them agree.', 3);
+    [row] = await deleteComment(f.root, 'proof', made.id, 4);
+    assert.equal(row.status, 'deleted'); assert.deepEqual(row.targets, places);
+    [row] = await restoreComment(f.root, 'proof', made.id, 5);
+    assert.equal(row.status, 'open'); assert.deepEqual(row.targets, places);
+    assert.deepEqual(row.history.map(event => event.action), ['created', 'resolved', 'reopened', 'edited', 'deleted', 'restored']);
+    assert.equal(row.version, 6);
+  } finally { await f.cleanup(); }
+});
+
+test('places are validated one by one and a block can be named only once', async () => {
+  const f = await fixture();
+  try {
+    const place = { blockId: 'target', quote: 'Paragraph' };
+    await assert.rejects(addComment(f.root, 'proof', { text: 'x', targets: [place, { ...place }] }), /once/);
+    await assert.rejects(addComment(f.root, 'proof', { text: 'x', targets: [place, { blockId: '', quote: 'q' }] }), /Select a document element/);
+    await assert.rejects(addComment(f.root, 'proof', { text: 'x', targets: [place, { blockId: 'title', quote: 7 as unknown as string }] }), /again before commenting/);
+    await assert.rejects(addComment(f.root, 'proof', { text: 'x', targets: [place, { blockId: 'title', quote: 'q', anchor: { ...phrase('title:text', 'q'), end: 99 } }] }), /phrase again/);
+    await assert.rejects(addComment(f.root, 'proof', { text: 'x', targets: [] }), /Select a document element/);
+    await assert.rejects(addComment(f.root, 'proof', { text: 'x', blockId: 'target', quote: 'q', targets: [place, { blockId: 'title', quote: 'q' }] }), /either one place/);
+    await assert.rejects(addComment(f.root, 'proof', { text: ' ', targets: [place, { blockId: 'title', quote: 'q' }] }), /between 1 and 8,000/);
+    assert.deepEqual(await readComments(f.root, 'proof'), [], 'A refused comment writes nothing.');
+    const long = 'w'.repeat(900);
+    const [row] = await addComment(f.root, 'proof', { text: 'Lengths.', targets: [{ blockId: 'target', quote: long }, { blockId: 'title', quote: long, exactQuote: true }] });
+    assert.equal(row.quote.length, 500);
+    assert.equal(row.targets![1].quote.length, 900, 'Each place keeps its own exact-quote choice.');
+  } finally { await f.cleanup(); }
+});
+
+test('saved targets that do not match the top-level fields are never silently rewritten', async () => {
+  const f = await fixture();
+  try {
+    const [comment] = await addComment(f.root, 'proof', { text: 'Keep this feedback.', targets: [{ blockId: 'target', quote: 'a' }, { blockId: 'title', quote: 'b' }] });
+    const file = resolve(f.root, 'documents/proof/comments.json');
+    for (const invalid of [
+      { ...comment, targets: [] }, { ...comment, targets: 'target' }, { ...comment, targets: [null, comment.targets![1]] },
+      { ...comment, targets: [{ ...comment.targets![0], blockId: 'other' }, comment.targets![1]] },
+      { ...comment, targets: [{ ...comment.targets![0], quote: 'changed' }, comment.targets![1]] },
+      { ...comment, targets: [comment.targets![0], { blockId: '', quote: 'b' }] },
+      { ...comment, targets: [comment.targets![0], { blockId: 'title', quote: 'b', anchor: { targetId: 'x' } }] },
+    ]) {
+      const original = JSON.stringify([invalid]);
+      await writeFile(file, original);
+      await assert.rejects(changeComment(f.root, 'proof', comment.id, 'resolved', 1), /Invalid comments file/);
+      assert.equal(await readFile(file, 'utf8'), original);
+    }
+  } finally { await f.cleanup(); }
+});

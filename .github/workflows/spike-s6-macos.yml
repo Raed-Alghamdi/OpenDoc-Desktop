@@ -62,6 +62,7 @@ jobs:
           done
 
       - name: Updates on macOS (Applications, Downloads, App Management, Gatekeeper)
+        timeout-minutes: 35
         shell: bash
         run: desktop/scripts/spike-s6-mac-test.sh ${{ matrix.arch }}
 

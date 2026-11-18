@@ -66,7 +66,14 @@ run_case() { # $1 label, $2 bundle path, $3 how (open|direct), $4 action, $5 sec
   local log="$OUT/$label.log"; rm -f "$log"
   set_test_config "$action" "$log"
   say ""; say "#### $label ($how, action $action)"
-  if [ "$how" = open ]; then open -n "$app" --args --update-run; say "open exit code: $?"
+  if [ "$how" = open ]; then
+    # A quarantined app makes `open` wait for Gatekeeper's dialog, which nobody clicks on a runner: cap it and record that.
+    tmo 30 open -n "$app" --args --update-run; local rc=$?
+    if [ "$rc" = 142 ]; then
+      say "open did not return within 30 s (exit 142): Gatekeeper's dialog is waiting for a click"
+      LINES_MAX=12 block bash -c "log show --last 2m --style compact --predicate 'process == \"syspolicyd\" OR process == \"CoreServicesUIAgent\"' 2>/dev/null | grep -iE 'opendoc|assess|quarantin|translocat|notari|malware|deny|allow' | tail -12 | cut -c1-260"
+      pkill -x CoreServicesUIAgent 2>/dev/null; sleep 2 # dismiss the dialog so the next case starts clean
+    else say "open exit code: $rc"; fi
   else ( "$app/Contents/MacOS/opendoc-desktop" --update-run >/dev/null 2>&1 & ) ; fi
   if [ "$action" = restart ]; then
     wait_for "$log" '"event":"app-started".*"build":2|"event":"install-failed"|"event":"check-failed"|"event":"download-failed"' "$wait_s" || say "(end state not reached within ${wait_s}s)"

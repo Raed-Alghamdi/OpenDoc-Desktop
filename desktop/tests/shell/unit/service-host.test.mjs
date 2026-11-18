@@ -179,3 +179,50 @@ test('an upload the service reads slowly sends credit only for what it has read'
   await done;
   assert.ok(bodyWindow >= 1024 * 1024);
 });
+
+test('an upload of three windows read with readable and read(n), not data events, gets its credit back and arrives exactly', async () => {
+  const piece = 256 * 1024;
+  const total = 3 * bodyWindow;
+  const source = Buffer.alloc(total);
+  for (let at = 0; at < total; at++) source[at] = (at * 31 + (at >> 8)) & 255;
+  let received = Buffer.alloc(0);
+  const { request, host, sent } = channel({
+    ...listeners(),
+    async handle(req, res) {
+      const parts = [];
+      await new Promise((accept, reject) => {
+        req.on('readable', () => { for (let part; (part = req.read(70001)) !== null;) parts.push(part); });
+        req.on('end', accept);
+        req.on('error', reject);
+      });
+      received = Buffer.concat(parts);
+      res.writeHead(200);
+      res.end('ok');
+    },
+  });
+  const credited = () => sent.filter(item => item.t === 'body-credit').reduce((sum, item) => sum + item.bytes, 0);
+  const done = request(9, 'POST', '/api/assets/logo', {}, true);
+  // The main process under the rules: never more than one window of the upload that the host has not acknowledged.
+  let outstanding = 0; let waits = 0; let peak = 0;
+  for (let at = 0; at < total; at += piece) {
+    const data = source.subarray(at, at + piece);
+    const until = Date.now() + 5000;
+    while (outstanding + data.length > bodyWindow) {
+      assert.ok(Date.now() < until, 'credit came back for what the service read');
+      waits++;
+      await new Promise(accept => setTimeout(accept, 2));
+      outstanding = at - credited();
+    }
+    await host.receive({ t: 'body', id: 9, data: new Uint8Array(data) });
+    outstanding = at + data.length - credited();
+    peak = Math.max(peak, outstanding);
+  }
+  await host.receive({ t: 'body-end', id: 9 });
+  await done;
+  assert.ok(waits > 0, 'the sender had to wait for credit at least once (3 windows do not fit in one)');
+  assert.ok(peak <= bodyWindow, 'never more than a window unacknowledged');
+  assert.equal(received.length, total);
+  assert.equal(Buffer.compare(received, source), 0, 'the bytes arrive exactly');
+  // What the service reads after the end of the body is not credited (nobody is waiting for it), so the tail is at most one window.
+  assert.ok(credited() >= total - bodyWindow && credited() <= total, 'credit was returned for what was read while the upload ran');
+});

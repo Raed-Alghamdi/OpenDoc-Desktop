@@ -21,6 +21,10 @@ import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 const listeners = new Set();
 let written = 0; let upload = 'none';
+// A broken host, as far as the main process can tell: tamper rewrites what the host sends for one request, then removes itself.
+const realSend = process.send.bind(process);
+let tamper = null;
+process.send = (message, ...rest) => { const out = tamper ? tamper(message) : message; if (message.t === 'end') tamper = null; return realSend(out, ...rest); };
 const pdf = Buffer.from('0123456789'.repeat(100));
 export async function createOpenDocService({ root, production }) {
   if (process.env.FAKE_SERVICE_FAIL) throw new Error('the service could not start: ' + process.env.FAKE_SERVICE_FAIL);
@@ -49,6 +53,14 @@ export async function createOpenDocService({ root, production }) {
         case '/big': { const piece = Buffer.alloc(1024 * 1024, 7); res.writeHead(200); for (let i = 0; i < 12; i++) { if (!res.write(piece)) await new Promise(accept => res.once('drain', accept)); } res.end(); return; }
         case '/stream': { const piece = Buffer.alloc(1024 * 1024, 9); res.writeHead(200); for (let i = 0; i < 400; i++) { written += piece.length; if (!res.write(piece)) await new Promise(accept => res.once('drain', accept)); if (res.destroyed) return; } res.end(); return; }
         case '/progress': return json({ written });
+        case '/tamper-status-text': tamper = m => m.t === 'head' ? { ...m, status: '200' } : m; res.writeHead(200); res.end('x'); return;
+        case '/tamper-header-name': tamper = m => m.t === 'head' ? { ...m, headers: [['bad header name', 'x']] } : m; res.writeHead(200); res.end('x'); return;
+        case '/tamper-header-value': tamper = m => m.t === 'head' ? { ...m, headers: [['x-ok', 'a\\r\\nSet-Cookie: x=1']] } : m; res.writeHead(200); res.end('x'); return;
+        case '/tamper-many-headers': tamper = m => m.t === 'head' ? { ...m, headers: Array.from({ length: 500 }, (_, i) => ['x-h' + i, 'v']) } : m; res.writeHead(200); res.end('x'); return;
+        case '/tamper-big-chunk': tamper = m => m.t === 'chunk' ? { ...m, data: new Uint8Array(2 * 1024 * 1024) } : m; res.writeHead(200); res.end('x'); return;
+        case '/tamper-chunk-type': tamper = m => m.t === 'chunk' ? { ...m, data: 'not bytes' } : m; res.writeHead(200); res.end('x'); return;
+        case '/tamper-second-head': tamper = m => m.t === 'chunk' ? { t: 'head', id: m.id, status: 200, headers: [] } : m; res.writeHead(200); res.end('x'); return;
+        case '/tamper-type': tamper = m => m.t === 'head' ? { ...m, t: ['head'] } : m; res.writeHead(200); res.end('x'); return;
         case '/badstatus': res.writeHead(700); res.end('x'); return;
         case '/hold-upload': { let size = 0; upload = 'reading'; req.on('data', chunk => { size += chunk.length; }); req.on('end', () => { upload = 'ended ' + size; res.writeHead(200); res.end('done'); }); req.on('close', () => { if (!upload.startsWith('ended')) upload = 'cut ' + size; }); return; }
         case '/upload-state': return json({ upload });
@@ -271,6 +283,36 @@ test('an answer with a status the host should not send is a 502, not a crash, an
   } finally { await transport.stop(); }
 });
 
+// What a broken or compromised host can send, end to end: the page gets a 502 (before the answer began) or a failed body
+// (after it began), never a hang and never a short answer that looks whole, and the same host serves the next request.
+for (const [route, what] of [
+  ['/badstatus', 'a status of 700'],
+  ['/tamper-status-text', 'a status that is not a number'],
+  ['/tamper-header-name', 'a header name with a space'],
+  ['/tamper-header-value', 'a header value with a line break'],
+  ['/tamper-many-headers', 'five hundred headers'],
+  ['/tamper-big-chunk', 'a piece of the answer of 2 MiB'],
+  ['/tamper-chunk-type', 'a piece of the answer that is text'],
+  ['/tamper-second-head', 'a second set of headers'],
+  ['/tamper-type', 'a message type that is not text'],
+]) {
+  test(`the host sends ${what}: the page gets a 502 or a failed response, and the next request is served by the same host`, async () => {
+    const { transport } = await started();
+    try {
+      const pid = (await (await get(transport, '/cwd')).json()).pid;
+      const outcome = await (async () => {
+        const response = await get(transport, route);
+        if (response.status === 502) return 'a 502';
+        try { await response.arrayBuffer(); return `a ${response.status} that ended as whole`; } catch { return 'a failed response'; }
+      })();
+      assert.match(outcome, /^(a 502|a failed response)$/, `got ${outcome}`);
+      assert.equal(transport.running, true, 'the host was not restarted for it');
+      assert.equal((await (await get(transport, '/cwd')).json()).pid, pid);
+      assert.equal(await transport.ping(), true);
+    } finally { await transport.stop(); }
+  });
+}
+
 test('an upload that is cut off midway reaches the service as a cut-off request, and the next request works', async () => {
   const { transport } = await started();
   try {
@@ -302,6 +344,20 @@ test('a request that ends early (the page cancels the response) stops the upload
     const seen = pushed;
     await pause(400);
     assert.ok(pushed - seen <= 3, 'the body is no longer read once the request is over');
+    assert.equal(await transport.ping(), true);
+  } finally { await transport.stop(); }
+});
+
+test('a request that is over before its upload is read does not leave the upload body locked', async () => {
+  const { transport } = await started();
+  try {
+    let cancelled = false;
+    const body = new ReadableStream({ pull(controller) { controller.enqueue(new Uint8Array(1024)); }, cancel() { cancelled = true; } });
+    const controller = new AbortController();
+    const pending = get(transport, '/hold-upload', { method: 'POST', body, duplex: 'half', signal: controller.signal });
+    controller.abort(); // before the request reached the host: nothing has taken a reader on the body yet
+    assert.equal((await pending.catch(() => ({ status: 500 }))).status >= 400, true);
+    assert.equal(await until(() => cancelled, 3000), true, 'the upload body is released, not left locked');
     assert.equal(await transport.ping(), true);
   } finally { await transport.stop(); }
 });

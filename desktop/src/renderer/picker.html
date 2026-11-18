@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>opendoc-desktop</title>
+<link rel="stylesheet" href="shell.css">
+</head>
+<body>
+<main>
+  <h1>Choose a workspace</h1>
+  <p class="lede">A workspace is a folder that holds your documents, themes and templates. opendoc-desktop opens one at a time.</p>
+  <div class="actions">
+    <button id="open" class="primary" type="button">Open existing workspace&hellip;</button>
+    <button id="create" type="button">Create new workspace&hellip;</button>
+  </div>
+  <h2>Recent</h2>
+  <div id="recent"></div>
+  <div id="message" role="status" aria-live="polite"></div>
+</main>
+<script src="picker.js"></script>
+</body>
+</html>

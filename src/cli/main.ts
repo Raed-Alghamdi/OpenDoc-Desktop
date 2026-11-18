@@ -19,7 +19,7 @@ ${edition === 'headless'
   npx opendoc tags                  Set types, status, and tags; find work
   npx opendoc assets                Manage fonts, logos, and bindings
   npx opendoc media                 Manage document-owned media
-  npx opendoc comments              Add, resolve, delete, and restore feedback
+  npx opendoc comments              Add, edit, resolve, delete, and restore feedback
   npx opendoc history               Review and restore earlier versions
   npx opendoc packs                 Share or install themes and templates
   npx opendoc export <id...>         Export PDF or editable PowerPoint

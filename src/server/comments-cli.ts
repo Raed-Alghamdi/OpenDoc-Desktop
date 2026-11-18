@@ -1,4 +1,4 @@
-import { readComments, changeComment, addComment, deleteComment, restoreComment, recentlyDeletedComments } from './comments';
+import { readComments, changeComment, editComment, addComment, deleteComment, restoreComment, recentlyDeletedComments } from './comments';
 import { readJSON } from './files';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -16,11 +16,14 @@ const usage = `Usage: npx opendoc comments list <doc> [--anchors | --deleted] [-
        npx opendoc comments delete <doc> <comment-id> [--json]
        npx opendoc comments restore <doc> <comment-id> [--json]
        npx opendoc comments add <doc> <block-id> "text" [--phrase "exact words" [--target <field-id>]] [--json]
+       npx opendoc comments edit <doc> <comment-id> "text" [--expected-version N] [--json]
 list includes deleted comments with their status; --deleted lists only those deleted in the last
 90 days, newest first, as Recently deleted does in the app. --anchors checks each comment against
 the current render and adds anchorStatus (attached, changed, or missing) and targetAvailable.
 add --phrase anchors the comment to one occurrence of those words in the block, such as one
-table cell; --target names the text field when the words appear in more than one.`;
+table cell; --target names the text field when the words appear in more than one.
+edit replaces the text of an open or resolved comment and keeps the earlier text in its history;
+--expected-version N refuses the edit when the comment is no longer at that version.`;
 
 async function request<T>(origin: string, path: string, init?: RequestInit): Promise<T> {
   let response: Response;
@@ -67,17 +70,18 @@ const shown = (comments: Comment[]) => comments.filter(comment => comment.status
 export async function runCommentsCli(args: string[], root = process.cwd(), options: { mode?: 'auto' | 'direct' } = {}): Promise<void> {
   const { values, positionals } = parseArgs({ args: args[0] === '--' ? args.slice(1) : args, allowPositionals: true, options: {
     json: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
-    phrase: { type: 'string' }, target: { type: 'string' }, anchors: { type: 'boolean' }, deleted: { type: 'boolean' },
+    phrase: { type: 'string' }, target: { type: 'string' }, 'expected-version': { type: 'string' }, anchors: { type: 'boolean' }, deleted: { type: 'boolean' },
   } });
   if (values.help) { console.log(values.json ? JSON.stringify({ usage }, null, 2) : usage); return; }
   const [action, doc, target, ...words] = positionals;
   if (!doc || !validId(doc)) throw new Error(usage);
   if ((values.phrase !== undefined || values.target !== undefined) && action !== 'add') throw new Error(`--phrase and --target belong to comments add.\n${usage}`);
   if (values.target !== undefined && values.phrase === undefined) throw new Error('Use --target with --phrase.');
+  if (values['expected-version'] !== undefined && action !== 'edit') throw new Error(`--expected-version belongs to comments edit.\n${usage}`);
   if ((values.anchors || values.deleted) && action !== 'list') throw new Error(`--anchors and --deleted belong to comments list.\n${usage}`);
   if (values.anchors && values.deleted) throw new Error('Choose --anchors or --deleted, not both.');
   // Agents read and resolve feedback around their edits; keep those edits as their own version.
-  if (['list', 'resolve', 'reopen', 'delete', 'restore', 'add'].includes(action)) await recordAgentChanges(root, [doc]);
+  if (['list', 'resolve', 'reopen', 'delete', 'restore', 'add', 'edit'].includes(action)) await recordAgentChanges(root, [doc]);
   if (action === 'list' && positionals.length === 2) {
     const comments = await readComments(root, doc);
     if (values.deleted) console.log(JSON.stringify(recentlyDeletedComments(comments), null, 2));
@@ -96,6 +100,14 @@ export async function runCommentsCli(args: string[], root = process.cwd(), optio
     if (!comment) throw new Error('Comment not found.');
     const comments = await changeComment(root, doc, target, action === 'resolve' ? 'resolved' : 'open', comment.version);
     console.log(values.json ? JSON.stringify(comments.find(c => c.id === target), null, 2) : `${action === 'resolve' ? 'Resolved' : 'Reopened'} ${target}`);
+  } else if (action === 'edit' && target && words.length) {
+    // A deleted comment cannot be edited; it has to be restored first.
+    const comment = (await readComments(root, doc)).find(c => c.id === target && c.status !== 'deleted');
+    if (!comment) throw new Error('Comment not found.');
+    const expected = values['expected-version'];
+    if (expected !== undefined && !/^[1-9]\d{0,9}$/.test(expected)) throw new Error('Use --expected-version with a whole comment version, such as 2.');
+    const comments = await editComment(root, doc, target, words.join(' '), expected === undefined ? comment.version : Number(expected));
+    console.log(values.json ? JSON.stringify(comments.find(c => c.id === target), null, 2) : `Edited ${target}`);
   } else if (action === 'delete' && target && positionals.length === 3) {
     // Deletion keeps the record and its history, so the comment stays restorable for 90 days.
     const comment = (await readComments(root, doc)).find(c => c.id === target && c.status !== 'deleted');

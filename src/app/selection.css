@@ -102,3 +102,12 @@
 }
 
 .selection-bar .selection-count { padding: 0 10px 0 8px; font-size: var(--label-size); font-weight: 600; color: var(--accent-ink); white-space: nowrap; }
+
+/* Shift-drag box selection. The box lives inside .sheets so it scrolls with the pages. */
+.sheets { position: relative; }
+.marquee-box { position: absolute; z-index: 6; pointer-events: none; box-sizing: border-box; border: 1px solid var(--inspection-line); border-radius: 2px; background: var(--inspection-selected); }
+.marquee-box[hidden] { display: none; }
+.reader-scroll.marquee-active, .reader-scroll.marquee-active * { cursor: crosshair !important; user-select: none; -webkit-user-select: none; }
+@media (forced-colors: active) {
+  .marquee-box { border: 2px solid Highlight; background: transparent; }
+}

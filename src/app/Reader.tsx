@@ -25,6 +25,7 @@ import { useNotificationClearance } from "./notificationClearance";
 import { carryRange, isPhrase, phraseFromText, savedPhrase, type TextRange } from './phraseSelection';
 import { missingGlyphs, pageList } from "./missingGlyphs";
 import { pageSlices, type PageSlice } from "./pageSlices";
+import { useMarquee, type MarqueeHit } from "./useMarquee";
 import { sessionForDocument, sourceIdentity } from './editSession';
 import { readOpenEditor, recoverEditor, type EditorBaseline, type OpenEditorRecord } from './editorRecovery';
 import "./selection.css";
@@ -406,6 +407,20 @@ export function Reader({
     holdSelections(at >= 0 ? all.filter((_, index) => index !== at)
       : [...all, { blockId: block, page: pageNumber, revision: state.revision, renderHash: artifact?.hash }]);
   }
+  /** The selection a box drag started from; the box adds to it and Escape restores it. */
+  const marqueeBase = useRef<DocumentSelection[]>([]);
+  const sheetsElement = useRef<HTMLDivElement>(null);
+  const marqueeElement = useRef<HTMLDivElement>(null);
+  const marqueePointerDown = useMarquee({
+    sheets: sheetsElement, box: marqueeElement, artifact,
+    enabled: !editor && !composing && !editPending && !editError && !mutationPending.current,
+    onStart: () => { marqueeBase.current = selection ? [selection, ...additional] : []; },
+    onChange: (hits: MarqueeHit[] | null) => {
+      const base = marqueeBase.current;
+      holdSelections(hits ? [...base, ...hits.filter(hit => !base.some(item => item.blockId === hit.id))
+        .map(hit => ({ blockId: hit.id, page: hit.page, revision: state.revision, renderHash: artifact?.hash }))] : base);
+    },
+  });
   function holdSelection(next: DocumentSelection | null) {
     setAdditional([]);
     setSelection(next);
@@ -889,6 +904,7 @@ export function Reader({
             // Shift, Ctrl and Cmd add to the selection, so they must not clear it first.
             if (!editor && !mutationPending.current && !(event.shiftKey || event.ctrlKey || event.metaKey)) clearSelection();
           }}
+          onPointerDown={marqueePointerDown}
           onScroll={onScroll}
         >
           {pdfError && !pdf ? (
@@ -898,9 +914,11 @@ export function Reader({
             </div>
           ) : pdf ? (
             <div
+              ref={sheetsElement}
               className="sheets"
               style={{ minWidth: widestPage + pageGutter * 2 }}
             >
+              <div ref={marqueeElement} className="marquee-box" hidden aria-hidden="true" />
               {pages.map((p, i) => (
                 <section data-sheet={i + 1} key={i} className="sheet">
                   <div className="sheet-label">

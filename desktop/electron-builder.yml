@@ -1,8 +1,13 @@
+# Spike S6 adds `publish` (the update feed written to resources/app-update.yml) on top of the S4 config.
 # Spike S4: one config for every installer (plan 3.5, E5). The build number is fixed at 1 here (fpm --iteration, mac bundleVersion); E5 must set it per build.
 appId: io.github.ryanyahya.OpenDocDesktop
 productName: opendoc-desktop
 executableName: opendoc-desktop
 copyright: opendoc-desktop contributors. Built on OpenDoc, https://github.com/RyanYahya/OpenDoc
+# Placeholder feed for the spike. The real build points at the fork's GitHub releases (provider github), and the app can override it.
+publish:
+  - provider: generic
+    url: http://127.0.0.1:8099/generic/
 directories:
   output: dist
   buildResources: resources

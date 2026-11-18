@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { checkFeedUrl, createUpdater, currentBuild, installType, log as updateLog, macBundleState, testSettings } from './updater.mjs';
 
 const runtimeDir = app.isPackaged
   ? path.join(process.resourcesPath, 'runtime')
@@ -54,7 +55,43 @@ async function fuseProbe() {
   return { fileProtocol: file, cookie };
 }
 
+// Spike S6: drive the updater without a UI. The real app shows "Restart to update" where this picks an action.
+async function updateRun() {
+  const ts = testSettings();
+  const { kind, updater } = createUpdater({ stockMac: ts.action === 'stock' });
+  updateLog('start', { version: app.getVersion(), build: currentBuild(), type: kind.type, disabled: kind.disabled ?? null, execPath: process.execPath, appimage: process.env.APPIMAGE ?? null, feed: ts.url, action: ts.action, mac: process.platform === 'darwin' ? macBundleState() : undefined });
+  if (!updater) return app.quit();
+  const result = await updater.checkForUpdates().catch((e) => { updateLog('check-failed', { message: String(e.message).slice(0, 300) }); return null; });
+  updateLog('check-result', { available: result?.isUpdateAvailable ?? null, latest: result?.updateInfo?.version, latestBuild: result?.updateInfo?.build });
+  if (!result?.isUpdateAvailable) return app.quit();
+  const timer = setTimeout(() => { updateLog('timeout'); app.exit(3); }, ts.wait * 1000);
+  const ok = await result.downloadPromise.then(() => true, (e) => { updateLog('download-failed', { message: String(e.message).slice(0, 300) }); return false; });
+  clearTimeout(timer);
+  if (!ok) return app.quit();
+  updateLog('downloaded', { action: ts.action });
+  if (ts.action === 'quit') return app.quit(); // AppImage: the swap happens in the quit handler
+  if (ts.action === 'stock') { setTimeout(() => app.quit(), 20000); return undefined; } // macOS: electron-updater's own Squirrel.Mac install, give it time to fail or succeed
+  if (ts.action === 'restart') {
+    // deb, rpm, pacman: "Restart to update". macOS: our own install step.
+    try {
+      if (kind.type === 'mac') { const r = updater.installFree(); updateLog('mac-installed', r); app.quit(); }
+      else updater.quitAndInstall(false, true);
+    } catch (e) { updateLog('install-failed', { code: e.code, message: String(e.message).slice(0, 300) }); app.quit(); }
+    return undefined;
+  }
+  // action none: stay open so the test can look at the state
+  return undefined;
+}
+
 app.whenReady().then(async () => {
+  if (process.argv.includes('--update-status')) {
+    const kind = installType();
+    let feed = null;
+    try { const u = testSettings().url; feed = u ? checkFeedUrl(u).href : null; } catch (e) { feed = `refused: ${e.message}`; }
+    console.log(JSON.stringify({ version: app.getVersion(), build: currentBuild(), ...kind, feed, resources: process.resourcesPath, appimage: process.env.APPIMAGE ?? null }));
+    return app.quit();
+  }
+  if (process.argv.includes('--update-run')) return updateRun();
   if (process.argv.includes('--fuse-probe')) {
     console.log(JSON.stringify(await fuseProbe()));
     return app.quit();
@@ -63,6 +100,7 @@ app.whenReady().then(async () => {
     console.log(JSON.stringify(process.env.APPIMAGE ? appImageSetup() : { error: 'not running from an AppImage' }));
     return app.quit();
   }
+  if (testSettings().log) updateLog('app-started', { version: app.getVersion(), build: currentBuild(), execPath: process.execPath, argv: process.argv.slice(1) });
   const selftest = process.argv.includes('--selftest');
   const win = new BrowserWindow({ width: 900, height: 600, show: !selftest, webPreferences: { contextIsolation: true, sandbox: true } });
   const version = await runCli(['--version']);

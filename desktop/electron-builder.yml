@@ -1,0 +1,75 @@
+# Spike S4: one config for every installer (plan 3.5, E5). The build number is fixed at 1 here (fpm --iteration, mac bundleVersion); E5 must set it per build.
+appId: io.github.ryanyahya.OpenDocDesktop
+productName: opendoc-desktop
+executableName: opendoc-desktop
+copyright: opendoc-desktop contributors. Built on OpenDoc, https://github.com/RyanYahya/OpenDoc
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - package.json
+  - src/**
+asar: true
+npmRebuild: false
+nodeGypRebuild: false
+buildDependenciesFromSource: false
+# The runtime made by scripts/spike-runtime.mjs on each platform's own machine (plan 3.3).
+# electron-builder always drops a root-level node_modules from a "from" folder, so the runtime's own
+# node_modules is a second entry whose "from" is that folder itself.
+extraResources:
+  - from: build/runtime/${platform}-${arch}
+    to: runtime
+    filter: ["**/*", "!node_modules/**"]
+  - from: resources/cli
+    to: cli
+    filter: ["opendoc-appimage.sh"]
+  - from: build/runtime/${platform}-${arch}/node_modules
+    to: runtime/node_modules
+    filter: ["**/*"]
+# Electron fuses (plan 3.5). runAsNode stays on: the shim, the service host and render children need it.
+electronFuses:
+  runAsNode: true
+  # Off (Electron's default, and not in the plan's list). A cookie write hung in the VM's desktop session in S4 with the fuse on
+  # and off, so cookies stay unproven there; the app should not depend on them (see the S4 report).
+  enableCookieEncryption: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false
+linux:
+  icon: resources/icons/icon.png
+  category: Office
+  synopsis: OpenDoc on the desktop
+  description: A self-contained desktop app for OpenDoc, built on the original OpenDoc project.
+  maintainer: opendoc-desktop contributors <opendoc-desktop@users.noreply.github.com>
+  target:
+    - target: pacman
+    - target: deb
+    - target: rpm
+    - target: AppImage
+deb:
+  # Ubuntu 24.04 blocks unprivileged user namespaces without a profile (electron-builder issue 8635).
+  appArmorProfile: resources/apparmor-profile.tpl
+  fpm: ["--iteration", "1"]
+pacman:
+  # electron-builder's default list pulls http-parser and libappindicator-gtk3, which a bundled Electron does not need.
+  depends: [gtk3, nss, libnotify, libxss, xdg-utils, at-spi2-core]
+  fpm: ["--iteration", "1"]
+rpm:
+  fpm: ["--iteration", "1"]
+appImage:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+mac:
+  icon: resources/icons/icon.png
+  category: public.app-category.productivity
+  target:
+    - target: zip
+    - target: dmg
+  identity: "-"
+  notarize: false
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  bundleVersion: "1"
+dmg:
+  sign: false

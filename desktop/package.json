@@ -17,5 +17,15 @@
     "@playwright/test": "1.65.1",
     "electron": "45.3.3",
     "electron-builder": "26.18.1"
+  },
+  "main": "src/main.mjs",
+  "author": {
+    "name": "opendoc-desktop contributors",
+    "email": "opendoc-desktop@users.noreply.github.com"
+  },
+  "scripts": {
+    "runtime": "node scripts/spike-runtime.mjs",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
   }
 }

@@ -1,0 +1,145 @@
+name: Spike S4 macOS packaging
+
+# Throwaway spike workflow (never merged). It builds the opendoc-desktop spike shell with the runtime
+# inside, ad-hoc signs it (identity "-", no notarization), and checks every Mach-O in the runtime.
+# The push trigger lets it run from the spike branch without being on the default branch first.
+on:
+  workflow_dispatch:
+  push:
+    branches: [spike/s4-packaging]
+    paths: ['.github/workflows/spike-s4-macos.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: pnpm/action-setup@v6
+        with:
+          cache: true
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the runtime (plan 3.3 steps 1 and 2)
+        run: pnpm --filter ./desktop run runtime
+
+      - name: Build zip and dmg (ad-hoc signed)
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          set -o pipefail
+          pnpm exec electron-builder --mac zip dmg --${{ matrix.arch }} --publish never 2>&1 | tail -60
+          ls -l dist
+
+      - name: Signing, launch and runtime checks
+        shell: bash
+        working-directory: desktop
+        run: |
+          set -u
+          APP=$(ls -d dist/mac*/opendoc-desktop.app | head -1)
+          RT="$APP/Contents/Resources/runtime"
+          BIN="$APP/Contents/MacOS/opendoc-desktop"
+          run_timeout() { perl -e 'alarm shift; exec @ARGV' "$@"; }
+          summary() { echo "$@" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          summary "### macOS ${{ matrix.arch }} on ${{ matrix.runner }}"
+          summary '```'
+          sw_vers | tee -a "$GITHUB_STEP_SUMMARY"
+          uname -m | tee -a "$GITHUB_STEP_SUMMARY"
+          summary "--- app signature"
+          codesign -dv --verbose=4 "$APP" 2>&1 | grep -E 'Identifier|Format|Signature|TeamIdentifier|flags|Authority|CDHash' | tee -a "$GITHUB_STEP_SUMMARY"
+          codesign -d --entitlements - "$APP" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" | head -20
+          summary "--- verify deep strict"
+          codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" | tail -5
+          summary "--- Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' -c 'Print :CFBundleShortVersionString' -c 'Print :CFBundleVersion' -c 'Print :ElectronAsarIntegrity' "$APP/Contents/Info.plist" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+          summary "--- every Mach-O file in the runtime: signed and verifying?"
+          total=0; bad=0
+          while IFS= read -r f; do
+            if file "$f" | grep -q 'Mach-O'; then
+              total=$((total+1))
+              if ! codesign --verify --strict "$f" 2>/dev/null; then bad=$((bad+1)); summary "NOT SIGNED OR INVALID: ${f#$RT/}"; fi
+            fi
+          done < <(find "$RT" -type f)
+          summary "runtime Mach-O files: $total, unsigned or invalid: $bad"
+          for f in $(find "$RT" -type f \( -name '*.node' -o -name esbuild \) | grep -E 'canvas|resvg|esbuild|fsevents'); do
+            summary "$(echo "${f#$RT/}"): $(codesign -dv "$f" 2>&1 | grep -E 'Signature|flags' | tr '\n' ' ')"
+          done
+
+          summary "--- the three platform pieces load and run under the app binary (run-as-Node)"
+          export ELECTRON_RUN_AS_NODE=1
+          NM="$RT/node_modules"
+          run_timeout 60 "$BIN" -e "const r=require('module').createRequire('$NM/opendoc/package.json'); console.log('canvas', typeof r('@napi-rs/canvas').createCanvas); console.log('resvg', typeof r('@resvg/resvg-js').Resvg)" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          ESB=$(find "$NM/@esbuild" -name esbuild -type f | head -1)
+          summary "esbuild executable: $("$ESB" --version 2>&1)"
+
+          summary "--- CLI with the app closed, workspace linked to the app's runtime"
+          WS="$RUNNER_TEMP/ws"
+          node "$RT/node_modules/opendoc/bin/opendoc.mjs" init "$WS" --no-start --no-open >/dev/null 2>&1 || true
+          rm -rf "$WS/node_modules"; ln -s "$NM" "$WS/node_modules"
+          CLI="$NM/opendoc/bin/opendoc.mjs"
+          summary "--version: $(run_timeout 60 "$BIN" "$CLI" --workspace "$WS" --version 2>&1 | head -1)"
+          summary "check: $(run_timeout 120 "$BIN" "$CLI" --workspace "$WS" check 2>&1 | head -1)"
+          summary "export: $(run_timeout 120 "$BIN" "$CLI" --workspace "$WS" export welcome --json 2>&1 | grep -E '"(status|pages|hash)"' | tr -d ' \n')"
+          summary "review --export: $(run_timeout 180 "$BIN" "$CLI" --workspace "$WS" review welcome --export 2>&1 | head -1)"
+          unset ELECTRON_RUN_AS_NODE
+
+          summary "--- app launch (hidden window self-test)"
+          run_timeout 90 "$BIN" --selftest 2>&1 | head -3 | cut -c1-300 | tee -a "$GITHUB_STEP_SUMMARY"
+
+          summary "--- fuses"
+          FUSES=$(find "$GITHUB_WORKSPACE/node_modules/.pnpm" -path '*@electron/fuses/dist/bin.js' | head -1)
+          node "$FUSES" read --app "$APP" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          summary "--- tampered app.asar must not start (EnableEmbeddedAsarIntegrityValidation, supported on macOS)"
+          T="$RUNNER_TEMP/tampered.app"; rm -rf "$T"; cp -R "$APP" "$T"
+          python3 - "$T/Contents/Resources/app.asar" <<'PY'
+          import sys
+          p = sys.argv[1]; b = bytearray(open(p, 'rb').read()); i = b.find(b'Spike S4 minimal'); b[i] = ord('X'); open(p, 'wb').write(b)
+          PY
+          run_timeout 60 "$T/Contents/MacOS/opendoc-desktop" --selftest 2>&1 | head -3 | cut -c1-200 | tee -a "$GITHUB_STEP_SUMMARY"
+          summary "tampered exit code: ${PIPESTATUS[0]}"
+
+          summary "--- Gatekeeper assessment of the ad-hoc app (expected: rejected)"
+          spctl --assess --type execute -vv "$APP" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || true
+          summary '```'
+
+      - name: Sizes and the dmg and zip contents
+        shell: bash
+        working-directory: desktop
+        run: |
+          set -u
+          { echo '### Installer sizes'; echo '```'; ls -l dist/*.zip dist/*.dmg; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+          unzip -q dist/*.zip -d "$RUNNER_TEMP/unzipped"
+          Z=$(ls -d "$RUNNER_TEMP"/unzipped/*.app | head -1)
+          { echo '```'; echo "zip: $(codesign --verify --deep --strict "$Z" 2>&1 && echo signature-ok)"; } | tee -a "$GITHUB_STEP_SUMMARY"
+          hdiutil attach -nobrowse -mountpoint "$RUNNER_TEMP/dmg" dist/*.dmg >/dev/null
+          D=$(ls -d "$RUNNER_TEMP"/dmg/*.app | head -1)
+          { echo "dmg: $(codesign --verify --deep --strict "$D" 2>&1 && echo signature-ok)"; ls "$RUNNER_TEMP/dmg"; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+          hdiutil detach "$RUNNER_TEMP/dmg" >/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: s4-macos-${{ matrix.arch }}
+          path: |
+            desktop/dist/*.zip
+            desktop/dist/*.dmg
+            desktop/dist/builder-debug.yml
+          retention-days: 5

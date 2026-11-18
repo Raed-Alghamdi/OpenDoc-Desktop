@@ -140,7 +140,8 @@ test.describe.serial('workspace flow', () => {
     await waitFor(() => readFile(opened, 'utf8').catch(() => ''), { timeout: 20_000, what: 'the file manager to be started' });
     const [line] = (await readFile(opened, 'utf8')).trim().split('\n');
     expect(line).toContain(`args=${join(workspace, 'output')}`);
-    // Known item (report): the service host's environment still has ELECTRON_RUN_AS_NODE, so the file manager gets it too (line: ${line}).
+    // The service strips the shell's run-as-Node switch (externalEnv, in the service) before it starts a program of the user's.
+    expect(line).toContain('run-as-node=unset');
     expect((await nativeCalls(app)).folders).toEqual([]);
   });
 

@@ -26,6 +26,8 @@ ${edition === 'headless'
   npx opendoc review <id>            Generate page images, text, and review issues
   npx opendoc check                 Typecheck workspace authoring
   npx opendoc update [--check]       Explicitly update the runtime
+  npx opendoc status                 Show whether OpenDoc is running here
+  npx opendoc stop                   Stop the OpenDoc service
 
 Commands discover the workspace from this folder or an ancestor.
 Use --workspace <folder> to select one and --json for structured results.
@@ -109,6 +111,8 @@ export async function main(rawArgs = process.argv.slice(2)) {
         case 'export': await (await import('../server/export')).runExportCli(flags, root, { mode: identity.edition === 'headless' ? 'direct' : 'preview' }); break;
         case 'review': await (await import('../server/review-cli')).runReviewCli(flags, root); break;
         case 'update': await (await import('./update')).runUpdate(flags, root); break;
+        case 'status': await (await import('./status')).runStatus(flags, root); break;
+        case 'stop': await (await import('./stop')).runStop(flags, root); break;
         case 'check': {
           if (args.includes('--help') || args.includes('-h')) { const help = 'Usage: npx opendoc check [--json]\nTypechecks workspace documents, themes, and templates.'; console.log(json ? JSON.stringify({ usage: help }) : help); break; }
           if (args.length) throw new Error('Usage: npx opendoc check [--json]');
@@ -123,7 +127,7 @@ export async function main(rawArgs = process.argv.slice(2)) {
         default: throw new Error(`Unknown command: ${command}. Use npx opendoc --help.`);
       }
     };
-    if (identity.edition === 'headless' && !['update', 'start', 'packs'].includes(command)) await withWorkspaceLock(root, dispatch);
+    if (identity.edition === 'headless' && !['update', 'start', 'packs', 'status', 'stop'].includes(command)) await withWorkspaceLock(root, dispatch);
     else await dispatch();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

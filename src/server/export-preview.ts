@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import type { DocumentState } from '../shared/types';
 import { exportInfo } from '../shared/export';
-import { readJSON } from './files';
+import { InvalidOwnerRecord, workspaceSession } from '../cli/owner';
 import type { ExportOptions, ExportResult } from './export-batch';
 import { ExportResponseLost } from './export-errors';
 
@@ -27,11 +27,12 @@ async function readStates(connection: Connection, timeout: number) {
 }
 
 export async function currentSession(root: string, timeout: number): Promise<Session | null> {
-  const connection = await readJSON<Connection | null>(resolve(root, '.opendoc/server.json'), null);
-  if (!connection) return null;
-  if (typeof connection.origin !== 'string' || !/^http:\/\/127\.0\.0\.1:\d+$/.test(connection.origin) || typeof connection.token !== 'string' || !connection.token) {
-    throw new Error('The local OpenDoc session file is invalid. Restart OpenDoc before exporting.');
-  }
+  let owned;
+  try { owned = await workspaceSession(root, { verify: false }); }
+  catch (error) { throw error instanceof InvalidOwnerRecord ? new Error(`${error.message} Restart OpenDoc before exporting.`) : error; }
+  // Beside the desktop app the export renders on its own, as with no owner at all.
+  if (owned.owner.mode !== 'service') return null;
+  const connection: Connection = { origin: owned.owner.origin!, token: owned.token! };
   try { return { connection, states: await readStates(connection, timeout) }; }
   catch (error) {
     // Only an unavailable server permits an offline render. A live error stays authoritative.

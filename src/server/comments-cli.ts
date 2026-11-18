@@ -1,5 +1,5 @@
 import { readComments, changeComment, editComment, addComment, deleteComment, restoreComment, recentlyDeletedComments } from './comments';
-import { readJSON } from './files';
+import { InvalidOwnerRecord, workspaceSession } from '../cli/owner';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -38,9 +38,12 @@ type Session = { origin: string; token: string };
 
 /** The running service, when there is one; it verifies the target against its current preview. */
 async function liveSession(root: string): Promise<{ server: Session; docs: DocumentState[] } | null> {
-  const server = await readJSON<Session | null>(resolve(root, '.opendoc/server.json'), null);
-  if (!server) return null;
-  if (typeof server.origin !== 'string' || !/^http:\/\/127\.0\.0\.1:\d+$/.test(server.origin) || typeof server.token !== 'string' || !server.token) throw new Error('The local OpenDoc session file is invalid. Restart OpenDoc before adding a comment.');
+  let session;
+  try { session = await workspaceSession(root, { verify: false }); }
+  catch (error) { throw error instanceof InvalidOwnerRecord ? new Error(`${error.message} Restart OpenDoc before adding a comment.`) : error; }
+  // Beside the desktop app the target is verified directly, as with no owner at all.
+  if (session.owner.mode !== 'service') return null;
+  const server = { origin: session.owner.origin!, token: session.token! };
   try { return { server, docs: await request<DocumentState[]>(server.origin, '/api/documents') }; }
   catch (error) {
     // A session left by a stopped service falls back to verifying the target directly.

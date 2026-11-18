@@ -3,8 +3,9 @@ import { resolve } from 'node:path';
 import { validId } from './render';
 import { HistoryStore, type HistoryVersion } from './history';
 import { historyDisabledVariable } from './history-paths';
+import { workspaceOwner } from '../cli/owner';
 
-/** Whether a local OpenDoc service owns this workspace; its file watcher then records history itself. */
+/** Whether a local OpenDoc service or the desktop app owns this workspace; its file watcher then records history itself. */
 export async function historyService(root: string) {
   const read = async (file: string) => {
     try { return JSON.parse(await readFile(resolve(root, '.opendoc', file), 'utf8')) as Record<string, unknown> | null; }
@@ -12,10 +13,11 @@ export async function historyService(root: string) {
   };
   // Headless never runs a service, so a stale or copied session file cannot suppress recording.
   if ((await read('workspace.json'))?.edition === 'headless') return false;
-  const pid = (await read('server.json'))?.pid;
-  if (!Number.isSafeInteger(pid) || (pid as number) <= 0) return false;
-  try { process.kill(pid as number, 0); return true; }
-  catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+  try {
+    const owner = await workspaceOwner(root, { verify: false });
+    // A service counts only with a live recorded process; the app's own record is a live pid by definition.
+    return owner.mode === 'desktop' || (owner.mode === 'service' && owner.pid !== undefined);
+  } catch { return false; }
 }
 
 /**

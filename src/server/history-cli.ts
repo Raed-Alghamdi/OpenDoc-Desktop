@@ -9,6 +9,7 @@ import { blockHistory, compareVersion, restoreVersion } from './history-restore'
 import { describeVersions, groupVersions, historyChangeLabels, summaryText, type HistoryBlockChange, type HistoryVersionSummary, type RestoreScope } from '../shared/history';
 import { formatTime, formatTimeRange, formatWhen } from '../shared/dates';
 import { changedPassages } from '../shared/word-diff';
+import { InvalidOwnerRecord, workspaceOwner } from '../cli/owner';
 
 const usage = `Usage: npx opendoc history list <doc> [--json]
        npx opendoc history show <doc> <version> [--json]
@@ -109,9 +110,11 @@ export async function runHistoryCli(args: string[], root = process.cwd()): Promi
     if (values.block && values.section) throw new Error('Choose --block or --section, not both.');
     const scope: RestoreScope = values.block ? 'block' : values.section ? 'section' : 'version';
     const blockId = values.block ?? values.section;
-    // A running service may hold unsaved browser drafts against the current source.
-    const server = await readJSON<{ pid?: number } | null>(resolve(root, '.opendoc/server.json'), null);
-    if (server) {
+    // A running service or the desktop app may hold unsaved drafts against the current source.
+    let owner;
+    try { owner = await workspaceOwner(root, { verify: false }); }
+    catch (error) { throw error instanceof InvalidOwnerRecord ? new Error(`${error.message} Restart OpenDoc before restoring.`) : error; }
+    if (owner.mode) {
       const current = await readJSON<{ documentId?: string; manualEdit?: { pendingEdits?: number } } | null>(resolve(root, '.opendoc/current.json'), null);
       if (current?.documentId === doc && (current.manualEdit?.pendingEdits ?? 0) > 0) throw new Error('This document has unsaved text edits in OpenDoc. Save or discard them before restoring.');
     }

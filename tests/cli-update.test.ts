@@ -567,3 +567,41 @@ test('update candidate checks have an empty document catalog without copying use
     assert.equal(await readFile(join(root, 'documents/my-document/index.tsx'), 'utf8'), 'user authored source');
   });
 });
+
+async function appRecord(root: string, pid: number) {
+  await writeFile(join(root, '.opendoc/desktop.json'), JSON.stringify({ pid, startedAt: '2026-01-01T00:00:00.000Z', version: '0.3.1', build: 1 }));
+}
+
+test('C3: update beside the desktop app says to update the app, before staging anything', async () => {
+  await fixture(async (root, container) => {
+    await appRecord(root, process.pid);
+    const before = await snapshot(root), executor = fakeNpm();
+    await assert.rejects(updateWorkspace(root, {}, executor), /open in opendoc-desktop\. Update the app instead\./);
+    assert.deepEqual(await snapshot(root), before);
+    assert.deepEqual(executor.calls.map(call => call.args[0]), ['view'], 'Only the registry lookup ran; nothing was installed.');
+    assert.deepEqual(await readdir(container), ['workspace']);
+    // Looking for updates changes nothing, so it stays available.
+    assert.equal((await updateWorkspace(root, { check: true }, fakeNpm())).status, 'available');
+  });
+});
+
+test('C3: an app that opens the workspace while dependencies install blocks final activation', async () => {
+  await fixture(async root => {
+    let expected: Awaited<ReturnType<typeof snapshot>> | undefined;
+    await assert.rejects(updateWorkspace(root, {}, {
+      ...fakeNpm(), beforeActivate: async () => { await appRecord(root, process.pid); expected = await snapshot(root); },
+    }), /open in opendoc-desktop\. Update the app instead\./);
+    assert.deepEqual(await snapshot(root), expected);
+  });
+});
+
+test('C3: a desktop record whose process is gone does not block an update', async () => {
+  await fixture(async root => {
+    const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+    const pid = child.pid;
+    assert.ok(pid);
+    await once(child, 'exit');
+    await appRecord(root, pid);
+    assert.equal((await updateWorkspace(root, {}, fakeNpm())).status, 'updated');
+  });
+});

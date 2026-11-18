@@ -95,6 +95,9 @@ export function Reader({
   const { pdf, artifact, error: pdfError } = readerPreview;
   const [selection, setSelection] = useState<DocumentSelection | null>(null);
   const selected = selection?.blockId ?? null;
+  /** Components chosen after the first with Shift/Ctrl-click, the keyboard or a box; `selection` stays the first (contract C1). */
+  const [additional, setAdditional] = useState<DocumentSelection[]>([]);
+  const selectedCount = selection ? 1 + additional.length : 0;
   const selectionAnchor = useRef<TextAnchor | undefined>(undefined);
   /** Whether the selection is part of its text, judged against the text it was chosen from. */
   const selectionPhrase = useRef(false);
@@ -391,7 +394,20 @@ export function Reader({
     holdSelection(null);
     window.getSelection()?.removeAllRanges();
   }
+  /** The whole selection as a list; the first entry is the main selection. */
+  function holdSelections(list: DocumentSelection[]) {
+    holdSelection(list[0] ?? null);
+    setAdditional(list.slice(1));
+  }
+  function toggleBlock(block: string, pageNumber: number) {
+    if (editor || composing || mutationPending.current || editPending || editError) return;
+    const all = selection ? [selection, ...additional] : [];
+    const at = all.findIndex(item => item.blockId === block);
+    holdSelections(at >= 0 ? all.filter((_, index) => index !== at)
+      : [...all, { blockId: block, page: pageNumber, revision: state.revision, renderHash: artifact?.hash }]);
+  }
   function holdSelection(next: DocumentSelection | null) {
+    setAdditional([]);
     setSelection(next);
     selectionAnchor.current = next ? anchorForSelection(artifact, next) : undefined;
     selectionPhrase.current = isPhrase(next, getTextTarget(artifact, next?.targetId));
@@ -703,9 +719,10 @@ export function Reader({
   }), [unresolvedComments, artifact]);
   // Each page receives only its own share of the selection and comments, and stable handlers.
   const previousSlices = useRef<PageSlice[]>([]);
-  const slices = useMemo(() => previousSlices.current = pageSlices(artifact, selection, commented, commentPhrases, previousSlices.current),
-    [artifact, selection, commented, commentPhrases]);
+  const slices = useMemo(() => previousSlices.current = pageSlices(artifact, selection, commented, commentPhrases, previousSlices.current, additional),
+    [artifact, selection, commented, commentPhrases, additional]);
   const selectFromPage = useLatest((block: string, number: number) => selectComponent({ blockId: block, page: number }));
+  const toggleFromPage = useLatest(toggleBlock);
   const commentsFromPage = useLatest(viewComments);
   const chooseFromPage = useLatest(selectComponent);
   const editTextFromPage = useLatest(editFromPage);
@@ -868,8 +885,9 @@ export function Reader({
           ref={scroll}
           className="reader-scroll"
           tabIndex={-1}
-          onPointerDownCapture={() => {
-            if (!editor && !mutationPending.current) clearSelection();
+          onPointerDownCapture={event => {
+            // Shift, Ctrl and Cmd add to the selection, so they must not clear it first.
+            if (!editor && !mutationPending.current && !(event.shiftKey || event.ctrlKey || event.metaKey)) clearSelection();
           }}
           onScroll={onScroll}
         >
@@ -900,6 +918,9 @@ export function Reader({
                     selection={slices[i]?.selection ?? null}
                     commented={slices[i]?.commented}
                     commentPhrases={slices[i]?.commentPhrases}
+                    multi={slices[i]?.multi}
+                    multiActive={additional.length > 0}
+                    onToggle={toggleFromPage}
                     onSelect={selectFromPage}
                     onComment={commentsFromPage}
                     onTextClick={chooseFromPage}
@@ -967,6 +988,7 @@ export function Reader({
         </form>}
       </section>}
       <p className="sr-only" role="status">{showSaveBar ? saveBarStatus(saveState) : ''}</p>
+      <p className="sr-only" role="status">{selectedCount > 1 ? `${selectedCount} components selected` : ''}</p>
       {(showSelectionBar || showSaveBar || showNotice) && <div className="reader-bars" ref={bars}>
         {showNotice && <div className="edit-session-notice" role="status">
           <p>{editing.error || (editStale ? 'The document changed. Refresh your draft to keep edits that still match.' : !connected ? 'Offline. Your draft is kept here until you reconnect.' : 'Browser storage is full. Save your draft before reloading or closing this tab.')}</p>
@@ -975,8 +997,9 @@ export function Reader({
         </div>}
         <div className="reader-bars-row">
           {showSelectionBar && <div className="selection-bar" role="group" aria-label="Selection actions">
-            <HintButton ref={editAction} aria-label="Edit selected text" hint={editUnavailable} focusableWhenDisabled disabled={!canEditText(editTargetId)} onClick={() => { if (selection) openTextComponent({ ...selection, targetId: editTargetId }); }}><Icon name="edit" size={16} />Edit</HintButton>
-            <HintButton ref={commentAction} focusableWhenDisabled aria-label={selectedPhrase ? 'Comment on selected phrase' : 'Comment on selection'} disabled={!selectedBlock || editPending || submitting || !!editError} onClick={openComments}><Icon name="comment" size={16} />Comment</HintButton>
+            {selectedCount > 1 && <span className="selection-count">{selectedCount} selected</span>}
+            <HintButton ref={editAction} aria-label="Edit selected text" hint={selectedCount > 1 ? 'Select one component to edit its text.' : editUnavailable} focusableWhenDisabled disabled={selectedCount > 1 || !canEditText(editTargetId)} onClick={() => { if (selection) openTextComponent({ ...selection, targetId: editTargetId }); }}><Icon name="edit" size={16} />Edit</HintButton>
+            <HintButton ref={commentAction} focusableWhenDisabled aria-label={selectedCount > 1 ? `Comment on ${selectedCount} components` : selectedPhrase ? 'Comment on selected phrase' : 'Comment on selection'} disabled={!selectedBlock || editPending || submitting || !!editError} onClick={openComments}><Icon name="comment" size={16} />Comment</HintButton>
             <HintButton focusableWhenDisabled aria-label="History for selection" aria-pressed={!!selectedHistory && isShowing(panel, 'history', selectedHistory)} aria-controls="reader-panel" disabled={!selectedBlock || editPending || submitting} onClick={() => selectedHistory && changePanel(togglePanel(panel, 'history', selectedHistory))}><Icon name="history" size={16} />History</HintButton>
           </div>}
           {showSaveBar && <div className="save-bar" role="group" aria-label="Unsaved changes" onFocus={() => { saveBarFocus.current = true; }} onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) saveBarFocus.current = false; }}>

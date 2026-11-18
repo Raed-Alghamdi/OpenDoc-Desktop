@@ -1,6 +1,6 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { cp, mkdir, symlink, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -433,12 +433,19 @@ test('a dead recorded pid is stale even when another server now answers at its a
 test('a live pid counts as the app only when the process is opendoc-desktop', { skip: process.platform !== 'linux' }, async t => {
   const root = await scratch(t);
   const start = async (name: string) => {
-    // A copy of sleep under another name: the kernel reports the executable's name as the process name.
+    // Node itself under another name: the kernel reports the basename of the path it was started through as the process name.
+    // A copy of sleep would not do: on a multi-call coreutils it picks its tool from that name and exits at once.
     const path = resolve(root, name);
-    await cp(execFileSync('which', ['sleep'], { encoding: 'utf8' }).trim(), path);
-    const child = spawn(path, ['300'], { stdio: 'ignore' });
+    await symlink(process.execPath, path);
+    const child = spawn(path, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
     t.after(() => { child.kill('SIGKILL'); });
     await once(child, 'spawn');
+    // The name is the new program's only once its exec has finished; wait for that rather than assume it.
+    const deadline = Date.now() + 2000;
+    while ((await readFile(`/proc/${child.pid}/comm`, 'utf8').catch(() => '')).trim() !== name.slice(0, 15)) {
+      assert.ok(Date.now() < deadline, `${name} did not start under its own name`);
+      await new Promise(accept => setTimeout(accept, 20));
+    }
     return child.pid!;
   };
   assert.deepEqual(await workspaceOwner(root), { mode: null });

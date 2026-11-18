@@ -1,0 +1,92 @@
+# One config for every installer (plan 3.5). Build it with `node runtime/dist.mjs`, which passes the build number from the runtime's
+# build-info.json and adds `build:` and `commit:` to the update metadata afterwards.
+appId: io.github.ryanyahya.OpenDocDesktop
+productName: opendoc-desktop
+executableName: opendoc-desktop
+copyright: opendoc-desktop contributors. Built on OpenDoc, https://github.com/RyanYahya/OpenDoc
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - package.json
+  - src/**
+asar: true
+npmRebuild: false
+nodeGypRebuild: false
+buildDependenciesFromSource: false
+# The build number (contracts, "Version numbers"): Arch pkgrel, Debian revision and RPM Release (fpm --iteration), the macOS bundle
+# build number, and the file names. runtime/dist.mjs overrides this with the number the runtime was built with.
+buildNumber: "1"
+# Writes resources/app-update.yml, which the updater reads (plan 3.7). The fork's releases until the handover; the app can override
+# the address in config.json.
+publish:
+  - provider: github
+    owner: Raed-Alghamdi
+    repo: OpenDoc-Desktop
+# The runtime made by runtime/build.mjs on each platform's own machine (plan 3.3). electron-builder always drops a root-level
+# node_modules from a "from" folder, so the runtime's own node_modules is a second entry whose "from" is that folder itself.
+# ${platform} is the build host's platform, so a macOS build must run on a Mac (the CI runners do).
+extraResources:
+  - from: build/runtime/${platform}-${arch}
+    to: runtime
+    filter: ["**/*", "!node_modules/**"]
+  - from: build/runtime/${platform}-${arch}/node_modules
+    to: runtime/node_modules
+    filter: ["**/*"]
+  # The AppImage's `opendoc` shim (E4); the app writes it to ~/.local/bin/opendoc.
+  - from: resources/cli
+    to: cli
+    filter: ["opendoc-appimage.sh"]
+# Electron fuses (plan 3.5). runAsNode stays on: the shim, the service host and render children need it.
+electronFuses:
+  runAsNode: true
+  # Off (Electron's default, and not in the plan's list). A cookie write hung in a VM desktop session in S4 with the fuse on
+  # and off, so cookies stay unproven there; the app does not depend on them.
+  enableCookieEncryption: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false
+linux:
+  # E12's icons (resources/icons/linux holds 16x16.png to 512x512.png; the scalable and symbolic SVGs sit beside it).
+  icon: resources/icons/linux
+  category: Office
+  synopsis: OpenDoc on the desktop
+  description: A self-contained desktop app for OpenDoc, built on the original OpenDoc project.
+  maintainer: opendoc-desktop contributors <Raed-Alghamdi@users.noreply.github.com>
+  vendor: opendoc-desktop contributors
+  target:
+    - target: pacman
+    - target: deb
+    - target: rpm
+    - target: AppImage
+# File names carry the build number; fpm gets it as the package revision. Each follows its distribution's own convention.
+deb:
+  # Ubuntu 24.04 blocks unprivileged user namespaces without a profile (electron-builder issue 8635); 26.18.1 writes one by
+  # default, and this template keeps it ours.
+  appArmorProfile: resources/apparmor-profile.tpl
+  artifactName: ${name}_${version}-${buildNumber}_${arch}.${ext}
+pacman:
+  # electron-builder's default list pulls http-parser and libappindicator-gtk3, which a bundled Electron does not need.
+  depends: [gtk3, nss, libnotify, libxss, xdg-utils, at-spi2-core]
+  artifactName: ${name}-${version}-${buildNumber}-${arch}.${ext}
+rpm:
+  artifactName: ${name}-${version}-${buildNumber}.${arch}.${ext}
+appImage:
+  artifactName: ${productName}-${version}-${buildNumber}-${arch}.${ext}
+mac:
+  icon: resources/icons/icon.icns
+  category: public.app-category.productivity
+  target:
+    - target: zip
+    - target: dmg
+  identity: "-"
+  notarize: false
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  # runtime/dist.mjs sets the real value from the runtime's build-info.json.
+  bundleVersion: "1"
+  artifactName: ${productName}-${version}-${buildNumber}-${arch}.${ext}
+dmg:
+  sign: false

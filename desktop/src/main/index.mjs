@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DesktopShell } from './desktop-shell.mjs';
 import { appName } from './identity.mjs';
+import { appImageTemplatePath } from './command-line-tool.mjs';
 import { runtimeLocation } from './runtime.mjs';
 import { registerSchemes } from './shell-pages.mjs';
 
@@ -27,7 +28,8 @@ async function run() {
   await app.whenReady();
   const here = fileURLToPath(new URL('.', import.meta.url));
   const runtime = runtimeLocation({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, developmentRoot: join(here, '..', '..') });
-  const shell = new DesktopShell({ runtime });
+  const templatePath = appImageTemplatePath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, developmentRoot: join(here, '..', '..') });
+  const shell = new DesktopShell({ runtime, templatePath });
 
   app.on('second-instance', () => shell.secondInstance());
   app.on('window-all-closed', () => { if (!shell.keepAlive) app.quit(); });

@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { showAbout } from './about.mjs';
+import { CommandLineTool } from './command-line-tool.mjs';
 import { createConfig, forgetWorkspace, rememberWorkspace } from './config.mjs';
 import { clearStaleDesktopRecord, inspectDesktopRecord, removeDesktopRecord, writeDesktopRecord } from './desktop-record.mjs';
 import { appVersion, environment } from './identity.mjs';
@@ -25,10 +26,11 @@ const ask = (name, parent, options) => parent && !parent.isDestroyed() ? dialog[
 const lastLine = text => String(text).split('\n').map(line => line.trim()).filter(Boolean).at(-1) ?? '';
 
 export class DesktopShell {
-  constructor({ runtime }) {
+  constructor({ runtime, templatePath }) {
     const userData = app.getPath('userData');
     this.runtime = runtime;
     this.config = createConfig(join(userData, 'config.json'));
+    this.commandLine = new CommandLineTool({ config: this.config, runtime, templatePath, home: app.getPath('home'), parent: () => this.#parent() });
     this.windowStateFile = join(userData, 'window-state.json');
     this.logsDir = join(userData, 'logs');
     this.sessions = new Map();
@@ -55,6 +57,8 @@ export class DesktopShell {
       const result = await this.openWorkspace(defaultWorkspace);
       if (!result.ok) await this.showPicker(result);
     } else await this.showPicker();
+    // The agent command (AppImage launcher, macOS refresh) is set up once a window is up, and never holds the app back.
+    void this.commandLine.launch();
   }
 
   /** Stop the service, remove desktop.json and release the lock. Called from will-quit, once. */
@@ -276,6 +280,7 @@ export class DesktopShell {
         reveal: () => { if (this.current) shell.showItemInFolder(this.current.root); },
         showLog: () => this.#showLog(),
         about: () => void showAbout(this.#parent(), this.build),
+        installCommand: () => void this.commandLine.installFromMenu(),
         openExternal,
       },
       state: { workspaceOpen: Boolean(this.current), recent: Array.isArray(recentWorkspaces) ? recentWorkspaces.filter(item => typeof item === 'string') : [] },

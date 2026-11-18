@@ -8,6 +8,7 @@
 // name, the same `.tmp.XXXXXX` folder beside it and a rename at the end, and it is skipped when `build-info.json` matches.
 import { cp, lstat, mkdir, mkdtemp, readdir, readFile, readlink, rename, rm, stat, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { runtimeCopiesDirectory } from './paths.mjs';
 
 export const currentName = 'current';
@@ -51,12 +52,17 @@ async function switchCurrent(directory, name) {
 
 const copyName_ = /^[0-9A-Za-z.+]+(?:-[0-9A-Za-z.+]+)*-\d+$/; // `<version>-<build>`
 
-/** Does any running process have `path` in its command line? (The agent command passes the copy's path as an argument; so does the service host.) Linux only. */
+/**
+ * Does any running process have `path` in its command line? (The agent command passes the copy's path as an argument; the
+ * service host carries its entry as a file:// URL, where a space is %20 and a non-ASCII character is percent-encoded, so that
+ * form is matched too.) Linux only.
+ */
 export async function inUse(path) {
+  const forms = [path, pathToFileURL(path).pathname];
   let pids;
   try { pids = (await readdir('/proc')).filter(name => /^\d+$/.test(name)); } catch { return false; }
   for (const pid of pids) {
-    try { if ((await readFile(`/proc/${pid}/cmdline`, 'utf8')).includes(path)) return true; } catch { /* gone, or not ours to read */ }
+    try { const line = await readFile(`/proc/${pid}/cmdline`, 'utf8'); if (forms.some(form => line.includes(form))) return true; } catch { /* gone, or not ours to read */ }
   }
   return false;
 }

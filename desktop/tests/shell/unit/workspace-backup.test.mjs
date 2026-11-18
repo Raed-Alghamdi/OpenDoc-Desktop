@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { chmod, lstat, mkdir, readFile, readdir, readlink, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { BackupError, cleanPartials, createBackup, deleteBackup, listBackups, recoverRestore, restoreBackup, stamp } from '../../../src/main/workspace/backup.mjs';
+import { BackupError, abandonRestore, cleanPartials, createBackup, deleteBackup, listBackups, recoverRestore, restoreBackup, stamp } from '../../../src/main/workspace/backup.mjs';
 import { runUpgradeSteps, stepsBetween } from '../../../src/main/workspace/registry.mjs';
 import { lockBytes, makeWorkspace, scratch } from '../support/workspace-fixtures.mjs';
 
@@ -380,4 +380,128 @@ test('a file that becomes a folder (and the other way round) is restored', async
   assert.equal(await readFile(join(root, 'was-folder', 'a.txt'), 'utf8'), 'a\n');
   assert.equal(await readFile(join(root, 'was-file'), 'utf8'), 'file\n');
   void base;
+});
+
+// ---- recovery runs again from any state: a file that became a folder, a folder that became a file, kills anywhere
+
+/** `direction`: 'folder-over-file' (the backup has a folder, the workspace has a file there) or 'file-over-folder'. */
+async function swapping(direction) {
+  const { base, root, dataDir } = await fixture();
+  if (direction === 'folder-over-file') {
+    await mkdir(join(root, 'themes', 't', 'deep'), { recursive: true });
+    await writeFile(join(root, 'themes', 't', 'theme.ts'), 'theme\n');
+    await writeFile(join(root, 'themes', 't', 'deep', 'big.bin'), 'big\n');
+  } else await writeFile(join(root, 'themes'), 'a file\n');
+  await writeFile(join(root, 'same.txt'), 'same\n');
+  await writeFile(join(root, 'changed.txt'), 'old\n');
+  const backup = await createBackup({ root, dataDir, from: '0.5.0', to: '0.6.1', now: when });
+  if (direction === 'folder-over-file') { await rm(join(root, 'themes'), { recursive: true }); await writeFile(join(root, 'themes'), 'now a file\n'); }
+  else { await rm(join(root, 'themes')); await mkdir(join(root, 'themes', 'sub'), { recursive: true }); await writeFile(join(root, 'themes', 'sub', 'x.txt'), 'x\n'); }
+  await writeFile(join(root, 'changed.txt'), 'new\n');
+  return { base, root, dataDir, backup, tree: () => treeOf(root) };
+}
+
+const killed = new Error('killed');
+const changing = new Set(['remove', 'rmdir', 'mkdir', 'replace', 'add', 'finish']); // the steps after the journal is written
+
+/** A step hook that stops the restore dead at its `at`-th step that changes the workspace (and lets nothing be rolled back, as a kill would). */
+const killAt = at => {
+  let count = 0;
+  return async ({ stage }) => {
+    if (stage.startsWith('rollback')) throw killed;
+    if (changing.has(stage) && ++count === at) throw killed;
+  };
+};
+/** A restore that dies at its last step: everything is done and nothing was rolled back. */
+const dieAtTheEnd = async ({ stage }) => { if (stage === 'finish' || stage.startsWith('rollback')) throw killed; };
+
+for (const direction of ['folder-over-file', 'file-over-folder']) {
+  test(`${direction}: a kill at every step that changes the workspace, then recovery (run twice), puts everything back, with no temp and no copy left`, async () => {
+    const dry = await swapping(direction);
+    let steps = 0;
+    await restoreBackup({ root: dry.root, dataDir: dry.dataDir, name: dry.backup.name, step: async ({ stage }) => { if (changing.has(stage)) steps++; } });
+    assert.ok(steps >= 5, `steps: ${steps}`);
+    for (let at = 1; at <= steps; at++) {
+      const { root, dataDir, backup, tree } = await swapping(direction);
+      const before = await tree();
+      await assert.rejects(restoreBackup({ root, dataDir, name: backup.name, step: killAt(at) }), error => error.code === 'rollback-failed', `kill at ${at}`);
+      const recovered = await recoverRestore({ root });
+      assert.match(recovered.message, /undid it/, `kill at ${at}`);
+      assert.deepEqual(await tree(), before, `kill at ${at}`);
+      assert.equal(await recoverRestore({ root }), null, `kill at ${at}: a second recovery has nothing to do`);
+      assert.equal(await exists(join(root, '.opendoc', 'restore-journal.json')), false);
+      assert.deepEqual((await listBackups(dataDir)).map(item => item.manifest.kind), ['upgrade']);
+    }
+  });
+
+  test(`${direction}: a kill in the middle of the rollback itself, at every rollback step, then recovery`, async () => {
+    const counting = await swapping(direction);
+    await restoreBackup({ root: counting.root, dataDir: counting.dataDir, name: counting.backup.name, step: dieAtTheEnd }).catch(() => {});
+    let rollbackSteps = 0;
+    await recoverRestore({ root: counting.root, step: async () => { rollbackSteps++; } });
+    assert.ok(rollbackSteps >= 3, `rollback steps: ${rollbackSteps}`);
+    for (let at = 1; at <= rollbackSteps; at++) {
+      const { root, dataDir, backup, tree } = await swapping(direction);
+      const before = await tree();
+      await restoreBackup({ root, dataDir, name: backup.name, step: dieAtTheEnd }).catch(() => {});
+      let seen = 0;
+      await assert.rejects(recoverRestore({ root, step: async () => { if (++seen === at) throw killed; } }), error => error.code === 'rollback-failed', `rollback kill at ${at}`);
+      await recoverRestore({ root }).catch(error => assert.fail(`recovery after a kill at rollback step ${at}: ${error.message}`));
+      assert.deepEqual(await tree(), before, `rollback kill at ${at}`);
+      assert.equal(await recoverRestore({ root }), null);
+    }
+  });
+}
+
+test('a hidden temporary file a kill left deep in a document folder is removed by the rollback', async () => {
+  const { root, dataDir, backup, tree } = await restoring();
+  await mkdir(join(root, 'documents', 'a', 'deep'), { recursive: true });
+  const before = await tree();
+  // The restore writes its temp beside the target; it dies after writing part of it.
+  const dead = join(root, 'documents', 'welcome', '.index.tsx.opendoc-999999.part');
+  const dead2 = join(root, 'notes', 'deep', '.kept.txt.opendoc-999999.part');
+  await assert.rejects(restoreBackup({ root, dataDir, name: backup.name, step: async ({ stage, path }) => { if (stage === 'add' && path === 'notes/deep/kept.txt') { await writeFile(dead2, 'partial'); await writeFile(dead, 'partial'); throw killed; } if (stage.startsWith('rollback')) throw killed; } }), /putting the files back failed/);
+  await recoverRestore({ root });
+  assert.equal(await exists(dead), false);
+  assert.equal(await exists(dead2), false);
+  assert.deepEqual(await tree(), before);
+});
+
+test('rollback leaves a replaced file alone when it already equals its saved copy (no rewrite, so no room needed)', async () => {
+  const { root, dataDir, backup } = await restoring();
+  let writes = 0;
+  const inode = (await lstat(join(root, 'documents', 'welcome', 'index.tsx'))).ino;
+  // Fail the very last forward step: every replace has happened, the failing one is after them; rollback must rewrite them all.
+  // Fail the first replace instead: nothing was replaced yet, so rollback must not rewrite any replace file.
+  await assert.rejects(restoreBackup({ root, dataDir, name: backup.name, step: async ({ stage }) => { if (stage === 'replace') throw new Error('stop'); if (stage === 'rollback-file') writes++; } }), /put back the way it was/);
+  assert.equal((await lstat(join(root, 'documents', 'welcome', 'index.tsx'))).ino, inode, 'the untouched file was not rewritten');
+  assert.ok(writes >= 1);
+});
+
+test('a new folder that holds nested metadata stays, is reported, and the restore succeeds', async () => {
+  const { root, dataDir, backup } = await restoring();
+  await mkdir(join(root, 'documents', 'd3', '.git'), { recursive: true });
+  await writeFile(join(root, 'documents', 'd3', '.git', 'HEAD'), 'ref\n');
+  await writeFile(join(root, 'documents', 'd3', 'index.tsx'), 'x\n');
+  const result = await restoreBackup({ root, dataDir, name: backup.name });
+  assert.deepEqual(result.kept, ['documents/d3']);
+  assert.equal(await readFile(join(root, 'documents', 'd3', '.git', 'HEAD'), 'utf8'), 'ref\n');
+  assert.equal(await exists(join(root, 'documents', 'd3', 'index.tsx')), false);
+  assert.equal(await readFile(join(root, 'documents', 'welcome', 'index.tsx'), 'utf8'), 'export default "welcome";\n');
+});
+
+test('abandonRestore sets the journal aside inside the safety copy, so nothing is rolled back later; the copy stays', async () => {
+  const { root, dataDir, backup } = await restoring();
+  await restoreBackup({ root, dataDir, name: backup.name, step: async ({ stage }) => { if (stage === 'replace' || stage.startsWith('rollback')) throw new Error('x'); } }).catch(() => {});
+  const [safety] = (await listBackups(dataDir)).filter(item => item.manifest.kind === 'before-restore');
+  const { directory } = await abandonRestore({ root });
+  assert.equal(directory, safety.directory);
+  assert.equal(await exists(join(root, '.opendoc', 'restore-journal.json')), false);
+  assert.equal(await exists(join(safety.directory, 'abandoned-restore-journal.json')), true);
+  assert.equal(await recoverRestore({ root }), null);
+  await deleteBackup({ dataDir, name: safety.name, trash: async path => rm(path, { recursive: true }) });
+  await writeFile(join(root, '.opendoc', 'restore-journal.json'), '{ nope');
+  assert.equal((await abandonRestore({ root })).directory, null);
+  assert.equal(await exists(join(root, '.opendoc', 'restore-journal.json')), false);
+  assert.equal((await readdir(join(root, '.opendoc'))).some(name => name.startsWith('restore-journal.abandoned-')), true);
 });

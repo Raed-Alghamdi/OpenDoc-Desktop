@@ -253,11 +253,29 @@ async function writeJournal(root, journal) {
 const depth = relative => relative.split('/').length;
 const bytesOf = (tree, paths) => paths.reduce((sum, relative) => sum + (tree.get(relative)?.size ?? 0), 0);
 
+/** The temporary files (`.<name>.opendoc-<pid>.part`) a killed restore left beside any path of its plan, at any depth. */
+async function removeTemps(root, plan) {
+  const names = new Map(); // folder -> the file names of the plan in it
+  for (const key of Object.keys(plan)) for (const relative of plan[key]) {
+    const folder = dirname(join(root, relative));
+    if (!names.has(folder)) names.set(folder, new Set());
+    names.get(folder).add(basename(relative));
+  }
+  for (const [folder, wanted] of names) {
+    for (const entry of await readdir(folder).catch(() => [])) {
+      const match = /^\.(.+)\.opendoc-\d+\.part$/.exec(entry);
+      if (match && wanted.has(match[1])) await rm(join(folder, entry), { recursive: true, force: true }).catch(() => {});
+    }
+  }
+}
+
 /**
- * Undo a restore from its safety copy, exactly: remove what the restore added, bring back what it changed or removed. Every
- * error is collected and reported, none is swallowed, and the result is verified against the safety copy. Throws a
- * BackupError ('rollback-failed') that names the safety copy when anything could not be put back (the copy and the journal
- * are then kept); otherwise removes the journal and the safety copy.
+ * Undo a restore from its safety copy, exactly. It reads the state each path is in and does only what is still needed, so it
+ * is safe to run again from any state (a kill in the middle of the restore, in the middle of this rollback, or both, and a
+ * file that became a folder or the other way round): a path that is already as it was is left alone, a path that is not there
+ * (or whose parent is not a folder yet) counts as gone. Every error is collected and reported, none is swallowed, and the
+ * result is verified against the safety copy. Throws a BackupError ('rollback-failed') that names the safety copy when
+ * anything could not be put back (the copy and the journal are then kept); otherwise removes the journal and the safety copy.
  */
 async function rollback({ root, journal, step }) {
   const savedRoot = join(journal.beforeDirectory, copyFolder);
@@ -266,10 +284,18 @@ async function rollback({ root, journal, step }) {
   const attempt = async (stage, relative, run) => {
     try { await step({ stage, path: relative }); await run(); } catch (error) { errors.push(`${relative}: ${error.message}`); }
   };
-  for (const relative of plan.add) await attempt('rollback-add', relative, () => rm(join(root, relative), { force: true }));
-  for (const relative of [...plan.mkdirs].sort((a, b) => depth(b) - depth(a))) {
-    // A folder the restore made that now holds something the restore did not put there is not ours to remove.
-    await attempt('rollback-mkdir', relative, () => rmdir(join(root, relative)).catch(error => { if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error; }));
+  const was = { file: new Set([...plan.remove, ...plan.replace]), dir: new Set(plan.rmdirs) }; // what a path was before the restore
+  await removeTemps(root, plan);
+  // What the restore added goes, the deepest first, unless what is there is what the path held before (the restore had not got to it).
+  for (const relative of [...new Set([...plan.add, ...plan.mkdirs])].sort((a, b) => depth(b) - depth(a))) {
+    await attempt('rollback-add', relative, async () => {
+      const now = await describe(join(root, relative));
+      if (!now) return;
+      if (now.type === 'dir' ? was.dir.has(relative) : was.file.has(relative)) return;
+      // A folder that now holds something the restore did not put there is not ours to remove.
+      if (now.type === 'dir') await rmdir(join(root, relative)).catch(error => { if (!['ENOENT', 'ENOTDIR', 'ENOTEMPTY'].includes(error.code)) throw error; });
+      else await rm(join(root, relative), { force: true });
+    });
   }
   for (const relative of [...plan.rmdirs].sort((a, b) => depth(a) - depth(b))) await attempt('rollback-rmdir', relative, () => mkdir(join(root, relative), { recursive: true }));
   const restored = [...plan.remove, ...plan.replace];
@@ -277,9 +303,12 @@ async function rollback({ root, journal, step }) {
     await attempt('rollback-file', relative, async () => {
       const info = await describe(join(savedRoot, relative));
       if (!info) throw new Error('the safety copy has no such file');
+      // A file that already equals its saved copy (the restore never got to it) is not written again: that needs no room.
+      if (await sameEntry(join(root, relative), await describe(join(root, relative)), join(savedRoot, relative), info)) return;
       await placeAtomically(join(savedRoot, relative), info, join(root, relative));
     });
   }
+  await removeTemps(root, plan);
   for (const relative of restored) {
     if (errors.some(message => message.startsWith(`${relative}:`))) continue;
     const [saved, now] = [await describe(join(savedRoot, relative)), await describe(join(root, relative))];
@@ -297,7 +326,8 @@ async function rollback({ root, journal, step }) {
  * into a new backup of kind `before-restore`, and a journal goes into the workspace's `.opendoc/`. If anything fails, everything
  * is rolled back from that copy; the copy is deleted only when the rollback fully succeeded.
  * `step({ stage, path })` is called before each file operation (tests use it to fail at a chosen place).
- * @returns { before: { name, directory, manifest }, restored: manifest, replaced, added, removed }
+ * @returns { before: { name, directory, manifest }, restored: manifest, replaced, added, removed, kept } where `kept` lists the folders the
+ * backup lacks that stayed because they hold version control or sync metadata
  */
 export async function restoreBackup({ root, dataDir, name, now = new Date(), free = freeBytes, step = async () => {} }) {
   const directory = backupsDirectory(dataDir);
@@ -366,9 +396,19 @@ export async function restoreBackup({ root, dataDir, name, now = new Date(), fre
     throw new BackupError('failed', `The backup could not be restored (${error.message}). Nothing was changed.`);
   }
 
+  const kept = [];
+  const swapped = new Set(plan.add); // a folder that must become a file cannot stay
   try {
     for (const relative of plan.remove) { await step({ stage: 'remove', path: relative }); await rm(join(root, relative), { force: true }); }
-    for (const relative of [...plan.rmdirs].sort((a, b) => depth(b) - depth(a))) { await step({ stage: 'rmdir', path: relative }); await rmdir(join(root, relative)).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
+    for (const relative of [...plan.rmdirs].sort((a, b) => depth(b) - depth(a))) {
+      await step({ stage: 'rmdir', path: relative });
+      // A folder the backup lacks that holds version control or sync metadata (never restored, never removed) stays, and is reported.
+      await rmdir(join(root, relative)).catch(error => {
+        if (error.code === 'ENOENT') return;
+        if (error.code === 'ENOTEMPTY' && !swapped.has(relative)) { kept.push(relative); return; }
+        throw error;
+      });
+    }
     for (const relative of [...plan.mkdirs].sort((a, b) => depth(a) - depth(b))) { await step({ stage: 'mkdir', path: relative }); await mkdir(join(root, relative), { recursive: true }); }
     for (const relative of plan.replace) { await step({ stage: 'replace', path: relative }); await placeAtomically(join(backupRoot, relative), wanted.get(relative), join(root, relative)); }
     for (const relative of plan.add) { await step({ stage: 'add', path: relative }); await placeAtomically(join(backupRoot, relative), wanted.get(relative), join(root, relative)); }
@@ -379,7 +419,7 @@ export async function restoreBackup({ root, dataDir, name, now = new Date(), fre
     throw new BackupError('restore-failed', `The backup could not be restored (${error.message}). Every file was put back the way it was.`);
   }
   await rm(journalFile(root), { force: true });
-  return { before: beforeInfo, restored: manifest, replaced: plan.replace.length, added: plan.add.length, removed: plan.remove.length };
+  return { before: beforeInfo, restored: manifest, replaced: plan.replace.length, added: plan.add.length, removed: plan.remove.length, kept };
 }
 
 /**
@@ -396,4 +436,21 @@ export async function recoverRestore({ root, step = async () => {} }) {
   if (!(await describe(join(journal.beforeDirectory, copyFolder)))) throw new BackupError('journal-orphan', `A restore of this workspace was interrupted, and its safety copy (${journal.beforeDirectory}) is not there, so it cannot be undone automatically. The journal is ${journalFile(root)}; nothing was changed.`);
   await rollback({ root, journal, step });
   return { message: `A restore of this workspace from the backup ${journal.backup} was interrupted. The app undid it: the workspace is as it was before the restore began.` };
+}
+
+/**
+ * The way forward when `recoverRestore` cannot finish: set the journal aside so the workspace can be opened and is never rolled
+ * back later over edits the user makes from here on. The journal moves into the safety copy's folder (or, when that is gone or
+ * the journal is unreadable, to `.opendoc/restore-journal.abandoned-<time>.json`); nothing else is touched, and the safety copy
+ * is kept. Resolves `{ directory }`, the folder that holds the files as they were before the restore (null when unknown).
+ */
+export async function abandonRestore({ root, now = new Date() }) {
+  let text;
+  try { text = await readFile(journalFile(root), 'utf8'); } catch (error) { if (error.code === 'ENOENT') return { directory: null }; throw error; }
+  let directory = null;
+  try { const journal = JSON.parse(text); if (typeof journal?.beforeDirectory === 'string' && await describe(journal.beforeDirectory)) directory = journal.beforeDirectory; } catch { /* unreadable: kept beside the workspace's own files */ }
+  const target = directory ? join(directory, 'abandoned-restore-journal.json') : join(root, '.opendoc', `restore-journal.abandoned-${stamp(now)}.json`);
+  await writeFile(target, text);
+  await rm(journalFile(root), { force: true });
+  return { directory };
 }

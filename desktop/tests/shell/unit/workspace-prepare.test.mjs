@@ -35,6 +35,7 @@ async function setup({ workspace = {}, answers = {}, runtime: runtimeOptions = {
     askAdopt: async () => { calls.ui.push('adopt'); return answers.adopt ?? true; },
     askRealModules: async (_root, kind) => { calls.ui.push(`real:${kind}`); return answers.real ?? true; },
     askUpgrade: async info => { calls.ui.push(`upgrade:${info.from}>${info.to}`); return answers.upgrade ?? { choice: 'upgrade', remember: false }; },
+    askRecoveryFailed: async info => { calls.ui.push('recovery-failed'); calls.recovery = info; return answers.recovery ?? false; },
     remember: async () => { calls.ui.push('remember'); },
     progress: text => { if (text) calls.ui.push(`progress:${text}`); },
     showResult: async info => { calls.ui.push('result'); calls.result = info; return answers.result ?? { action: 'close' }; },
@@ -583,4 +584,28 @@ test('an interrupted restore (its journal) is undone at the next open, with a no
   const files = snapshotNow => Object.fromEntries(Object.entries(snapshotNow).filter(([path]) => !path.startsWith('.opendoc') && !path.startsWith('node_modules')));
   assert.deepEqual(files(after), files(before), 'the workspace is as it was before the interrupted restore began');
   assert.equal((await listBackups(context.dataDir)).filter(item => item.manifest.kind === 'before-restore').length, 0, 'the safety copy is removed once it has done its job');
+});
+
+test('a restore that cannot be undone never locks the user out: "Open anyway" sets the journal aside and opens; "Cancel" refuses and keeps everything', async () => {
+  const context = await setup({ workspace: { pin: '0.6.1' } });
+  const journal = join(context.root, '.opendoc', 'restore-journal.json');
+  const gone = join(context.dataDir, 'backups', 'gone');
+  await mkdir(join(context.root, '.opendoc'), { recursive: true });
+  await writeFile(journal, JSON.stringify({ plan: { add: [], mkdirs: [], rmdirs: [], remove: [], replace: [] }, beforeDirectory: gone }));
+  const refused = await context.run();
+  assert.equal(refused.ok, false);
+  assert.equal(refused.code, 'restore-recovery-failed');
+  assert.ok(refused.message.includes(gone), 'names the safety copy');
+  assert.deepEqual(context.calls.ui, ['recovery-failed']);
+  assert.equal(await exists(journal), true);
+  // Another answer: open anyway.
+  const again = await setup({ workspace: { pin: '0.6.1' }, answers: { recovery: true } });
+  await mkdir(join(again.root, '.opendoc'), { recursive: true });
+  await writeFile(join(again.root, '.opendoc', 'restore-journal.json'), '{ nope');
+  const opened = await again.run();
+  assert.equal(opened.ok, true);
+  assert.equal(opened.notes[0].title, 'Interrupted restore not undone');
+  assert.equal(await exists(join(again.root, '.opendoc', 'restore-journal.json')), false);
+  assert.equal((await readdir(join(again.root, '.opendoc'))).some(name => name.startsWith('restore-journal.abandoned-')), true);
+  assert.equal(again.calls.ui[0], 'recovery-failed');
 });

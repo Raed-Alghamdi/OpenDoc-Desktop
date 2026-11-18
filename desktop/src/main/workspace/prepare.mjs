@@ -3,10 +3,11 @@
 // user through `ui` (the shell supplies Electron dialogs and pages; the tests supply fakes) and changes nothing before every
 // question is answered and every refusal is decided: a refusal or a "no" leaves the folder as it was. A workspace that will
 // open read-only is not written to at all, except for the `node_modules` link it cannot run without.
+import { join } from 'node:path';
 import { ensureModulesLink, ensureSkillsLink, inspectModules } from './links.mjs';
 import { adoptWorkspace, markManaged, readMarker, setFormatVersion } from './marker.mjs';
 import { readManifest, writePin } from './pin.mjs';
-import { backupManifest, recoverRestore, restoreBackup } from './backup.mjs';
+import { abandonRestore, backupManifest, recoverRestore, restoreBackup } from './backup.mjs';
 import { cleanStaleTemps } from './temps.mjs';
 import { agentPrompt, clearPending, readPending, runChecks, runUpgrade } from './upgrade.mjs';
 import { compareFormat, decideVersion, declinedUpgradeMessage, newerFormatMessage, readPin, restoredBackupMessage } from './versions.mjs';
@@ -37,7 +38,15 @@ export async function prepareWorkspace(options) {
   try {
     const recovered = await recoverRestore({ root });
     if (recovered) notes.push({ title: 'Interrupted restore undone', message: recovered.message, detail: '' });
-  } catch (error) { return fail('restore-recovery-failed', error.message); }
+  } catch (error) {
+    // The files are intact, but the workspace may be part way between two states. The user is never locked out: the dialog names
+    // the safety copy and offers to open anyway (the journal is set aside, so nothing is rolled back later over new edits).
+    if (!(await ui.askRecoveryFailed?.({ root, message: error.message, code: error.code }))) return fail('restore-recovery-failed', error.message);
+    try {
+      const { directory } = await abandonRestore({ root, now });
+      notes.push({ title: 'Interrupted restore not undone', message: 'An interrupted restore could not be undone, and the workspace was opened as it is now.', detail: directory ? `The files that were in the workspace just before that restore are in ${join(directory, 'workspace')}.` : '' });
+    } catch (failure) { return fail('restore-recovery-failed', `${error.message} The journal could not be set aside either (${failure.message}).`); }
+  }
 
   // ---- what is this folder? (reads only)
   const marker = await readMarker(root);
@@ -126,7 +135,7 @@ export async function prepareWorkspace(options) {
       const original = await backupManifest(dataDir, backup.name);
       if (Number.isInteger(original?.workspaceFormat)) await setFormatVersion(root, original.workspaceFormat).catch(error => log(`could not restore the workspace format: ${error.message}`));
       const text = restoredBackupMessage(from);
-      const where = `The files that were in the workspace just before are in ${restored.before.directory}.`;
+      const where = `The files that were in the workspace just before are in ${restored.before.directory}.${restored.kept?.length ? ` Folders the backup does not have were left in place because they hold version control or sync data: ${restored.kept.join(', ')}.` : ''}`;
       if (!readOnlySupport) return fail('restored', `${text} ${where}${unsupportedSuffix}`);
       readOnly = { reason: 'restored-backup', message: text };
       notes.push({ title: 'Backup restored', message: text, detail: where });

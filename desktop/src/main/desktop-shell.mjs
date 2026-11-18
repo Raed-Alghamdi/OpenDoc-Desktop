@@ -356,6 +356,11 @@ export class DesktopShell {
         detail: `${join(root, 'node_modules')}\n\nopendoc-desktop runs the workspace with the OpenDoc that comes with the app. To do that it replaces node_modules with a link to it. The ${kind === 'file' ? 'file' : 'folder'} you have now is moved to the trash, not deleted.`,
         buttons: ["Use the app's OpenDoc", 'Leave it as it is'], defaultId: 1, cancelId: 1, noLink: true,
       })).response === 0,
+      askRecoveryFailed: async ({ message }) => (await ask('showMessageBox', parent(), {
+        type: 'warning', title: 'An interrupted restore could not be undone', message: `"${name}" has a restore that was interrupted, and the app could not undo it.`,
+        detail: `${message}\n\nNo file was deleted: the files as they were before that restore are in the safety copy named above. "Open anyway" opens the workspace as it is now (some files may be from the backup) and does not try to undo the restore again. "Cancel" leaves everything as it is so you can try again.`,
+        buttons: ['Open anyway', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true,
+      })).response === 0,
       askUpgrade: async ({ from, to, formatFrom, formatTo }) => {
         const formatOnly = from === to && Number.isInteger(formatFrom);
         const answer = await ask('showMessageBox', parent(), {

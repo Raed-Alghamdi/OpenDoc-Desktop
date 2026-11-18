@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { cp, lstat, mkdir, readFile, readdir, readlink, realpath, symlink, utimes, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { inUse, prepareAppImageRuntime, pruneCopies } from '../../../src/main/workspace/appimage-runtime.mjs';
 import { dataDirectory } from '../../../src/main/workspace/paths.mjs';
@@ -155,6 +156,23 @@ test('a copy that a running process has in its command line is never pruned (the
   } finally { child.kill('SIGKILL'); }
   await new Promise(accept => child.once('exit', accept));
   assert.deepEqual(await pruneCopies(directory, '0.6.1-7'), ['0.5.0-3']);
+});
+
+test('a copy whose path has a space or a non-ASCII character is found in a file:// URL command line (as the service host carries it)', { skip: process.platform !== 'linux' }, async () => {
+  const { dataDir } = await fixture();
+  const directory = join(dataDir, 'my data \u00e9\u0627', 'runtime');
+  await mkdir(join(directory, '0.5.0-3'), { recursive: true });
+  await writeFile(join(directory, '0.5.0-3', 'build-info.json'), '{}');
+  const url = pathToFileURL(join(directory, '0.5.0-3', 'node_modules', 'opendoc', 'src', 'server', 'service.ts')).href;
+  assert.match(url, /%20/);
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)', url], { stdio: 'ignore' });
+  try {
+    await new Promise(accept => setTimeout(accept, 200));
+    assert.equal(await inUse(join(directory, '0.5.0-3')), true);
+    assert.deepEqual(await pruneCopies(directory, '0.6.1-7'), []);
+  } finally { child.kill('SIGKILL'); }
+  await new Promise(accept => child.once('exit', accept));
+  assert.equal(await inUse(join(directory, '0.5.0-3')), false);
 });
 
 test('another process that finishes the same copy first wins: its complete copy is kept, never removed, and ours is dropped', async () => {

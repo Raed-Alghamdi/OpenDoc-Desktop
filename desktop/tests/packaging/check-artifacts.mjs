@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Checks the Linux installers in desktop/dist: each file carries the app version and the build number in its own metadata (not
-// just its name), and latest-linux.yml lists every installer and carries build: and commit:.
+// just its name; the AppImage has no version in its name), and latest-linux.yml lists every installer and carries build: and commit:.
 //
 // Usage: node desktop/tests/packaging/check-artifacts.mjs [--dist <folder>] [--require-rpm]
 // Reads package metadata with dpkg-deb, pacman and rpm where they exist, and otherwise straight from the archive (ar and bsdtar),
@@ -25,6 +25,20 @@ const tool = (command, args, input) => {
 };
 const field = (text, name) => text.match(new RegExp(`^${name}\\s*[:=]\\s*(.*)$`, 'm'))?.[1].trim();
 const files = readdirSync(dist);
+
+// The scalable and symbolic icons are mapped in through fpm (electron-builder installs only the sized PNGs).
+const iconFiles = [
+  '/usr/share/icons/hicolor/scalable/apps/opendoc-desktop.svg',
+  '/usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg',
+];
+const assertIcons = (listing) => { for (const icon of iconFiles) assert.ok(listing.split('\n').some((line) => line.trim().endsWith(icon.slice(1))), `missing ${icon}`); };
+const debListing = (file) => {
+  const direct = tool('dpkg-deb', ['-c', file]);
+  if (direct !== null) return direct;
+  const member = tool('ar', ['t', file]).split('\n').find((entry) => entry.startsWith('data.tar'));
+  const data = spawnSync('ar', ['p', file, member], { maxBuffer: 1 << 30 }).stdout;
+  return spawnSync('bsdtar', ['-tf', '-'], { input: data, encoding: 'utf8', maxBuffer: 64 << 20 }).stdout;
+};
 const only = (extension) => {
   const found = files.filter((name) => name.endsWith(extension));
   assert.equal(found.length, 1, `expected one ${extension} in ${dist}, found ${found.length}`);
@@ -49,6 +63,7 @@ check('deb', () => {
   assert.equal(field(control, 'Package'), 'opendoc-desktop');
   assert.equal(field(control, 'Version'), `${version}-${build}`);
   assert.equal(name, `opendoc-desktop_${version}-${build}_amd64.deb`);
+  assertIcons(debListing(file));
   return `${field(control, 'Version')} (${field(control, 'Architecture')}, Maintainer ${field(control, 'Maintainer')})`;
 });
 
@@ -58,6 +73,7 @@ check('pacman', () => {
   const text = tool('pacman', ['-Qip', file]) ?? tool('bsdtar', ['-xOf', file, '.PKGINFO']);
   const pkgver = field(text, 'Version') ?? field(text, 'pkgver');
   assert.equal(pkgver, `${version}-${build}`);
+  assertIcons(tool('bsdtar', ['-tf', file]));
   assert.equal(name, `opendoc-desktop-${version}-${build}-x64.pacman`);
   return pkgver;
 });
@@ -73,12 +89,13 @@ check('rpm', () => {
   }
   assert.equal(field(text, 'Version'), version);
   assert.equal(field(text, 'Release'), build);
+  assertIcons(tool('rpm', ['-qlp', path.join(dist, name)]));
   return `${field(text, 'Version')}-${field(text, 'Release')}`;
 });
 
 check('AppImage', () => {
   const name = only('.AppImage');
-  assert.equal(name, `opendoc-desktop-${version}-${build}-x86_64.AppImage`);
+  assert.equal(name, 'opendoc-desktop-x86_64.AppImage');
   return name;
 });
 

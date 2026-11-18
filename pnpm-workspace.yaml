@@ -1,4 +1,9 @@
+packages:
+  - desktop
 allowBuilds:
+  electron: true
+  # Windows installers are out of scope; its script only prepares Windows tooling.
+  electron-winstaller: false
   esbuild: true
 minimumReleaseAgeExclude:
   - '@formepdf/core@0.20.1'

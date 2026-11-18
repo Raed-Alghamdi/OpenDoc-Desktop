@@ -28,7 +28,9 @@ const maxHeaderBytes = 128 * 1024;
 const headerName = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 // Runs outside the host: ends when the host's group is gone, and kills the group if the app is gone first. The group
 // number cannot be given to anything else while a member lives, and the loop stops as soon as the last one is gone.
-const sentinelScript = 'while kill -0 "$1" 2>/dev/null && kill -0 -- "-$2" 2>/dev/null; do sleep 1; done; kill -0 "$1" 2>/dev/null || kill -KILL -- "-$2" 2>/dev/null';
+// Written for every POSIX shell: dash (/bin/sh on Debian and Ubuntu) rejects `kill -0 -- -PID` ("Illegal number"), so
+// every signal is named with `-s`. $1 is the app's pid, $2 the host's pid (its group number).
+export const sentinelScript = 'while kill -s 0 "$1" 2>/dev/null && kill -s 0 -- "-$2" 2>/dev/null; do sleep 1; done; kill -s 0 "$1" 2>/dev/null || kill -s KILL -- "-$2" 2>/dev/null';
 
 export class TransportError extends Error {
   constructor(message, tail = []) { super(message); this.name = 'TransportError'; this.tail = tail; }
@@ -208,9 +210,11 @@ export async function startTransport({ root, location, logFile, startupTimeout =
         let enqueued = 0;
         let credited = 0;
         let reader = null;
+        let finished = false;
         const gate = creditGate(bodyWindow);
         /** The request is over, one way or another: nothing more is read from the page's upload, and the host's credit is moot. */
         const finish = () => {
+          finished = true;
           pending.delete(id);
           gate.close();
           if (reader) void reader.cancel().catch(() => {});
@@ -270,6 +274,8 @@ export async function startTransport({ root, location, logFile, startupTimeout =
         void (async () => {
           await send({ t: 'req', id, method: request.method, url: url.pathname + url.search, headers: headerObject(request), body: hasBody });
           if (!hasBody) return;
+          // The request can be over before there is a reader (finish() found nothing to cancel): then the body is released here, never left locked.
+          if (finished) { void request.body.cancel().catch(() => {}); return; }
           reader = request.body.getReader();
           for (;;) {
             const { done, value } = await reader.read();

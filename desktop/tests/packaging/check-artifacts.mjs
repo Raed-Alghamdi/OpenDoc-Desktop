@@ -7,7 +7,9 @@
 // except for rpm, which then is checked by file name only.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -99,14 +101,68 @@ check('AppImage', () => {
   return name;
 });
 
+// What the updater reads from inside each install (plan 3.7, S6): the type word, the feed (app-update.yml) and, for the AUR only, the
+// marker that switches it off. A file in a package is read straight from its archive (rpm through rpm2cpio).
+const debMember = (file, prefix) => tool('ar', ['t', file]).split('\n').find((entry) => entry.startsWith(prefix));
+const inPackage = (kind, file, inner) => {
+  if (kind === 'deb') {
+    const data = spawnSync('ar', ['p', file, debMember(file, 'data.tar')], { maxBuffer: 1 << 30 }).stdout;
+    return spawnSync('bsdtar', ['-xOf', '-', `./${inner}`], { input: data, encoding: 'utf8', maxBuffer: 64 << 20 });
+  }
+  if (kind === 'rpm') {
+    const cpio = spawnSync('rpm2cpio', [file], { maxBuffer: 1 << 30 }).stdout;
+    return spawnSync('bsdtar', ['-xOf', '-', `./${inner}`], { input: cpio, encoding: 'utf8', maxBuffer: 64 << 20 });
+  }
+  return spawnSync('bsdtar', ['-xOf', file, inner], { encoding: 'utf8', maxBuffer: 64 << 20 });
+};
+for (const [kind, extension] of [['deb', '.deb'], ['pacman', '.pacman'], ['rpm', '.rpm']]) {
+  check(`${kind} update files`, () => {
+    const name = files.find((entry) => entry.endsWith(extension));
+    if (!name) throw new Error(`no ${extension} in dist`);
+    const file = path.join(dist, name);
+    const type = inPackage(kind, file, 'opt/opendoc-desktop/resources/package-type');
+    assert.equal(type.stdout.trim(), kind, `package-type: ${type.stdout.trim() || type.stderr.trim()}`);
+    const feed = inPackage(kind, file, 'opt/opendoc-desktop/resources/app-update.yml').stdout;
+    assert.match(feed, /^provider: github$/m);
+    assert.match(feed, /^owner: .+$/m);
+    const marker = inPackage(kind, file, 'opt/opendoc-desktop/resources/update-disabled');
+    assert.notEqual(marker.status, 0, 'the updater-off marker must not ship in this package (only the AUR package adds it)');
+    return `package-type ${kind}, app-update.yml (github), no update-disabled`;
+  });
+}
+
+check('AppImage update files', () => {
+  const name = only('.AppImage');
+  const scratch = mkdtempSync(path.join(os.tmpdir(), 'opendoc-appimage-'));
+  try {
+    // The AppImage runtime's own extract flag: it unpacks files and starts nothing.
+    const extract = spawnSync(path.join(dist, name), ['--appimage-extract', 'resources/app-update.yml'], { cwd: scratch, encoding: 'utf8', timeout: 120_000 });
+    assert.equal(extract.status, 0, extract.stderr);
+    const feed = readFileSync(path.join(scratch, 'squashfs-root', 'resources', 'app-update.yml'), 'utf8');
+    assert.match(feed, /^provider: github$/m);
+    assert.ok(!existsSync(path.join(scratch, 'squashfs-root', 'resources', 'package-type')), 'an AppImage has no package-type (the updater uses $APPIMAGE)');
+    return 'app-update.yml (github), no package-type';
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 check('latest-linux.yml', () => {
   const text = readFileSync(path.join(dist, 'latest-linux.yml'), 'utf8');
   assert.equal(field(text, 'version'), version);
   assert.equal(field(text, 'build'), build);
   assert.equal(field(text, 'commit'), info.commit);
-  const urls = [...text.matchAll(/^ {2}- url: (.*)$/gm)].map((match) => match[1]);
-  for (const extension of ['.deb', '.pacman', '.rpm', '.AppImage']) assert.ok(urls.some((url) => url.endsWith(extension)), `no ${extension} listed`);
-  return `build ${build}, commit ${info.commit.slice(0, 12)}, ${urls.length} files`;
+  // The updater only offers a file whose entry exists, so every installer needs one, with the file's real size and SHA-512.
+  const entries = [...text.matchAll(/^ {2}- url: (.*)\n {4}sha512: (.*)\n {4}size: (\d+)/gm)].map((match) => ({ url: match[1], sha512: match[2], size: Number(match[3]) }));
+  for (const extension of ['.deb', '.pacman', '.rpm', '.AppImage']) {
+    const entry = entries.find((candidate) => candidate.url.endsWith(extension));
+    assert.ok(entry, `no ${extension} listed`);
+    const bytes = readFileSync(path.join(dist, entry.url));
+    assert.equal(entry.size, bytes.length, `${entry.url}: size`);
+    assert.equal(entry.sha512, createHash('sha512').update(bytes).digest('base64'), `${entry.url}: sha512`);
+  }
+  assert.equal(field(text, 'path'), 'opendoc-desktop-x86_64.AppImage');
+  return `build ${build}, commit ${info.commit.slice(0, 12)}, ${entries.length} files with sha512 and size, all matching`;
 });
 
 console.log(checks.join('\n'));

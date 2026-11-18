@@ -3,8 +3,8 @@ import { appName, originalProject } from './identity.mjs';
 import { basename } from 'node:path';
 
 /**
- * @param actions { open, create, openRecent(path), reveal, showLog, about, installCommand, openExternal(url) }
- * @param state { workspaceOpen: boolean, recent: string[] }
+ * @param actions { open, create, openRecent(path), reveal, showLog, about, installCommand, checkForUpdates, setAutomaticUpdates(checked), restartToUpdate, openExternal(url) }
+ * @param state { workspaceOpen: boolean, recent: string[], updates?: { show, automatic, checkEnabled, restartReady, installing } }
  */
 export function menuTemplate({ platform = process.platform, actions, state }) {
   const mac = platform === 'darwin';
@@ -12,8 +12,9 @@ export function menuTemplate({ platform = process.platform, actions, state }) {
     ? state.recent.map(path => ({ label: `${basename(path)}  (${path})`, click: () => actions.openRecent(path) }))
     : [{ label: 'No recent workspaces', enabled: false }];
   const about = { label: `About ${appName}`, click: () => actions.about() };
+  const updates = updateItems({ actions, state: state.updates });
   return [
-    ...(mac ? [{ label: appName, submenu: [about, { type: 'separator' }, { label: 'Install Command-Line Tool…', click: () => actions.installCommand() }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }] : []),
+    ...(mac ? [{ label: appName, submenu: [about, ...updates, { type: 'separator' }, { label: 'Install Command-Line Tool…', click: () => actions.installCommand() }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }] : []),
     {
       label: 'File',
       submenu: [
@@ -33,8 +34,23 @@ export function menuTemplate({ platform = process.platform, actions, state }) {
       role: 'help',
       submenu: [
         { label: `${originalProject.name} on GitHub`, click: () => actions.openExternal(originalProject.url) },
-        ...(mac ? [] : [{ type: 'separator' }, about]),
+        ...(mac ? [] : [{ type: 'separator' }, about, ...updates]),
       ],
     },
+  ];
+}
+
+/**
+ * The update items (UpdateController.menuState): a manual check, the switch for the daily check, and "Restart to Update" while a
+ * downloaded update waits. Nothing for an install the app does not update (a package manager's, or a development run).
+ * In the app menu on macOS, in Help elsewhere (the shell has no settings page).
+ */
+function updateItems({ actions, state }) {
+  if (!state?.show) return [];
+  return [
+    { type: 'separator' },
+    { label: 'Check for Updates…', enabled: state.checkEnabled, click: () => actions.checkForUpdates() },
+    { label: 'Check for Updates Automatically', type: 'checkbox', checked: state.automatic, click: item => actions.setAutomaticUpdates(item.checked) },
+    ...(state.restartReady ? [{ label: 'Restart to Update', click: () => actions.restartToUpdate() }] : []),
   ];
 }

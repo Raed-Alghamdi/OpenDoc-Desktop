@@ -2,9 +2,10 @@
 import { app, dialog, ipcMain, session, shell } from 'electron';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { realpath, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { showAbout } from './about.mjs';
+import { installAppImageShim } from './cli-shim.mjs';
 import { CommandLineTool } from './command-line-tool.mjs';
 import { createConfig, forgetWorkspace, rememberWorkspace } from './config.mjs';
 import { clearStaleDesktopRecord, inspectDesktopRecord, removeDesktopRecord, writeDesktopRecord } from './desktop-record.mjs';
@@ -18,6 +19,7 @@ import { applySessionPolicy, openExternal } from './session-policy.mjs';
 import { shellPageUrl } from './shell-pages.mjs';
 import { superviseTransport } from './supervisor.mjs';
 import { startTransport, TransportError } from './transport.mjs';
+import { createUpdates } from './updater/electron.mjs';
 import { WorkspaceWindow, createPickerWindow, guardAllContents } from './windows.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -31,6 +33,15 @@ export class DesktopShell {
     this.runtime = runtime;
     this.config = createConfig(join(userData, 'config.json'));
     this.commandLine = new CommandLineTool({ config: this.config, runtime, templatePath, home: app.getPath('home'), parent: () => this.#parent() });
+    this.updates = createUpdates({
+      config: this.config,
+      getVersion: () => this.version,
+      getBuild: () => this.build?.build ?? null,
+      parent: () => this.#parent(),
+      onChange: () => void this.#refreshMenu(),
+      // An update that renames the AppImage (a version in its name) must take the opendoc command along.
+      onAppImageMoved: async appImage => { await installAppImageShim({ template: await readFile(templatePath, 'utf8'), appImage, home: app.getPath('home') }); },
+    });
     this.windowStateFile = join(userData, 'window-state.json');
     this.logsDir = join(userData, 'logs');
     this.sessions = new Map();
@@ -59,6 +70,8 @@ export class DesktopShell {
     } else await this.showPicker();
     // The agent command (AppImage launcher, macOS refresh) is set up once a window is up, and never holds the app back.
     void this.commandLine.launch();
+    // The updater checks only while the app is open: at launch, then daily. It never holds the app back or throws.
+    void this.updates.start();
   }
 
   /** Stop the service, remove desktop.json and release the lock. Called from will-quit, once. */
@@ -67,6 +80,9 @@ export class DesktopShell {
     this.stopped = true;
     await this.#teardown(this.current).catch(error => console.error('Shutdown problem:', error.message));
     this.current = null;
+    this.updates.stop();
+    // An AppImage update that was downloaded replaces the file now, with the service stopped (a no-op for everything else).
+    await this.updates.installOnQuit();
   }
 
   async #teardown(current) {
@@ -281,9 +297,12 @@ export class DesktopShell {
         showLog: () => this.#showLog(),
         about: () => void showAbout(this.#parent(), this.build),
         installCommand: () => void this.commandLine.installFromMenu(),
+        checkForUpdates: () => void this.updates.checkNow(),
+        setAutomaticUpdates: enabled => void this.updates.setAutomatic(enabled),
+        restartToUpdate: () => void this.updates.restartToUpdate(),
         openExternal,
       },
-      state: { workspaceOpen: Boolean(this.current), recent: Array.isArray(recentWorkspaces) ? recentWorkspaces.filter(item => typeof item === 'string') : [] },
+      state: { workspaceOpen: Boolean(this.current), recent: Array.isArray(recentWorkspaces) ? recentWorkspaces.filter(item => typeof item === 'string') : [], updates: this.updates.menuState },
     });
   }
 

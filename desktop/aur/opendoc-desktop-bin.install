@@ -1,0 +1,13 @@
+# Chromium's sandbox needs unprivileged user namespaces. Where the kernel has them off (for example linux-hardened), the
+# sandbox helper must be setuid root instead; the release package's own script makes the same choice.
+post_install() {
+  if [[ -L /proc/self/ns/user ]] && unshare --user true 2>/dev/null; then
+    chmod 0755 /opt/opendoc-desktop/chrome-sandbox
+  else
+    chmod 4755 /opt/opendoc-desktop/chrome-sandbox
+  fi
+}
+
+post_upgrade() {
+  post_install
+}

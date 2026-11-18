@@ -433,14 +433,14 @@ test('a dead recorded pid is stale even when another server now answers at its a
 test('a live pid counts as the app only when the process is opendoc-desktop', { skip: process.platform !== 'linux' }, async t => {
   const root = await scratch(t);
   const start = async (name: string) => {
-    // Node itself under another name: the kernel reports the basename of the path it was started through as the process name.
-    // A copy of sleep would not do: on a multi-call coreutils it picks its tool from that name and exits at once.
-    const path = resolve(root, name);
-    await symlink(process.execPath, path);
-    const child = spawn(path, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    // A Node process that names itself. Starting Node through a symlink of that name is not enough: Node renames its main
+    // thread to node-MainThread while it starts, so the stand-in sets its own name once its code runs. (A copy of sleep
+    // would not do either: on a multi-call coreutils it picks its tool from its file name and exits at once.)
+    const script = `require('node:fs').writeFileSync('/proc/self/comm', ${JSON.stringify(name)}); setInterval(() => {}, 1000);`;
+    const child = spawn(process.execPath, ['-e', script], { stdio: 'ignore' });
     t.after(() => { child.kill('SIGKILL'); });
     await once(child, 'spawn');
-    // The name is the new program's only once its exec has finished; wait for that rather than assume it.
+    // The name is the stand-in's only once its code has run; wait for that rather than assume it.
     const deadline = Date.now() + 2000;
     while ((await readFile(`/proc/${child.pid}/comm`, 'utf8').catch(() => '')).trim() !== name.slice(0, 15)) {
       assert.ok(Date.now() < deadline, `${name} did not start under its own name`);

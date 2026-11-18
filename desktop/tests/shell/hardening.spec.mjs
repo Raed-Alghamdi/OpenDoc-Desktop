@@ -14,7 +14,7 @@ test.describe.serial('hardening', () => {
     await stubNative(app);
     page = await app.firstWindow();
     await libraryReady(page);
-    origin = new URL(page.url()).origin;
+    origin = 'app://opendoc';
   });
 
   test.afterAll(async () => { await app?.close().catch(() => {}); });
@@ -29,10 +29,29 @@ test.describe.serial('hardening', () => {
     expect(exposed).toEqual({ require: 'undefined', process: 'undefined', module: 'undefined', buffer: 'undefined', shell: 'undefined' });
   });
 
+  test('the workspace page gets the two bridge functions, and nothing else of the shell', async () => {
+    const bridge = await page.evaluate(() => ({ keys: Object.keys(window.opendocDesktop ?? {}).sort(), types: Object.values(window.opendocDesktop ?? {}).map(item => typeof item) }));
+    expect(bridge).toEqual({ keys: ['onChange', 'onHostState'], types: ['function', 'function'] });
+    // Each subscription returns the function that stops it.
+    expect(await page.evaluate(() => [window.opendocDesktop.onChange(() => {}), window.opendocDesktop.onHostState(() => {})].map(item => typeof item))).toEqual(['function', 'function']);
+    // A page that is not the workspace (a window the page opens, an iframe, the app's own pages) has no bridge.
+    const frame = await page.evaluate(async () => {
+      const element = document.createElement('iframe');
+      element.src = 'about:blank';
+      document.body.append(element);
+      await new Promise(accept => setTimeout(accept, 300));
+      const seen = typeof element.contentWindow.opendocDesktop;
+      element.remove();
+      return seen;
+    });
+    expect(frame).toBe('undefined');
+  });
+
   test('the content security policy is set and blocks inline script, eval and other origins', async () => {
     const policy = await page.evaluate(async () => (await fetch('/')).headers.get('content-security-policy'));
     expect(policy).toContain("default-src 'none'");
-    expect(policy).toContain(`connect-src 'self' ${origin.replace('http', 'ws')}`);
+    expect(policy).toContain("connect-src 'self'; ");
+    expect(policy).not.toMatch(/wss?:/);
     expect(policy).not.toContain("'unsafe-eval'");
     const result = await page.evaluate(async () => {
       const script = document.createElement('script');
@@ -43,9 +62,9 @@ test.describe.serial('hardening', () => {
       document.head.append(external);
       await new Promise(accept => setTimeout(accept, 300));
       const attempt = async url => fetch(url).then(() => 'reached', () => 'blocked');
-      return { inline: window.__inline ?? null, dataScript: window.__data ?? null, remote: await attempt('https://example.com/'), file: await attempt('file:///etc/hostname'), otherPort: await attempt(`${location.protocol}//127.0.0.1:9/`) };
+      return { inline: window.__inline ?? null, dataScript: window.__data ?? null, remote: await attempt('https://example.com/'), file: await attempt('file:///etc/hostname'), otherHost: await attempt('app://elsewhere/api/session'), otherPort: await attempt('http://127.0.0.1:9/'), socket: await new Promise(accept => { try { const socket = new WebSocket('ws://127.0.0.1:9/api/events'); socket.onerror = () => accept('blocked'); socket.onopen = () => accept('reached'); } catch { accept('blocked'); } }) };
     });
-    expect(result).toEqual({ inline: null, dataScript: null, remote: 'blocked', file: 'blocked', otherPort: 'blocked' });
+    expect(result).toEqual({ inline: null, dataScript: null, remote: 'blocked', file: 'blocked', otherHost: 'blocked', otherPort: 'blocked', socket: 'blocked' });
   });
 
   test('the app itself runs without a single policy violation', async () => {
@@ -114,11 +133,13 @@ test.describe.serial('hardening', () => {
         read: await status(`${base}/api/session`),
         change: await status(`${base}/api/documents`, { method: 'POST', body: '{}' }),
         otherHost: await status('http://127.0.0.1:9/api/session'),
+        otherAppHost: await status('app://elsewhere/api/session'),
       };
     }, origin);
     expect(answers.read).toBe(200);
     expect(answers.change).toMatch(/^blocked/);
     expect(answers.otherHost).toMatch(/^blocked/);
+    expect(answers.otherAppHost).toMatch(/^blocked/);
     // The page itself can still change things (saving a comment is covered by the workspace flow).
     expect(await page.evaluate(async () => (await fetch('/api/context', { method: 'POST', headers: { 'content-type': 'application/json', 'x-opendoc-token': (await (await fetch('/api/session')).json()).token }, body: JSON.stringify({ documentId: 'welcome', blockId: null, page: 1, selection: null, editing: false, pendingEdits: 0, draftPreview: false }) })).status)).toBeLessThan(500);
   });

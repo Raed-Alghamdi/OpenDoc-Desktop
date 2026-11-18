@@ -2,7 +2,7 @@ import { expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { processAlive } from './processes.mjs';
+import { processAlive, serviceHostOf } from './processes.mjs';
 
 /** The first render of a fresh workspace can take a while on a busy machine. */
 export const slow = { timeout: 180_000 };
@@ -20,17 +20,15 @@ export async function deadPid() {
   return child.pid;
 }
 
-/** The service's pid once it differs from `previous` and the service answers. */
-export async function nextServicePid(workspace, previous, milliseconds = 120_000) {
-  const deadline = Date.now() + milliseconds;
-  while (Date.now() < deadline) {
-    try {
-      const record = await serverRecord(workspace);
-      if (record.pid !== previous && processAlive(record.pid) && (await fetch(`${record.origin}/api/session`, { signal: AbortSignal.timeout(2000) })).ok) return record;
-    } catch { /* not yet */ }
-    await new Promise(accept => setTimeout(accept, 250));
-  }
-  throw new Error(`The service did not come back (still pid ${previous}).`);
+/** Is this page the OpenDoc workspace (the service's address)? */
+export const isWorkspaceUrl = url => url.startsWith('app://opendoc/');
+
+/** The pid of the app's service host (the child of the main process that runs the service), or null. */
+export const hostPid = app => serviceHostOf(app.process().pid);
+
+/** The service host's pid once it differs from `previous` (a restarted host), as soon as it is running. */
+export async function nextHostPid(app, previous, milliseconds = 120_000) {
+  return waitFor(() => { const pid = hostPid(app); return pid && pid !== previous && processAlive(pid) ? pid : null; }, { timeout: milliseconds, interval: 200, what: `a new service host (still ${previous})` });
 }
 
 export async function waitForExit(child, milliseconds) {

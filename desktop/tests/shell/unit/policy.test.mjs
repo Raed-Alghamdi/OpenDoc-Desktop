@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { classifyNavigation, classifyWindowOpen, contentSecurityPolicy, crossOriginMutation, permissionAllowed, requestAllowed, revealRequest } from '../../../src/main/policy.mjs';
+import { classifyNavigation, classifyWindowOpen, contentSecurityPolicy, crossOriginMutation, originOf, permissionAllowed, requestAllowed } from '../../../src/main/policy.mjs';
 
-const origin = 'http://127.0.0.1:4310';
+const origin = 'app://opendoc';
+
+test('the origin of an app address is app://host (URL.origin says null for it)', () => {
+  assert.equal(originOf('app://opendoc/api/session?x=1'), 'app://opendoc');
+  assert.equal(originOf('app://shell/picker.html'), 'app://shell');
+  assert.equal(originOf('https://example.com:8443/a'), 'https://example.com:8443');
+  assert.equal(originOf('not a url'), '');
+});
 
 test('navigation stays on the app origin; web links go out; everything else is refused', () => {
   assert.equal(classifyNavigation(`${origin}/#library`, [origin]), 'allow');
@@ -10,6 +17,7 @@ test('navigation stays on the app origin; web links go out; everything else is r
   assert.equal(classifyNavigation('https://example.com/', [origin]), 'external');
   assert.equal(classifyNavigation('mailto:someone@example.com', [origin]), 'external');
   assert.equal(classifyNavigation('http://127.0.0.1:9999/', [origin]), 'external');
+  assert.equal(classifyNavigation('app://opendoc/', []), 'deny'); // no workspace is open
   for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'data:text/html,hi', 'app://other/x', 'not a url', 'ftp://example.com/']) assert.equal(classifyNavigation(url, [origin]), 'deny', url);
 });
 
@@ -25,8 +33,8 @@ test('window.open: only files the service serves open in an app window', () => {
 
 test('requests: the origin, the app pages and inline data only', () => {
   assert.equal(requestAllowed(`${origin}/api/session`, [origin]), true);
-  assert.equal(requestAllowed('ws://127.0.0.1:4310/api/events', [origin]), true);
-  assert.equal(requestAllowed('ws://127.0.0.1:4311/api/events', [origin]), false);
+  assert.equal(requestAllowed('ws://127.0.0.1:4310/api/events', [origin]), false); // nothing listens, nothing is reachable
+  assert.equal(requestAllowed('http://127.0.0.1:4310/api/session', [origin]), false);
   assert.equal(requestAllowed('app://shell/picker.js', [origin]), true);
   assert.equal(requestAllowed('app://elsewhere/x', [origin]), false);
   assert.equal(requestAllowed('https://example.com/x.png', [origin]), false);
@@ -35,28 +43,20 @@ test('requests: the origin, the app pages and inline data only', () => {
   assert.equal(requestAllowed(`${origin}/api/session`, []), false);
 });
 
-test('the content security policy names only the origin', () => {
-  const policy = contentSecurityPolicy(origin);
+test('the content security policy names only the page\'s own address', () => {
+  const policy = contentSecurityPolicy();
   assert.match(policy, /default-src 'none'/);
-  assert.match(policy, /connect-src 'self' ws:\/\/127\.0\.0\.1:4310/);
+  assert.match(policy, /connect-src 'self'(;|$)/);
+  assert.doesNotMatch(policy, /wss?:/);
   assert.match(policy, /object-src 'none'/);
   assert.match(policy, /frame-ancestors 'none'/);
   assert.doesNotMatch(policy, /'unsafe-eval'/);
-  assert.doesNotMatch(policy, /https?:\/\/(?!127)/);
+  assert.doesNotMatch(policy, /https?:/);
 });
 
 test('only a click-to-copy write is a permission the app grants', () => {
   assert.equal(permissionAllowed('clipboard-sanitized-write'), true);
   for (const name of ['geolocation', 'notifications', 'media', 'clipboard-read', 'midi', 'openExternal', 'fullscreen']) assert.equal(permissionAllowed(name), false, name);
-});
-
-test('the reveal request is a POST to /api/exports/<id>/reveal on the origin', () => {
-  const make = (method, url) => ({ method, url });
-  assert.equal(revealRequest(make('POST', `${origin}/api/exports/abc-123/reveal`), origin), 'abc-123');
-  assert.equal(revealRequest(make('GET', `${origin}/api/exports/abc-123/reveal`), origin), null);
-  assert.equal(revealRequest(make('POST', `${origin}/api/exports/abc-123/copy`), origin), null);
-  assert.equal(revealRequest(make('POST', 'http://127.0.0.1:1/api/exports/abc-123/reveal'), origin), null);
-  assert.equal(revealRequest(make('POST', `${origin}/api/exports/../../x/reveal`), origin), null);
 });
 
 test('a request that changes something is refused unless the app\'s own page made it', () => {

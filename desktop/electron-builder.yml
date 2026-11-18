@@ -62,7 +62,8 @@ linux:
     - target: rpm
     - target: AppImage
 # File names carry the build number, except the AppImage; fpm gets it as the package revision. Each follows its distribution's own convention.
-# fpm also installs the scalable and symbolic icons (electron-builder only handles the sized PNGs), mapped from desktop/.
+# fpm also installs the scalable and symbolic icons (electron-builder only handles the sized PNGs) and the `opendoc` agent command
+# (a real file in /usr/bin, E4), mapped from desktop/.
 deb:
   # Ubuntu 24.04 blocks unprivileged user namespaces without a profile (electron-builder issue 8635); 26.18.1 writes one by
   # default, and this template keeps it ours.
@@ -71,6 +72,7 @@ deb:
   fpm:
     - resources/icons/opendoc-desktop.svg=/usr/share/icons/hicolor/scalable/apps/opendoc-desktop.svg
     - resources/icons/opendoc-desktop-symbolic.svg=/usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg
+    - resources/cli/opendoc=/usr/bin/opendoc
 pacman:
   # electron-builder's default list pulls http-parser and libappindicator-gtk3, which a bundled Electron does not need.
   depends: [gtk3, nss, libnotify, libxss, xdg-utils, at-spi2-core]
@@ -78,11 +80,13 @@ pacman:
   fpm:
     - resources/icons/opendoc-desktop.svg=/usr/share/icons/hicolor/scalable/apps/opendoc-desktop.svg
     - resources/icons/opendoc-desktop-symbolic.svg=/usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg
+    - resources/cli/opendoc=/usr/bin/opendoc
 rpm:
   artifactName: ${name}-${version}-${buildNumber}.${arch}.${ext}
   fpm:
     - resources/icons/opendoc-desktop.svg=/usr/share/icons/hicolor/scalable/apps/opendoc-desktop.svg
     - resources/icons/opendoc-desktop-symbolic.svg=/usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg
+    - resources/cli/opendoc=/usr/bin/opendoc
 appImage:
   # No version in the name (D-g): electron-updater then replaces the file in place, so launchers and the opendoc shim keep working.
   artifactName: ${productName}-${arch}.${ext}

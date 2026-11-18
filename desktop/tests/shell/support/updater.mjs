@@ -20,7 +20,7 @@ export function newUpdater(Class, version, folder) {
 
 /**
  * A scripted stand-in for an electron-updater instance, for the controller's tests.
- * script: { preflight, check: result | (updater) => result, install: result | (updater) => result, installAtQuit }.
+ * script: { preflight, check: result | (updater) => result, install: result | (updater) => result, installAtQuit }. A check result's downloadPromise is what downloadUpdate() resolves.
  */
 export class FakeUpdater extends EventEmitter {
   constructor(script = {}) {
@@ -35,7 +35,15 @@ export class FakeUpdater extends EventEmitter {
     this.lastAutoDownload = this.autoDownload;
     const result = await (typeof this.script.check === 'function' ? this.script.check(this) : this.script.check);
     if (result instanceof Error) throw result;
-    return result ?? { isUpdateAvailable: false };
+    this.lastResult = result ?? { isUpdateAvailable: false };
+    return this.lastResult;
+  }
+
+  /** The controller downloads after the check (autoDownload is off during it): the script's downloadPromise is the download. */
+  async downloadUpdate(token) {
+    this.downloads = (this.downloads ?? 0) + 1;
+    this.lastToken = token;
+    return this.lastResult?.downloadPromise ?? [];
   }
 
   async installDownloaded() {

@@ -72,12 +72,12 @@ test('a managed install (the AUR package) builds no updater and starts no timer'
   assert.deepEqual(shown, []);
 });
 
-test('switched off in the app: no updater, no timer, and the menu offers the way back on', async () => {
+test('switched off in the app: no updater, no timer, and the menu offers the way back on (a manual check still works)', async () => {
   const { controller, calls } = await setup({ config: { checkForUpdates: false } });
   await controller.start();
   assert.equal(calls.created.length, 0);
   assert.equal(controller.schedule.running, false);
-  assert.deepEqual(controller.menuState, { show: true, automatic: false, checkEnabled: false, restartReady: false, installing: false });
+  assert.deepEqual(controller.menuState, { show: true, automatic: false, checkEnabled: true, restartReady: false, installing: false });
 });
 
 test('a development run and an unknown install are inactive: no updater, nothing in the menu', async () => {
@@ -118,7 +118,8 @@ test('AppImage: downloads in the background and says nothing; the swap is for th
   await settle();
   await controller.idle();
   assert.equal(updater.checks, 1, 'one check at launch');
-  assert.equal(updater.lastAutoDownload, true);
+  assert.equal(updater.lastAutoDownload, false, 'the check itself never downloads');
+  assert.equal(updater.downloads, 1, 'the download starts after the metadata came back');
   assert.equal(updater.autoInstallOnAppQuit, true);
   assert.deepEqual(shown, [], 'no prompt');
   assert.equal(controller.menuState.restartReady, false);
@@ -375,7 +376,7 @@ test('switching off mid-run cancels the timer at once and writes the switch; swi
   assert.equal((await config.read()).checkForUpdates, false);
   assert.equal(controller.schedule.running, false);
   assert.equal(controller.menuState.automatic, false);
-  assert.equal(controller.menuState.checkEnabled, false);
+  assert.equal(controller.menuState.checkEnabled, true, 'the user can still ask for one check');
   assert.deepEqual(cancelled, [true], 'a download in progress is cancelled');
   t.mock.timers.tick(dayMilliseconds * 3);
   await settle();
@@ -502,4 +503,130 @@ test('the notice appears for an AppImage that was swapped at quit as well (the n
   await controller.idle();
   assert.equal(shown.length, 1);
   assert.equal(shown[0].message, 'opendoc-desktop was updated to 0.6.1, build 2');
+});
+
+// ---------- the switch governs automatic checks; a click is always one check ----------
+
+const defer = () => { let accept; let reject; const promise = new Promise((resolve, fail) => { accept = resolve; reject = fail; }); return { promise, accept, reject }; };
+
+test('with the switch off, "Check for Updates…" runs one check on a lazily made updater and does not turn the switch back on', async () => {
+  const { controller, calls, updater, config, shown } = await setup({ config: { checkForUpdates: false }, script: { check: downloadedUpdate('0.6.1', 2) }, answers: [1] });
+  await controller.start();
+  assert.equal(calls.created.length, 0, 'nothing is made while the switch is off');
+  assert.deepEqual(await controller.check({ manual: false }), { status: 'none' }, 'a background check is never run while off');
+  assert.equal(updater.checks, 0);
+  const result = await controller.checkNow();
+  assert.equal(result.status, 'downloaded');
+  assert.equal(calls.created.length, 1);
+  assert.equal(calls.created[0].kind, 'deb');
+  assert.equal(updater.checks, 1);
+  assert.equal(titles(shown).at(-1), 'A new version is ready: 0.6.1, build 2', 'a package update is offered the normal way');
+  assert.equal((await config.read()).checkForUpdates, false, 'the switch stays off');
+  assert.equal(controller.menuState.automatic, false);
+  assert.equal(controller.schedule.running, false, 'no daily timer');
+  assert.equal(controller.menuState.restartReady, true);
+});
+
+test('with the switch off, a manual AppImage download is still swapped in at quit; an automatic one is not once the switch goes off', async () => {
+  const manual = await setup({ type: 'appimage', config: { checkForUpdates: false }, script: { check: downloadedUpdate() } });
+  await manual.controller.start();
+  await manual.controller.checkNow();
+  assert.equal(manual.updater.autoInstallOnAppQuit, false, 'electron-updater\'s own quit handler stays off');
+  assert.equal(await manual.controller.installOnQuit(), true);
+  assert.equal(manual.updater.quitInstalls, 1);
+
+  const automatic = await setup({ type: 'appimage', script: { check: downloadedUpdate() } });
+  await automatic.controller.start();
+  await settle();
+  await automatic.controller.setAutomatic(false);
+  assert.equal(await automatic.controller.installOnQuit(), false);
+});
+
+test('a managed install answers a manual check with "not available" and never builds an updater', async () => {
+  const { controller, calls, shown } = await setup({ type: 'managed' });
+  await controller.start();
+  await controller.checkNow();
+  assert.equal(calls.created.length, 0);
+  assert.equal(shown.at(-1).message, 'Updates are not available');
+});
+
+// ---------- switching off during a check ----------
+
+test('a check still fetching its metadata when the switch goes off neither downloads nor opens a dialog', async () => {
+  const metadata = defer();
+  const { controller, updater, shown, log } = await setup({ type: 'deb', script: { check: () => metadata.promise } });
+  await controller.start();
+  await settle();
+  assert.equal(updater.checks, 1, 'the launch check is waiting for the metadata');
+  await controller.setAutomatic(false);
+  metadata.accept({ isUpdateAvailable: true, updateInfo: { version: '0.6.1', build: 2 }, downloadPromise: Promise.resolve([]), cancellationToken: { cancel() {} } });
+  await settle();
+  await controller.idle();
+  assert.equal(updater.downloads ?? 0, 0, 'the download never started');
+  assert.deepEqual(shown, [], 'no dialog after the switch went off');
+  assert.equal(controller.ready, null);
+  assert.equal(controller.menuState.restartReady, false);
+  assert.ok(log.some(line => /no automatic update checks/.test(line)));
+});
+
+test('a download that finishes after the switch went off opens no dialog and leaves nothing ready', async () => {
+  const download = defer();
+  const { controller, updater, shown } = await setup({ type: 'deb', script: { check: { isUpdateAvailable: true, updateInfo: { version: '0.6.1', build: 2 }, downloadPromise: download.promise, cancellationToken: { cancel() {} } } } });
+  await controller.start();
+  await settle();
+  assert.equal(updater.downloads, 1);
+  await controller.setAutomatic(false);
+  download.accept([]);
+  await settle();
+  await controller.idle();
+  assert.deepEqual(shown, []);
+  assert.equal(controller.ready, null);
+});
+
+test('a manual click right after switching off does not join the dropped check and gets its own answer', async () => {
+  const first = defer();
+  let calls = 0;
+  const { controller, updater, shown } = await setup({ type: 'deb', script: { check: () => (++calls === 1 ? first.promise : { isUpdateAvailable: false }) } });
+  await controller.start();
+  await settle();
+  await controller.setAutomatic(false);
+  const click = controller.checkNow();
+  await settle();
+  first.accept({ isUpdateAvailable: false });
+  assert.equal((await click).status, 'up-to-date');
+  assert.equal(updater.checks, 2, 'a second, separate check');
+  assert.equal(shown.at(-1).message, 'opendoc-desktop is up to date');
+});
+
+// ---------- a newer download clears the ready one ----------
+
+test('a newer download starting makes "Restart to Update" go away until it has finished', async () => {
+  const second = defer();
+  let round = 0;
+  const { controller, updater } = await setup({ type: 'deb', answers: 1, script: { check: () => (++round === 1 ? downloadedUpdate('0.6.1', 2) : { isUpdateAvailable: true, updateInfo: { version: '0.6.1', build: 3 }, downloadPromise: second.promise, cancellationToken: { cancel() {} } }) } });
+  await controller.start();
+  await settle();
+  await controller.idle();
+  assert.equal(controller.menuState.restartReady, true);
+  assert.equal(controller.ready.info.build, 2);
+  const again = controller.checkNow();
+  await settle();
+  assert.equal(controller.menuState.restartReady, false, 'the older file is gone when the newer one starts');
+  assert.equal(controller.ready, null);
+  second.accept([]);
+  await again;
+  assert.equal(controller.ready.info.build, 3);
+  assert.equal(controller.menuState.restartReady, true);
+  assert.equal(updater.downloads, 2);
+});
+
+test('AppImage: no room beside the AppImage is reported like a read-only folder: nothing is downloaded', async () => {
+  const blocked = { ok: false, reason: 'no-space', folder: '/home/u/Apps', message: 'There is not enough free space in /home/u/Apps to put the update beside opendoc-desktop (180 MB needed, 2 MB free). Free some space and check again.' };
+  const { controller, updater, shown } = await setup({ type: 'appimage', script: { preflight: blocked, check: { isUpdateAvailable: true, updateInfo: { version: '0.6.1', build: 2 }, downloadPromise: null, cancellationToken: { cancel() {} } } }, answers: 1 });
+  await controller.start();
+  await settle();
+  await controller.checkNow();
+  assert.equal(updater.downloads ?? 0, 0);
+  assert.equal(shown.at(-1).message, 'A new version is available: 0.6.1, build 2');
+  assert.match(shown.at(-1).detail, /not enough free space/);
 });

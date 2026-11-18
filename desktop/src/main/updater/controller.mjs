@@ -39,6 +39,10 @@ export class UpdateController {
     Object.assign(this, { config, packaged, resourcesDir, getVersion, getBuild, createUpdater, show, openExternal, relaunch, quit, onChange, onAppImageMoved, log, platform, env, readText });
     this.schedule = scheduleFactory({ run: () => this.check({ manual: false }), log });
     this.kind = { type: 'inactive', active: false, reason: 'not started' };
+    this.base = this.kind; // the install type with the user's switch left out: what a manual check works with
+    this.generation = 0; // raised when the switch goes off: a check that started before it neither downloads nor speaks
+    this.checkIsManual = false;
+    this.checkingGeneration = 0;
     this.automatic = true;
     this.updater = null;
     this.updaterType = null;
@@ -58,13 +62,15 @@ export class UpdateController {
 
   // ---------- what the menu shows ----------
 
-  /** { show, automatic, checkEnabled, restartReady }: the menu's update items (menu-template.mjs). */
+  /**
+   * { show, automatic, checkEnabled, restartReady }: the menu's update items (menu-template.mjs). The switch governs the automatic
+   * checks only: "Check for Updates…" works whenever this install can update itself (managed and inactive installs show no items).
+   */
   get menuState() {
-    const type = this.kind.type;
     return {
-      show: this.kind.active || type === 'off',
+      show: this.base.active,
       automatic: this.automatic,
-      checkEnabled: this.kind.active && !this.installing,
+      checkEnabled: this.base.active && !this.installing,
       restartReady: Boolean(this.ready) && needsRestartClick(this.updaterType) && this.updater?.installDownloaded != null && !this.installing,
       installing: this.installing,
     };
@@ -149,18 +155,23 @@ export class UpdateController {
   async refresh() {
     const config = await this.config.read();
     this.automatic = config.checkForUpdates !== false;
-    this.kind = detectInstallType({ packaged: this.packaged, resourcesDir: this.resourcesDir, config, platform: this.platform, env: this.env });
-    if (!this.kind.active) {
+    const detect = options => detectInstallType({ packaged: this.packaged, resourcesDir: this.resourcesDir, config: options, platform: this.platform, env: this.env });
+    this.base = detect({ ...config, checkForUpdates: undefined });
+    this.kind = this.automatic || !this.base.active ? this.base : detect(config);
+    if (!this.automatic || !this.base.active) {
+      // Nothing automatic from here on: the timer stops, a check that is still fetching or downloading is dropped (it must not download
+      // or open a dialog after the user switched off), and electron-updater's own swap at quit is off.
+      this.generation++;
       this.schedule.stop();
       this.cancellation?.cancel?.();
       if (this.updater) this.updater.autoInstallOnAppQuit = false;
-      this.log(`no update checks: ${this.kind.reason ?? this.kind.type}`);
+      this.log(`no automatic update checks: ${this.kind.reason ?? this.kind.type}`);
       this.#changed();
       return;
     }
     this.repository = await this.#repository();
     await this.#ensureUpdater(config);
-    if (this.updater) this.updater.autoInstallOnAppQuit = this.kind.type === 'appimage';
+    if (this.updater) this.updater.autoInstallOnAppQuit = this.base.type === 'appimage';
     this.#changed();
     this.schedule.start();
   }
@@ -180,14 +191,15 @@ export class UpdateController {
       feed = feedProviderOptions(parsed.url, this.repository);
       this.log(`the update address is ${parsed.url.origin}${parsed.url.pathname} (from config.json)`);
     }
-    if (this.updater && this.updaterType === this.kind.type && JSON.stringify(this.feed) === JSON.stringify(feed)) return;
+    if (this.updater && this.updaterType === this.base.type && JSON.stringify(this.feed) === JSON.stringify(feed)) return;
     this.feed = feed;
     const logger = { info: message => this.log(String(message)), warn: message => this.log(`warning: ${message}`), error: message => this.log(`error: ${message}`), debug: () => {} };
-    const updater = this.createUpdater(this.kind.type, { feed, logger });
+    const updater = this.createUpdater(this.base.type, { feed, logger });
     this.updater = updater;
-    this.updaterType = this.kind.type;
+    this.updaterType = this.base.type;
     if (!updater) return;
     updater.autoRunAppAfterInstall = true;
+    updater.autoInstallOnAppQuit = this.automatic && this.base.type === 'appimage'; // electron-updater's default is on; the swap at quit is ours (installOnQuit)
     updater.on('appimage-filename-updated', path => {
       this.log(`the AppImage is now ${path}`);
       this.renamedTo = path;
@@ -225,35 +237,55 @@ export class UpdateController {
    * Resolves { status: 'up-to-date' | 'available' | 'downloaded' | 'error' | 'none', info?, error? }.
    */
   async check({ manual }) {
-    if (!this.updater) {
-      if (manual && this.feedError) await this.#say('error', 'Could not check for updates', this.feedError);
-      else if (manual) await this.#say('info', 'Updates are not available', this.kind.reason ? `This copy of opendoc-desktop does not update itself: ${this.kind.reason}.` : 'This copy of opendoc-desktop does not update itself.');
+    if (!this.base.active) {
+      if (manual) await this.#say('info', 'Updates are not available', this.base.reason ? `This copy of opendoc-desktop does not update itself: ${this.base.reason}.` : 'This copy of opendoc-desktop does not update itself.');
       return { status: 'none' };
     }
-    if (!this.checking) this.checking = this.#runCheck().finally(() => { this.checking = null; });
+    if (!manual && !this.automatic) return { status: 'none' }; // the switch is off: only the user's own click checks
+    if (!this.updater) await this.#ensureUpdater(await this.config.read()); // with the switch off the updater is made at the first manual check
+    if (!this.updater) {
+      if (manual && this.feedError) await this.#say('error', 'Could not check for updates', this.feedError);
+      return { status: 'none' };
+    }
+    while (this.checking && this.checkingGeneration !== this.generation) await this.checking; // one dropped by the switch is not joined
+    if (!this.checking) {
+      this.checkIsManual = manual;
+      this.checkingGeneration = this.generation;
+      this.checking = this.#runCheck().finally(() => { this.checking = null; });
+    } else if (manual) this.checkIsManual = true; // a click that joins a background check wants its answer
+    const mine = this.generation;
     const result = await this.checking;
+    if (mine !== this.generation) return { status: 'none' }; // switched off meanwhile: nothing is said
     await this.#report(result, manual);
     return result;
   }
 
   async #runCheck() {
     const updater = this.updater;
+    const generation = this.generation;
+    const dropped = () => generation !== this.generation;
     this.blocked = null;
     try {
       const preflight = await updater.preflight();
       if (!preflight.ok) this.blocked = preflight;
-      updater.autoDownload = preflight.ok;
+      // The check runs with autoDownload off: the download starts only after the metadata has come back and nobody switched off meanwhile.
+      updater.autoDownload = false;
       const result = await updater.checkForUpdates();
+      if (dropped()) return { status: 'up-to-date' };
       if (!result?.isUpdateAvailable) return { status: 'up-to-date' };
       this.cancellation = result.cancellationToken ?? null;
       const info = result.updateInfo;
-      if (!result.downloadPromise) return { status: 'available', info };
-      await result.downloadPromise;
-      this.ready = { info };
+      if (!preflight.ok) return { status: 'available', info };
+      // electron-updater removes the older downloaded file when a newer one starts to download, so a "ready" update must not outlive that.
+      if (this.ready) { this.ready = null; this.#changed(); }
+      await updater.downloadUpdate(this.cancellation ?? undefined);
+      if (dropped()) return { status: 'up-to-date' };
+      this.ready = { info, manual: this.checkIsManual };
       this.#changed();
       return { status: 'downloaded', info };
     } catch (error) {
       if (error?.constructor?.name === 'CancellationError' || /^cancell?ed$/i.test(String(error?.message ?? ''))) return { status: 'up-to-date' }; // switched off during a download
+      if (dropped()) return { status: 'up-to-date' };
       this.log(`the check failed: ${firstLine(error)}`);
       return { status: 'error', error };
     } finally {
@@ -359,7 +391,8 @@ export class UpdateController {
   /** The AppImage's swap, run while the app quits (called from the shell's shutdown, after the service has stopped). Never throws. */
   async installOnQuit() {
     try {
-      if (!this.updater?.installAtQuit || !this.ready || !this.automatic || this.updaterType !== 'appimage') return false;
+      // A download from an automatic check is swapped in only while the switch is on; one the user asked for with "Check for Updates…" always is.
+      if (!this.updater?.installAtQuit || !this.ready || (!this.automatic && !this.ready.manual) || this.updaterType !== 'appimage') return false;
       this.renamedTo = null;
       this.swapping = true;
       const installed = this.updater.installAtQuit();

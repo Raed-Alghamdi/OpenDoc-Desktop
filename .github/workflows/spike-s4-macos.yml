@@ -52,8 +52,9 @@ jobs:
         shell: bash
         working-directory: desktop
         run: |
-          set -u
-          APP=$(ls -d dist/mac*/opendoc-desktop.app | head -1)
+          # Report every check instead of stopping at the first non-zero exit (some checks are expected to fail).
+          set -u; set +e; set +o pipefail
+          APP="$PWD/$(ls -d dist/mac*/opendoc-desktop.app | head -1)"
           RT="$APP/Contents/Resources/runtime"
           BIN="$APP/Contents/MacOS/opendoc-desktop"
           run_timeout() { perl -e 'alarm shift; exec @ARGV' "$@"; }

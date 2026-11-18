@@ -101,7 +101,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-latest
+          # Fork only: macos-15 while macos-latest gives this fork no runner (2026-11-18).
+          - runner: macos-15
             arch: arm64
           - runner: macos-15-intel
             arch: x64

@@ -27,6 +27,7 @@ ${edition === 'headless'
   npx opendoc review <id>            Generate page images, text, and review issues
   npx opendoc check                 Typecheck workspace authoring
   npx opendoc update [--check]       Explicitly update the runtime
+  npx opendoc context                Show what the OpenDoc app has selected
   npx opendoc status                 Show whether OpenDoc is running here
   npx opendoc stop                   Stop the OpenDoc service
 
@@ -116,6 +117,7 @@ export async function main(rawArgs = process.argv.slice(2)) {
         }
         case 'review': await (await import('../server/review-cli')).runReviewCli(flags, root); break;
         case 'update': await (await import('./update')).runUpdate(flags, root); break;
+        case 'context': await (await import('./context')).runContext(flags, root); break;
         case 'status': await (await import('./status')).runStatus(flags, root); break;
         case 'stop': await (await import('./stop')).runStop(flags, root); break;
         case 'check': {
@@ -132,7 +134,7 @@ export async function main(rawArgs = process.argv.slice(2)) {
         default: throw new Error(`Unknown command: ${command}. Use npx opendoc --help.`);
       }
     };
-    if (identity.edition === 'headless' && !['update', 'start', 'packs', 'status', 'stop'].includes(command)) await withWorkspaceLock(root, dispatch);
+    if (identity.edition === 'headless' && !['update', 'start', 'packs', 'status', 'stop', 'context'].includes(command)) await withWorkspaceLock(root, dispatch);
     else await dispatch();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

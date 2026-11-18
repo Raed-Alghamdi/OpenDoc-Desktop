@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { highWater, serveRequests } from '../../../src/host/service-host.mjs';
+import { bodyWindow, responseWindow, serveRequests } from '../../../src/host/service-host.mjs';
 
-/** A channel that records what the host sends and lets the test decide when the channel has "taken" each message. */
-function channel(service, { hold = false } = {}) {
+/** A channel that records what the host sends. */
+function channel(service) {
   const sent = [];
-  const callbacks = [];
-  const post = (message, done) => { sent.push(message); if (hold) callbacks.push(done); else done(); };
+  const post = message => { sent.push(message); };
   const host = serveRequests({ service, post, onClose: async () => { sent.push({ t: 'close-called' }); } });
   const request = (id, method, url, headers = {}, body = false) => host.receive({ t: 'req', id, method, url, headers: { host: 'opendoc', ...headers }, body });
-  return { host, sent, callbacks, request, of: id => sent.filter(message => message.id === id) };
+  return { host, sent, request, of: id => sent.filter(message => message.id === id) };
 }
 
 const listeners = () => { const set = new Set(); return { set, onChange: listener => { set.add(listener); return () => set.delete(listener); } }; };
@@ -133,21 +132,50 @@ test('the close message calls the close handler', async () => {
   assert.deepEqual(sent, [{ t: 'close-called' }]);
 });
 
-test('a response stops writing while the channel is full and resumes when it drains', async () => {
-  const chunk = Buffer.alloc(highWater / 2, 1);
+test('a response stops writing when the page is a window behind and resumes on credit', async () => {
+  const chunk = Buffer.alloc(responseWindow / 2, 1);
   let wrote;
-  const { request, callbacks } = channel({
+  const { request, host, sent } = channel({
     ...listeners(),
     async handle(req, res) {
       res.writeHead(200);
-      wrote = [res.write(chunk), res.write(chunk), res.write(chunk)]; // the second fills the channel
+      wrote = [res.write(chunk), res.write(chunk), res.write(chunk)]; // the second fills the window
       await new Promise(accept => res.once('drain', accept));
       res.end();
     },
-  }, { hold: true });
+  });
   const done = request(6, 'GET', '/big');
-  await new Promise(accept => setTimeout(accept, 20));
+  await new Promise(accept => setTimeout(accept, 30));
   assert.deepEqual(wrote, [true, false, false]);
-  for (const callback of callbacks.splice(0)) callback(); // the channel took everything
+  const unacknowledged = sent.filter(item => item.t === 'chunk').reduce((sum, item) => sum + item.data.length, 0);
+  assert.equal(unacknowledged, responseWindow * 1.5, 'the host wrote the window plus the one write that crossed it, not the whole file');
+  await host.receive({ t: 'credit', id: 6, bytes: responseWindow });
   await done;
+  assert.equal(sent.filter(item => item.id === 6).at(-1).t, 'end');
+});
+
+test('an upload the service reads slowly sends credit only for what it has read', async () => {
+  const gate = {};
+  const reading = new Promise(accept => { gate.go = accept; });
+  const { request, host, sent } = channel({
+    ...listeners(),
+    async handle(req, res) {
+      await reading; // the service is busy and does not read yet
+      req.on('data', () => {});
+      await new Promise(accept => req.once('end', accept));
+      res.writeHead(200);
+      res.end('ok');
+    },
+  });
+  const credit = () => sent.filter(item => item.t === 'body-credit').reduce((sum, item) => sum + item.bytes, 0);
+  const done = request(8, 'POST', '/api/assets/logo', {}, true);
+  await host.receive({ t: 'body', id: 8, data: new Uint8Array(100000) });
+  await new Promise(accept => setTimeout(accept, 20));
+  assert.equal(credit(), 0, 'nothing read, nothing acknowledged');
+  gate.go();
+  await new Promise(accept => setTimeout(accept, 30));
+  assert.equal(credit(), 100000, 'everything the service read is credited');
+  await host.receive({ t: 'body-end', id: 8 });
+  await done;
+  assert.ok(bodyWindow >= 1024 * 1024);
 });

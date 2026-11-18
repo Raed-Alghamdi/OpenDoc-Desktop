@@ -7,21 +7,34 @@
 // why starting is guarded by the flag.
 //
 // Messages, main to host:   { t: 'req', id, method, url, headers, body }   then, when body is true, { t: 'body', id, data }... and { t: 'body-end', id }
+//                           { t: 'credit', id, bytes }   (the page took that much of the response)
 //                           { t: 'abort', id }    { t: 'close' }
 // Messages, host to main:   { t: 'ready' }   { t: 'failed', message }
 //                           { t: 'head', id, status, headers: [[name, value]] }   { t: 'chunk', id, data }   { t: 'end', id, aborted? }
 //                           { t: 'error', id, message }   { t: 'change' }   { t: 'closed' }
+//                           { t: 'body-credit', id, bytes }   (the service took that much of the upload)
+//
+// Flow control, both ways, by credit: the host sends at most `responseWindow` bytes of a response that the page has not
+// taken yet (it stops writing and waits for 'credit'), and the main process sends at most `bodyWindow` bytes of an upload
+// the service has not read yet (it waits for 'body-credit'). Neither side buffers a whole file for a slow reader.
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { Socket } from 'node:net';
 
 export const hostFlag = 'opendoc-service-host';
-/** The host asks the channel to carry at most this much before it stops writing and waits (a response is never read faster than the main process takes it). */
-export const highWater = 4 * 1024 * 1024;
+/** How much of one response may be on its way unacknowledged, and how big each piece is. */
+export const responseWindow = 4 * 1024 * 1024;
+export const chunkSize = 256 * 1024;
+/** How much of one upload may be on its way unacknowledged. */
+export const bodyWindow = 4 * 1024 * 1024;
 
-/** The request the service sees. Its body arrives with `feed(chunk)` and `finish()`. */
+/** The request the service sees. Its body arrives with `feed(chunk)` and `finish()`; `credit(bytes)` is told what the service has read. */
 export class HostRequest extends IncomingMessage {
-  constructor({ method, url, headers }) {
+  #fed = 0;
+  #acked = 0;
+  #credit;
+  constructor({ method, url, headers }, credit = () => {}) {
     super(new Socket()); // The handlers never touch the socket; Node's own cleanup calls destroy() on it.
+    this.#credit = credit;
     this.httpVersion = '1.1';
     this.httpVersionMajor = 1;
     this.httpVersionMinor = 1;
@@ -31,11 +44,23 @@ export class HostRequest extends IncomingMessage {
     this.headers = headers;
     this.rawHeaders = Object.entries(headers).flat();
   }
-  feed(data) { if (data?.length) this.push(Buffer.from(data.buffer, data.byteOffset, data.byteLength)); }
+  feed(data) {
+    if (!data?.length) return;
+    this.#fed += data.length;
+    this.push(Buffer.from(data.buffer, data.byteOffset, data.byteLength));
+  }
   finish() { this.push(null); }
+  // Called when the service wants more: what it has read since the last call is credit for the main process.
+  // read() empties the buffer only after it has called _read(), so the count is taken a moment later.
+  _read() {
+    queueMicrotask(() => {
+      const consumed = this.#fed - this.readableLength - this.#acked;
+      if (consumed > 0) { this.#acked += consumed; this.#credit(consumed); }
+    });
+  }
 }
 
-/** The response the service writes to. Everything written goes to `send`; `queued()` says how much the channel still holds. */
+/** The response the service writes to. Everything written goes to `send(message, size)`, which answers true once the window is full. */
 export class HostResponse extends ServerResponse {
   #id;
   #send;
@@ -67,9 +92,13 @@ export class HostResponse extends ServerResponse {
     this.#open();
     const done = typeof encoding === 'function' ? encoding : callback;
     const data = Buffer.from(chunk, typeof encoding === 'string' ? encoding : undefined);
-    const wait = this.#send({ t: 'chunk', id: this.#id, data: new Uint8Array(data) }, data.length);
+    let full = false;
+    for (let at = 0; at < data.length; at += chunkSize) {
+      const piece = data.subarray(at, at + chunkSize);
+      full = this.#send({ t: 'chunk', id: this.#id, data: new Uint8Array(piece) }, piece.length);
+    }
     done?.();
-    return !wait;
+    return !full;
   }
   end(chunk, encoding, callback) {
     if (this.#finished) return this;
@@ -93,44 +122,44 @@ export class HostResponse extends ServerResponse {
 }
 
 /**
- * Connects a service to a channel. `post(message)` sends to the main process and calls back through `sent` when the
- * channel took it; `receive(message)` is what the channel delivers.
+ * Connects a service to a channel. `post(message)` sends to the main process; `receive(message)` is what the channel delivers.
  * @returns { receive }
  */
 export function serveRequests({ service, post, onClose }) {
   const live = new Map();
-  let queued = 0;
-  const waiting = new Set();
-  const send = (message, size = 0) => {
-    queued += size;
-    post(message, () => {
-      queued -= size;
-      if (queued < highWater / 2) for (const response of [...waiting]) { waiting.delete(response); response.emit('drain'); }
-    });
-    return queued >= highWater;
-  };
-  service.onChange(() => send({ t: 'change' }));
+  service.onChange(() => post({ t: 'change' }));
 
   async function start(message) {
-    const request = new HostRequest({ method: message.method, url: message.url, headers: message.headers });
-    const response = new HostResponse(request, message.id, (...args) => {
-      const full = send(...args);
-      if (full) waiting.add(response);
-      return full;
-    });
-    live.set(message.id, { request, response });
-    response.on('close', () => { live.delete(message.id); waiting.delete(response); });
+    const entry = { outstanding: 0, waiting: false };
+    const request = new HostRequest({ method: message.method, url: message.url, headers: message.headers }, bytes => post({ t: 'body-credit', id: message.id, bytes }));
+    const send = (item, size = 0) => {
+      entry.outstanding += size;
+      post(item);
+      if (entry.outstanding >= responseWindow) { entry.waiting = true; return true; }
+      return false;
+    };
+    const response = new HostResponse(request, message.id, send);
+    Object.assign(entry, { request, response });
+    live.set(message.id, entry);
+    response.on('close', () => live.delete(message.id));
     if (!message.body) request.finish();
     try { await service.handle(request, response); }
-    catch (error) { send({ t: 'error', id: message.id, message: String(error?.message ?? error) }); response.destroy(); }
+    catch (error) { post({ t: 'error', id: message.id, message: String(error?.message ?? error) }); response.destroy(); }
   }
 
   return {
     async receive(message) {
       if (message.t === 'req') return start(message);
-      if (message.t === 'body') { live.get(message.id)?.request.feed(message.data); return; }
-      if (message.t === 'body-end') { live.get(message.id)?.request.finish(); return; }
-      if (message.t === 'abort') { const entry = live.get(message.id); entry?.request.destroy(); entry?.response.destroy(); return; }
+      const entry = live.get(message.id);
+      if (message.t === 'body') { entry?.request.feed(message.data); return; }
+      if (message.t === 'body-end') { entry?.request.finish(); return; }
+      if (message.t === 'credit') {
+        if (!entry) return;
+        entry.outstanding = Math.max(0, entry.outstanding - message.bytes);
+        if (entry.waiting && entry.outstanding < responseWindow) { entry.waiting = false; entry.response.emit('drain'); }
+        return;
+      }
+      if (message.t === 'abort') { entry?.request.destroy(); entry?.response.destroy(); return; }
       if (message.t === 'close') await onClose();
     },
   };

@@ -2,6 +2,7 @@
 // desktop-shell.mjs calls createUpdates() once; everything else is in controller.mjs.
 import { app, dialog } from 'electron';
 import { appendFile, mkdir, rename, stat } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { openExternal } from '../session-policy.mjs';
 import { createUpdaterClass } from './classes.mjs';
@@ -16,6 +17,22 @@ import { UpdateController } from './controller.mjs';
 export const updaterEnvironment = { resources: 'OPENDOC_DESKTOP_UPDATE_RESOURCES' };
 
 const logLimit = 512 * 1024;
+
+// electron-updater reads the app's version from Electron's app.getVersion(), which answers "0.0" when the app is started as a script
+// (development and tests). The shell knows the real version (desktop/package.json, the same one About shows), so it is handed over
+// through the adapter. Passing an adapter also means passing the HTTP executor, which the constructor otherwise creates.
+const require = createRequire(import.meta.url);
+const { ElectronAppAdapter } = require('electron-updater/out/ElectronAppAdapter');
+const { ElectronHttpExecutor } = require('electron-updater/out/electronHttpExecutor');
+
+class VersionedAppAdapter extends ElectronAppAdapter {
+  constructor(version) {
+    super();
+    this.fixedVersion = version;
+  }
+
+  get version() { return this.fixedVersion; }
+}
 
 /** One line per event, to the console and to <profile>/logs/updater.log (the log is moved aside once it passes 512 KB). */
 function fileLogger(folder) {
@@ -51,7 +68,8 @@ export function createUpdates({ config, getVersion, getBuild, parent, onChange, 
     getBuild,
     createUpdater: (type, { feed, logger }) => {
       const Updater = createUpdaterClass(type, { getBuild: () => getBuild() ?? 0 });
-      const updater = new Updater();
+      const updater = new Updater(null, new VersionedAppAdapter(getVersion()));
+      updater.httpExecutor = new ElectronHttpExecutor((authInfo, callback) => updater.emit('login', authInfo, callback));
       updater.logger = logger;
       updater.forceDevUpdateConfig = !app.isPackaged; // a test switch on a development Electron
       if (testResources) updater.updateConfigPath = join(testResources, 'app-update.yml'); // before setFeedURL: the setter clears the client

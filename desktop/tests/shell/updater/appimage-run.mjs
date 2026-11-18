@@ -11,6 +11,9 @@
 //   (SIGTERM), the AppImage file is now build 2, ~/.local/bin/opendoc (in the scratch HOME) still works, and the next launch is build 2.
 // Case 2: the feed serves a build 2 file whose bytes are corrupted while the metadata keeps the real SHA-512. The update is refused,
 //   the AppImage stays build 1, nothing is installed, and the next launch is build 1.
+// Case 3: the AppImage's folder is made read-only after the download, so staging the new file beside the AppImage fails at quit. The
+//   old AppImage is untouched and still runs (nothing is unlinked first, no temporary file is left), and once the folder is writable
+//   again the next launch swaps in the download it kept.
 // Every launch is `xvfb-run` inside `timeout -s KILL`, with the Claude app's display and Electron variables removed. It never touches the real HOME.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { constants, createReadStream } from 'node:fs';
@@ -187,6 +190,8 @@ try {
   check(/swap at quit: done/.test(text1), 'the swap ran at quit');
   check(await hashFile(good.appImage) === second.sha512, 'the AppImage file is now build 2 (SHA-512 of the metadata)');
   check(((await stat(good.appImage)).mode & 0o111) !== 0, 'the AppImage is still executable');
+  check((await readdir(join(good.appImage, '..'))).join(',') === appName, 'the AppImage folder holds the AppImage and nothing else (no staging file)', (await readdir(join(good.appImage, '..'))).join(', '));
+  check(!/Executing:|APPIMAGE_EXIT_AFTER_INSTALL/.test(text1), 'the new AppImage was not run by the swap');
   check(await readFile(good.command, 'utf8').then(text => text.includes(`APPIMAGE=${good.appImage}`) || text.includes(good.appImage), () => false), '~/.local/bin/opendoc points at the same AppImage path');
   const cli = runCommand(good);
   check(cli.status === 0 && cli.text.length > 20, '~/.local/bin/opendoc works after the swap', `exit ${cli.status}`);
@@ -215,6 +220,38 @@ try {
   check(paths.at(-1) === '/generic/latest-linux.yml', 'the last request is the relaunch check: build 2 downloaded nothing more');
   const bytes = requests.filter(request => pathOf(request).endsWith('.AppImage')).reduce((sum, request) => sum + request.sent, 0);
   console.log(`   downloaded ${bytes} bytes of a ${second.size} byte file${bytes < second.size ? ' (a differential download)' : ''}`);
+  await feed.stop();
+  feed = null;
+
+  // ---------- case 3: staging fails at quit ----------
+  console.log('\nCase 3: the AppImage folder turns read-only after the download');
+  feed = await startFeed(join(work, 'feed-locked'));
+  await publish(feed, second);
+  const locked = await scratchHome('locked', first, feed);
+  const lockedFolder = join(locked.appImage, '..');
+  try {
+    run = launch(locked, 'locked-1');
+    launches.push(run);
+    check(await until('the download', async () => /Z downloaded /.test(await logText(locked)), { run }), 'build 1 downloaded build 2');
+    await chmod(lockedFolder, 0o555);
+    const exitLocked = await quit(run);
+    check(exitLocked !== null, 'the app quit on SIGTERM', exitLocked ? JSON.stringify(exitLocked) : 'it had to be killed');
+    const textLocked = await logText(locked);
+    check(/The AppImage was not replaced, the current one is untouched/.test(textLocked), 'the failed swap is logged', (textLocked.split('\n').find(line => /not replaced/.test(line)) ?? '').slice(0, 160));
+    check(await hashFile(locked.appImage) === first.sha512, 'the old AppImage is untouched (SHA-512 unchanged)');
+    check((await readdir(lockedFolder)).join(',') === appName, 'no staging file is left in the folder');
+    await chmod(lockedFolder, 0o755);
+    const cliLocked = runCommand(locked);
+    check(cliLocked.status === 0, '~/.local/bin/opendoc still works with the old AppImage', `exit ${cliLocked.status}`);
+    check((await runtimeFolders(locked)).every(name => name.endsWith(`-${first.build}`)) && (await runtimeFolders(locked)).length > 0, 'the command ran build 1', (await runtimeFolders(locked)).join(', '));
+
+    const markLocked = await logSize(locked);
+    run = launch(locked, 'locked-2');
+    launches.push(run);
+    check(await until('the kept download', async () => /Z downloaded /.test(await logText(locked, markLocked)), { run }), 'the old AppImage starts and has the kept download ready again');
+    check(await quit(run) !== null, 'it quit on SIGTERM');
+    check(await hashFile(locked.appImage) === second.sha512, 'with the folder writable again the swap succeeded (build 2)');
+  } finally { await chmod(lockedFolder, 0o755).catch(() => {}); }
   await feed.stop();
   feed = null;
 

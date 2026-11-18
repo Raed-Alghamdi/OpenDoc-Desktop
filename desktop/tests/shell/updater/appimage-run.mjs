@@ -13,7 +13,7 @@
 //   the AppImage stays build 1, nothing is installed, and the next launch is build 1.
 // Case 3: the AppImage's folder is made read-only after the download, so staging the new file beside the AppImage fails at quit. The
 //   old AppImage is untouched and still runs (nothing is unlinked first, no temporary file is left), and once the folder is writable
-//   again the next launch swaps in the download it kept.
+//   again the next launch tells the user once why the swap failed, and swaps in the download it kept.
 // Every launch is `xvfb-run` inside `timeout -s KILL`, with the Claude app's display and Electron variables removed. It never touches the real HOME.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { constants, createReadStream } from 'node:fs';
@@ -249,6 +249,8 @@ try {
     run = launch(locked, 'locked-2');
     launches.push(run);
     check(await until('the kept download', async () => /Z downloaded /.test(await logText(locked, markLocked)), { run }), 'the old AppImage starts and has the kept download ready again');
+    check(/the last update could not be installed: .*EACCES/.test(await logText(locked, markLocked)), 'the next launch noticed the failed swap and says why (once)');
+    check(JSON.parse(await readFile(locked.config, 'utf8')).updateNotices?.swapFailed === undefined, 'the record is cleared once it was shown');
     check(await quit(run) !== null, 'it quit on SIGTERM');
     check(await hashFile(locked.appImage) === second.sha512, 'with the folder writable again the swap succeeded (build 2)');
   } finally { await chmod(lockedFolder, 0o755).catch(() => {}); }

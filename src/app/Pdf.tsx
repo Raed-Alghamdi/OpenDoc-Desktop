@@ -16,7 +16,7 @@ import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask, TextLayer } 
 import worker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { getBlock, type Fragment, type RenderArtifact } from "../shared/types";
 import type { DocumentSelection, TextTarget } from "../shared/selection";
-import { nearestBox, phraseSelection, wordRange, type TextRange } from './phraseSelection';
+import { addsToSelection, nearestBox, phraseSelection, wordRange, type TextRange } from './phraseSelection';
 import { mapPdfTextSpans, pdfSpanRangeForSelection, type PdfSpanMapping } from "./pdfSelection";
 import { loadPdfWithDeadline } from './pdfLoading';
 import { componentName, componentNavigation, isWithin, moveComponentFocus, navigationMove } from './componentNavigation';
@@ -153,8 +153,10 @@ type PdfPageProps = {
   commentPhrases?: DocumentSelection[];
   /** Components chosen in addition to the main selection, by block ID. */
   multi?: ReadonlySet<string>;
-  /** True while two or more components are chosen, so each reports whether it is one of them. */
+  /** True while two or more components are chosen, so each is drawn chosen or not. */
   multiActive?: boolean;
+  /** True while anything is chosen, so each component reports to assistive technology whether it is one of them. */
+  selecting?: boolean;
   onSelect?: (id: string, page: number) => void;
   /** Shift-, Ctrl- or Cmd-click, or Shift+Enter, adds or removes a component. */
   onToggle?: (id: string, page: number) => void;
@@ -184,6 +186,7 @@ export const PdfPage = memo(function PdfPage({
   commentPhrases,
   multi,
   multiActive,
+  selecting,
   onSelect,
   onToggle,
   onComment,
@@ -396,7 +399,7 @@ export const PdfPage = memo(function PdfPage({
   // clicks. A drag instead chooses whole words within the pressed component.
   function startPhrase(event: ReactPointerEvent<HTMLElement>, target: TextTarget) {
     // Shift, Ctrl and Cmd belong to multi-selection: Shift-drag is a box, not a phrase.
-    if (!onPhraseSelect || event.button !== 0 || event.pointerType === 'touch' || event.shiftKey || event.ctrlKey || event.metaKey) return;
+    if (!onPhraseSelect || event.button !== 0 || event.pointerType === 'touch' || addsToSelection(event)) return;
     const element = event.currentTarget;
     const origin = { x: event.clientX, y: event.clientY };
     let anchor: TextRange | undefined, chosen = '', frame = 0, point = origin, dragging = false;
@@ -529,7 +532,7 @@ export const PdfPage = memo(function PdfPage({
       },
     };
   }
-  const modified = (event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => !!onToggle && (event.shiftKey || event.ctrlKey || event.metaKey);
+  const modified = (event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => !!onToggle && addsToSelection(event);
   function rectStyle(f: Pick<Fragment, 'x' | 'y' | 'width' | 'height'>): CSSProperties {
     return {
       left: f.x * scale,
@@ -610,7 +613,7 @@ export const PdfPage = memo(function PdfPage({
               return <Button static key={fragment.id} className={`block-target component-target ${(multiActive ? !!multi?.has(fragment.id) || selected === fragment.id : selected === fragment.id && showBlockSelection) ? 'selected' : ''}`}
                 data-block-id={fragment.id} style={rectStyle(fragment)} {...componentFocus(`block:${fragment.id}`)}
                 aria-label={names.get(`block:${fragment.id}`)}
-                aria-pressed={multiActive ? !!multi?.has(fragment.id) || selected === fragment.id : undefined}
+                aria-pressed={selecting ? !!multi?.has(fragment.id) || selected === fragment.id : undefined}
                 onClick={event => modified(event) ? onToggle?.(fragment.id, number) : onSelect?.(fragment.id, number)}>
                 <span className="block-label" aria-hidden="true">{block?.kind ?? 'Component'}</span>
               </Button>;
@@ -621,7 +624,7 @@ export const PdfPage = memo(function PdfPage({
               return <Button static key={item.target.id} className={`block-target component-target text-component ${fullSelected ? 'selected' : ''}`}
                 data-text-target={item.target.id} style={rectStyle(item)} {...componentFocus(`text:${item.target.id}`)}
                 aria-label={names.get(`text:${item.target.id}`)}
-                aria-pressed={multiActive ? !!multi?.has(item.target.blockId) || selected === item.target.blockId : undefined}
+                aria-pressed={selecting ? !!multi?.has(item.target.blockId) || selected === item.target.blockId : undefined}
                 onPointerDown={event => startPhrase(event, item.target)}
                 onClick={event => {
                   if (modified(event)) { onToggle?.(item.target.blockId, number); return; }

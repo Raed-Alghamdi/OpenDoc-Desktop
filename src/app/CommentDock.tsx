@@ -2,16 +2,29 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import type { Comment } from '../shared/types';
 import { textLang } from '../shared/language';
 import { blockName } from '../shared/history';
+import type { CommentTarget } from './commentPlaces';
 import { Button, IconButton } from './ui';
 import { Icon } from './ui/Icon';
 import { CommentHandoff } from './CommentHandoff';
 import { CommentTime } from './CommentTime';
 import './comment-dock.css';
 
+/** One of the places a comment covers, in page order. */
+export interface CommentDockPlace {
+  target: CommentTarget;
+  page?: number;
+  kind: string;
+  canJump: boolean;
+  /** The place's wording changed and it could not be located again. */
+  textChanged?: boolean;
+}
+
 export interface CommentDockItem {
   comment: Comment;
   page?: number;
   kind: string;
+  /** Present for a comment on two or more places; the row then names them and jumps to each. */
+  places?: CommentDockPlace[];
   canJump: boolean;
   /** The phrase a phrase comment is about. */
   quote?: string;
@@ -37,7 +50,8 @@ export interface CommentDockProps {
   onSaveEdit: (comment: Comment) => void | Promise<void>;
   onCancelEdit: () => void;
   onDelete: (comment: Comment) => void | Promise<void>;
-  onJump: (comment: Comment) => void;
+  /** Without a target, jump to the comment's first place. */
+  onJump: (comment: Comment, target?: CommentTarget) => void;
   /** Return from one component's comments to the whole document's. */
   onShowAll: () => void;
   onClose: () => void;
@@ -92,7 +106,7 @@ export function CommentDock({
     </div>
     <div className="comment-dock-content">
       {error && <p className="comment-error" role="alert">{error}</p>}
-      {items.length ? items.map(({ comment, page, kind, canJump, quote, textChanged }) => <article className={`comment-card ${comment.status}`} key={comment.id} data-comment-id={comment.id}>
+      {items.length ? items.map(({ comment, page, kind, canJump, quote, textChanged, places }) => <article className={`comment-card ${comment.status}`} key={comment.id} data-comment-id={comment.id}>
         {editing?.id === comment.id ? <form onSubmit={event => {
           event.preventDefault();
           if (!connected || busy || !editing.text.trim() || editing.text.trim() === comment.text) return;
@@ -109,7 +123,8 @@ export function CommentDock({
             aria-label={commentName(comment.text).name}
             aria-describedby={[`${cardId(comment.id)}-location`, quote && `${cardId(comment.id)}-quote`, commentName(comment.text).shortened && `${cardId(comment.id)}-text`].filter(Boolean).join(' ')}>
             <span className="comment-location" id={`${cardId(comment.id)}-location`}>
-              <span className="comment-where">{page !== undefined ? <><span>{pageLabel} {page}</span><span aria-hidden="true">·</span><span className="comment-kind">{kind}</span>{canJump && <Icon name="arrow" size={12} />}</> : 'Component unavailable'}</span>
+              <span className="comment-where">{places ? <><span>{places.length} places</span>{canJump && <Icon name="arrow" size={12} />}</>
+                : page !== undefined ? <><span>{pageLabel} {page}</span><span aria-hidden="true">·</span><span className="comment-kind">{kind}</span>{canJump && <Icon name="arrow" size={12} />}</> : 'Component unavailable'}</span>
               {/* Status and age wrap together, so a narrow panel never strands the time on its own line. */}
               <span className="comment-state">
                 <span className="comment-status">{comment.status === 'resolved' ? <><Icon name="check" size={11} />Resolved</> : 'Open'}</span>
@@ -124,9 +139,17 @@ export function CommentDock({
             <IconButton label={changing === comment.id ? 'Deleting comment…' : 'Delete comment'} className="delete-comment" disabled={!connected || busy} onClick={() => { void onDelete(comment); }}><Icon name="trash" size={15} /></IconButton>
           </div>
         </div>}
+        {places && editing?.id !== comment.id && <ul className="comment-places" aria-label={`${places.length} places in this comment`}>
+          {places.map((place, index) => <li key={index}>
+            <Button static className="comment-place" disabled={!place.canJump || busy} onClick={() => onJump(comment, place.target)}
+              aria-label={place.page !== undefined ? `Go to ${pageLabel.toLowerCase()} ${place.page}, ${place.kind}${place.textChanged ? ', text changed' : ''}` : 'Place unavailable'}>
+              {place.page !== undefined ? <><span>{pageLabel} {place.page}</span><span aria-hidden="true">·</span><span className="comment-kind">{place.kind}</span></> : <span>Unavailable</span>}
+            </Button>
+          </li>)}
+        </ul>}
       </article>) : <div className="no-comments">
         <p><strong>{filtered ? 'No comments here yet' : 'No comments yet'}</strong></p>
-        <p>{filtered ? 'Choose Comment in the selection bar to add one.' : `Select a component on the ${pageLabel.toLowerCase()}, or drag across words to choose a phrase, then choose Comment in the selection bar.`} Your agent applies open comments and marks them resolved.</p>
+        <p>{filtered ? 'Choose Comment in the selection bar to add one.' : `Select a component on the ${pageLabel.toLowerCase()}, or drag across words to choose a phrase, then choose Comment in the selection bar. Shift-click, or Shift-drag a box, to include several components in one comment.`} Your agent applies open comments and marks them resolved.</p>
       </div>}
       {footer}
     </div>

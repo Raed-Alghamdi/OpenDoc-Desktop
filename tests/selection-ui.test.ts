@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { commentDraftKey, componentCommentDraftKey, createCommentDraftStore } from '../src/app/commentDrafts';
+import { commentDraftKey, componentCommentDraftKey, createCommentDraftStore, multiCommentDraftKey } from '../src/app/commentDrafts';
+import { addsToSelection } from '../src/app/phraseSelection';
 import type { DocumentSelection } from '../src/shared/selection';
 
 const selection: DocumentSelection = { blockId: 'opening', targetId: 'opening:text', start: 3, end: 8, quote: 'words', page: 2, revision: 7, renderHash: 'selected-preview' };
@@ -27,4 +28,24 @@ test('phrase drafts remain separate from other phrases and legacy whole-block dr
   assert.equal(store.read('report')[secondKey], 'Different note.');
   assert.equal(store.read('report')[blockKey], 'Older paragraph note.');
   assert.equal(commentDraftKey(null), '');
+});
+
+test('Shift, Ctrl and Cmd add to the selection, so Cmd-click works on macOS where Ctrl-click is the context menu', () => {
+  const none = { shiftKey: false, ctrlKey: false, metaKey: false };
+  assert.equal(addsToSelection(none), false);
+  assert.equal(addsToSelection({ ...none, shiftKey: true }), true);
+  assert.equal(addsToSelection({ ...none, ctrlKey: true }), true);
+  assert.equal(addsToSelection({ ...none, metaKey: true }), true);
+});
+
+test('a comment on several components keeps its own draft, whichever order they were chosen in', () => {
+  const first = componentCommentDraftKey(selection);
+  const others: DocumentSelection[] = [{ blockId: 'closing', page: 3 }, { blockId: 'chart', page: 2 }];
+  const key = multiCommentDraftKey(first, others);
+  assert.notEqual(key, first, 'The first component alone has its own draft.');
+  assert.equal(multiCommentDraftKey(first, [...others].reverse()), key);
+  assert.notEqual(multiCommentDraftKey(first, others.slice(0, 1)), key);
+  assert.notEqual(multiCommentDraftKey(commentDraftKey(selection), others), key, 'A phrase first is a different comment.');
+  assert.equal(multiCommentDraftKey(first, []), '');
+  assert.equal(multiCommentDraftKey('', others), '');
 });

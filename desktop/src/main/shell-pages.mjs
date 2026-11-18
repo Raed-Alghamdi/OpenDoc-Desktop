@@ -1,4 +1,4 @@
-// The app's own pages (workspace picker, crash screen) are files in desktop/src/renderer, served from
+// The app's own pages (workspace picker, crash screen, upgrade progress and result, backups) are files in desktop/src/renderer, served from
 // app://shell/ by the main process. The app loads no file:// pages (the file protocol keeps no fetch or storage
 // when its extra privileges are off), and these pages share no origin with the OpenDoc workspace pages.
 import { protocol } from 'electron';
@@ -7,7 +7,7 @@ import { extname, join } from 'node:path';
 import { shellHost, shellScheme } from './identity.mjs';
 import { shellContentSecurityPolicy } from './policy.mjs';
 
-const pages = new Set(['picker.html', 'picker.js', 'crash.html', 'crash.js', 'shell.css']);
+const pages = new Set(['picker.html', 'picker.js', 'crash.html', 'crash.js', 'status.html', 'status.js', 'result.html', 'result.js', 'backups.html', 'backups.js', 'shell.css']);
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 const rendererFolder = new URL('../renderer/', import.meta.url);
 

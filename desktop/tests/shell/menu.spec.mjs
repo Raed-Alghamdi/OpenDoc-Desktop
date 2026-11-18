@@ -33,7 +33,7 @@ test.describe.serial('menus', () => {
   test('the menu has Open, New, Reveal, Help and the Edit roles, and no reload or developer tools', async () => {
     expect(await menuLabels(app)).toEqual(['File', 'Edit', 'View', 'Window', 'Help']);
     const file = await menuLabels(app, ['File']);
-    expect(file).toEqual(expect.arrayContaining(['Open Workspace…', 'New Workspace…', 'Open Recent', 'Reveal Workspace', 'Show Log', 'Quit']));
+    expect(file).toEqual(expect.arrayContaining(['Open Workspace…', 'New Workspace…', 'Open Recent', 'Reveal Workspace', 'Workspace Backups…', 'Show Log', 'Quit']));
     expect(await menuLabels(app, ['Edit'])).toEqual(expect.arrayContaining(['Undo', 'Redo', 'Cut', 'Copy', 'Paste', 'Select All']));
     const view = (await menuLabels(app, ['View'])).join(' ');
     expect(view).not.toMatch(/reload|devtools|developer/i);

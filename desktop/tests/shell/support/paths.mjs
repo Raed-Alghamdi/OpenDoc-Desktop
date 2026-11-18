@@ -14,6 +14,8 @@ export const cache = process.env.OPENDOC_SHELL_TEST_CACHE ?? join(repo, 'tmp', '
 export const runtimeDir = join(cache, 'runtime');
 export const goldenWorkspace = join(cache, 'golden');
 export const workDir = join(cache, 'work');
+// npm's cache for every `npm install` the tests run (the scratch HOME has none), so a run never touches the real ~/.npm.
+export const npmCache = join(cache, 'npm-cache');
 // A linux-unpacked layout (the app's executable, resources/runtime, resources/cli) the agent command is tested against:
 // the Electron of this worktree with the test runtime, or a copy of a real build named by OPENDOC_SHELL_TEST_UNPACKED.
 export const unpackedDir = join(cache, 'unpacked');

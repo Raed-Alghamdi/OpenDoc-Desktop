@@ -31,7 +31,7 @@ export function nodeModeEnvironment(extra = {}, base = process.env) {
 }
 
 /** Run the CLI and collect its output. */
-export function runCli(runtime, args, { cwd, env, timeout = 10 * 60_000 } = {}) {
+export function runCli(runtime, args, { cwd, env, timeout = 10 * 60_000, signal } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cliPath(runtime), ...args], { cwd, env: nodeModeEnvironment(env), stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
@@ -39,7 +39,9 @@ export function runCli(runtime, args, { cwd, env, timeout = 10 * 60_000 } = {}) 
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
     const timer = setTimeout(() => child.kill('SIGKILL'), timeout);
-    child.once('error', error => { clearTimeout(timer); reject(error); });
-    child.once('close', (code, signal) => { clearTimeout(timer); resolve({ code: code ?? 1, signal, stdout, stderr }); });
+    const stop = () => child.kill('SIGKILL'); // the caller gave up (the app is quitting)
+    if (signal?.aborted) stop(); else signal?.addEventListener('abort', stop, { once: true });
+    child.once('error', error => { clearTimeout(timer); signal?.removeEventListener('abort', stop); reject(error); });
+    child.once('close', (code, killed) => { clearTimeout(timer); signal?.removeEventListener('abort', stop); resolve({ code: code ?? 1, signal: killed, stdout, stderr }); });
   });
 }

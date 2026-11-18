@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upgrade result</title>
+<link rel="stylesheet" href="shell.css">
+</head>
+<body>
+<main>
+  <h1 id="title">The upgrade needs your attention</h1>
+  <p class="lede" id="summary"></p>
+  <h2>What failed</h2>
+  <ul class="problems" id="failures"></ul>
+  <h2>Your backup</h2>
+  <p>A copy of the workspace from before the upgrade is here:</p>
+  <p class="mono" id="backup"></p>
+  <p class="hint" id="how">To go back to it later, open Workspace Backups in the File menu. Backups are never deleted by the app.</p>
+  <div class="actions">
+    <button id="copy" class="primary" type="button">Copy prompt for your agent</button>
+    <button id="restore" type="button">Restore backup</button>
+    <button id="open" type="button" hidden>Open anyway</button>
+    <button id="close" type="button">Close</button>
+  </div>
+  <div id="message" role="status" aria-live="polite"></div>
+</main>
+<script src="result.js"></script>
+</body>
+</html>

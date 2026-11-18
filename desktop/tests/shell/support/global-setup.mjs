@@ -6,13 +6,13 @@ import { existsSync } from 'node:fs';
 import { copyFile, chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { assertVirtualDisplay } from './environment.mjs';
-import { cache, cliResources, desktopDir, electronExecutable, goldenWorkspace, repo, runtimeDir, unpackedDir, workDir } from './paths.mjs';
+import { cache, cliResources, desktopDir, electronExecutable, goldenWorkspace, npmCache, repo, runtimeDir, unpackedDir, workDir } from './paths.mjs';
 import { killElectronProcesses } from './processes.mjs';
 
 const gentle = ['nice', '-n', '19', 'ionice', '-c', '3'];
 
 function run(command, args, options = {}) {
-  const result = spawnSync(gentle[0], [...gentle.slice(1), command, ...args], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', ...options });
+  const result = spawnSync(gentle[0], [...gentle.slice(1), command, ...args], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', ...options, env: { ...(options.env ?? process.env), ...(['npm', process.execPath].includes(command) ? { npm_config_cache: npmCache } : {}) } });
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed (${result.status}):\n${result.stdout}\n${result.stderr}`);
   return result.stdout;
 }

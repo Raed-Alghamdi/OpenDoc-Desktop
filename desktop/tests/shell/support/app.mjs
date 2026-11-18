@@ -2,23 +2,49 @@
 // profile folder, and Playwright's Electron driver on the virtual display.
 import { _electron } from '@playwright/test';
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdirSync, readFileSync } from 'node:fs';
+import { cp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { electronEnvironment } from './environment.mjs';
-import { electronExecutable, goldenWorkspace, mainEntry, runtimeDir, workDir } from './paths.mjs';
+import { electronExecutable, goldenWorkspace, mainEntry, npmCache, runtimeDir, workDir } from './paths.mjs';
 
 let counter = 0;
 
-/** A new scratch workspace: a reflink copy of the template, so the copy is cheap and independent. */
-export async function newWorkspace(name = 'ws') {
+/**
+ * A new scratch workspace: a reflink copy of the template, so the copy is cheap and independent.
+ * By default it is set up the way the app leaves a workspace it opened: node_modules is a link to the test runtime and the
+ * marker says `managed`. `{ npm: true }` keeps the template's own npm node_modules (a real folder) and its marker as they are.
+ */
+export async function newWorkspace(name = 'ws', { npm = false } = {}) {
   const target = join(workDir, `${name}-${++counter}`);
   await mkdir(workDir, { recursive: true });
-  const copy = spawnSync('cp', ['-a', '--reflink=auto', goldenWorkspace, target], { encoding: 'utf8' });
-  if (copy.status !== 0) throw new Error(`Could not copy the template workspace: ${copy.stderr}`);
+  if (npm) {
+    const copy = spawnSync('cp', ['-a', '--reflink=auto', goldenWorkspace, target], { encoding: 'utf8' });
+    if (copy.status !== 0) throw new Error(`Could not copy the template workspace: ${copy.stderr}`);
+  } else {
+    await mkdir(target);
+    for (const entry of await readdir(goldenWorkspace)) {
+      if (entry === 'node_modules') continue;
+      const copy = spawnSync('cp', ['-a', '--reflink=auto', join(goldenWorkspace, entry), join(target, entry)], { encoding: 'utf8' });
+      if (copy.status !== 0) throw new Error(`Could not copy the template workspace: ${copy.stderr}`);
+    }
+    await symlink(join(runtimeDir, 'node_modules'), join(target, 'node_modules'), 'dir');
+    const marker = join(target, '.opendoc', 'workspace.json');
+    await writeFile(marker, `${JSON.stringify({ ...JSON.parse(await readFile(marker, 'utf8')), managed: true }, null, 2)}\n`);
+  }
   await rm(join(target, '.opendoc', 'server.json'), { force: true });
   return target;
 }
+
+/** A scratch HOME with its own XDG folders, so no test ever reads or writes the real ~/.config, ~/.local/share or ~/.cache. */
+export function newHome(name = 'home') {
+  const home = join(workDir, `${name}-${++counter}`);
+  for (const folder of ['.config', '.local/share', '.cache']) mkdirSync(join(home, folder), { recursive: true });
+  return home;
+}
+
+/** Where the app keeps its data (backups, the AppImage's runtime copy) for a launch with this HOME. */
+export const dataFolder = home => join(home, '.local', 'share', 'opendoc-desktop');
 
 /** A fresh profile folder (Electron's userData, which also holds config.json). */
 export async function newProfile(name = 'profile', config) {
@@ -39,7 +65,13 @@ function builtTarball() {
 }
 
 export function appEnvironment(extra = {}) {
+  const home = extra.HOME ?? newHome();
   return electronEnvironment({
+    HOME: home,
+    XDG_CONFIG_HOME: join(home, '.config'),
+    XDG_DATA_HOME: join(home, '.local', 'share'),
+    XDG_CACHE_HOME: join(home, '.cache'),
+    npm_config_cache: npmCache,
     OPENDOC_DESKTOP_RUNTIME: runtimeDir,
     // `opendoc init` installs the package from the tarball the global setup built, so no test needs the network.
     OPENDOC_PACKAGE_TARBALL: builtTarball(),
@@ -50,7 +82,11 @@ export function appEnvironment(extra = {}) {
 
 /** Start the app with Playwright and wait for its first window. */
 export async function launchApp({ profile, env, args } = {}) {
-  const app = await _electron.launch({ executablePath: electronExecutable, args: appArguments(profile, args), env: appEnvironment(env), timeout: 90_000 });
+  const environment = appEnvironment(env);
+  const app = await _electron.launch({ executablePath: electronExecutable, args: appArguments(profile, args), env: environment, timeout: 90_000 });
+  app.home = environment.HOME;
+  app.profile = profile;
+  app.dataFolder = dataFolder(environment.HOME);
   // What the main process prints (the service supervisor logs here), for failures and for tests that read it.
   app.output = [];
   for (const stream of [app.process().stdout, app.process().stderr]) stream?.on('data', chunk => app.output.push(String(chunk)));
@@ -69,14 +105,17 @@ export function spawnApp({ profile, env, args } = {}) {
 
 /**
  * Replace Electron's native dialogs and "open in the OS" calls with recorders in the main process.
- * `config`: openDialog (what showOpenDialog returns), saveDialog, messageChoice (a button label or index).
+ * `config`: openDialog (what showOpenDialog returns), saveDialog, messageChoice (a button label or index, or an object of those by box title),
+ * checkboxChecked (the answer for a box that has a checkbox).
  * Change the answers later with setNative; read what was asked with nativeCalls.
  */
 export async function stubNative(app, config = {}) {
   await app.evaluate(({ dialog, shell }, initial) => {
-    const state = globalThis.__native = { config: initial, external: [], folders: [], messages: [], saves: [], opens: [] };
+    const state = globalThis.__native = { config: initial, external: [], folders: [], messages: [], saves: [], opens: [], trashed: [] };
     const choose = options => {
-      const wanted = state.config.messageChoice;
+      // `messageChoice` is one answer for every box, or an object that answers by the box's title (a box not named gets the first button).
+      const given = state.config.messageChoice;
+      const wanted = given && typeof given === 'object' ? given[options.title] : given;
       const index = typeof wanted === 'number' ? wanted : (options.buttons ?? []).indexOf(wanted);
       return index >= 0 ? index : 0;
     };
@@ -85,7 +124,16 @@ export async function stubNative(app, config = {}) {
     shell.openPath = async path => { state.folders.push(path); return ''; };
     dialog.showOpenDialog = async (...args) => { state.opens.push(args.at(-1)); return state.config.openDialog ?? { canceled: true, filePaths: [] }; };
     dialog.showSaveDialog = async (...args) => { state.saves.push(args.at(-1)); return state.config.saveDialog ?? { canceled: true }; };
-    dialog.showMessageBox = async (...args) => { const options = args.at(-1); state.messages.push(options); return { response: choose(options), checkboxChecked: false }; };
+    dialog.showMessageBox = async (...args) => { const options = args.at(-1); state.messages.push(options); return { response: choose(options), checkboxChecked: Boolean(options.checkboxLabel && state.config.checkboxChecked) }; };
+    // The OS trash is never used: a trashed item is moved into <XDG_DATA_HOME>/Trash and recorded.
+    shell.trashItem = async path => {
+      const fs = process.getBuiltinModule('node:fs/promises'); // a dynamic import does not work in this context
+      const path_ = process.getBuiltinModule('node:path');
+      state.trashed.push(path);
+      const folder = path_.join(process.env.XDG_DATA_HOME ?? '/nonexistent', 'Trash');
+      await fs.mkdir(folder, { recursive: true });
+      await fs.rename(path, path_.join(folder, `${path_.basename(path)}-${state.trashed.length}`));
+    };
     dialog.showMessageBoxSync = (...args) => { const options = args.at(-1); state.messages.push(options); return choose(options); };
   }, config);
 }

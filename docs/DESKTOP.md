@@ -36,23 +36,50 @@ env -u ELECTRON_FORCE_IS_PACKAGED -u ELECTRON_RUN_AS_NODE node_modules/.bin/elec
 | `policy.mjs` | The rules above as pure functions (tested without Electron). |
 | `config.mjs`, `desktop-record.mjs`, `lock.mjs`, `service-session.mjs`, `window-state.mjs` | The files the app reads and writes, each with its own tests. |
 | `menu.mjs`, `about.mjs` | The application menu and the About dialog. |
+| `workspace/` | Linking a workspace to the app's OpenDoc, the version table, the upgrade, backups and the AppImage's runtime copy (see "Workspaces and versions"). |
 | `runtime.mjs`, `process-info.mjs`, `identity.mjs`, `shell-pages.mjs` | Where the runtime is and how to run its CLI; questions about other processes; names; the app's own pages. |
 
-`desktop/src/renderer/` holds the app's own pages (workspace picker, crash screen). They are served from `app://shell/` by the main process, never from `file://`, and get a small API from `desktop/src/preload/shell.cjs`. The workspace page (`app://opendoc/`, top frame only) gets only the two bridge functions described below.
+`desktop/src/renderer/` holds the app's own pages (workspace picker, crash screen, upgrade progress and result, the backups list). They are served from `app://shell/` by the main process, never from `file://`, and get a small API from `desktop/src/preload/shell.cjs`. The workspace page (`app://opendoc/`, top frame only) gets only the two bridge functions described below.
 
 ## Opening a workspace
 
 Everything below happens before the window loads, in this order, and any failure stops the open with a message the picker (or a dialog, for menu actions) shows:
 
-1. The folder must hold `.opendoc/workspace.json`.
+1. The folder must hold `.opendoc/workspace.json`, or a `package.json` (a synced workspace that has not been used on this device yet: see "Workspaces and versions"). On an AppImage whose runtime copy failed, the open is refused here with that error.
 2. `.opendoc/desktop.json` (C3): a live opendoc-desktop on it means "already open elsewhere"; a stale one (its pid is gone, or now belongs to another program) is removed.
 3. `.opendoc/server.json`: a running browser-edition service means the workspace is refused, with a button that runs `opendoc stop`.
 4. The workspace lock (`.opendoc/update.lock`, the CLI's own lock): taken while the workspace opens. A stale lock (its pid is gone) is reported and cleared only when the user asks; a live or damaged one is never offered for clearing.
-5. Another workspace that is open is closed first (with the unsaved-edits question), then its service stops.
-6. The service host starts (see below): a run-as-Node child of the app's executable, with the workspace as its working directory, the runtime's OpenDoc loaded through tsx, and an IPC channel; it has no listener and writes no `server.json`. It runs in its own process group, guarded three ways (see "Never left behind" below).
-7. `desktop.json` is written, the workspace becomes `defaultWorkspace` and heads `recentWorkspaces` in `config.json`, the window opens, the lock is released.
+5. The workspace is prepared (`workspace/prepare.mjs`, see "Workspaces and versions"): marker or adoption, the `node_modules` link, `.claude/skills`, the version table and the upgrade. A refusal at any step releases the lock and leaves the workspace as it was (an empty `.opendoc` folder that the lock made is removed again).
+6. Another workspace that is open is closed first (with the unsaved-edits question), then its service stops.
+7. The service host starts (see below): a run-as-Node child of the app's executable, with the workspace as its working directory, the runtime's OpenDoc loaded through tsx, and an IPC channel; it has no listener and writes no `server.json`. It runs in its own process group, guarded three ways (see "Never left behind" below). A workspace that must be read-only is started with `readOnly` (see "Workspaces and versions").
+8. `desktop.json` is written, the workspace becomes `defaultWorkspace` and heads `recentWorkspaces` in `config.json`, the window opens, the lock is released.
 
 On quit, the service is asked to close (it finishes accepted saves first; SIGKILL after 8 seconds), `desktop.json` is removed and the lock is released. A workspace that is still opening when the app quits is cancelled: its host is killed, its lock released (the shell keeps the pending open, so `shutdown()` does not depend on the open having finished) and nothing is written. After a `kill -9` of the main process the host and everything it started are gone within about a second (see "Never left behind"), and `desktop.json` and, if the app was opening a workspace, `update.lock` stay behind, stale, for the next launch to report (C3: a stale lock is never cleared on its own; the picker offers "Clear stale lock").
+
+## Workspaces and versions
+
+A workspace is a folder the user owns; the OpenDoc that runs it is the app's. Everything here is in `desktop/src/main/workspace/` and runs while a workspace opens (step 5 above), before the host starts.
+
+**Where the runtime is.** The deb, rpm, pacman and macOS builds run from `resources/runtime`, which stays put. An AppImage's resources live in a mount that goes away with the app, so at launch the app copies `resources/runtime` to `<data>/runtime/<version>-<build>/` (`<data>` is `$XDG_DATA_HOME/opendoc-desktop`, else `~/.local/share/opendoc-desktop`; `~/Library/Application Support/opendoc-desktop` on macOS) and runs the service host and `runCli` from the copy. The copy is made in a `.tmp.XXXXXX` folder beside it and renamed, so it is whole or absent; it is skipped when a copy with the same `build-info.json` is there (the agent command makes the same copy by the same rule); a copy that fails (a full disk) is shown when a workspace is opened and is never half-used. Other copies are pruned at every launch, and a `runtime/current` link, switched atomically, always points at the copy of this build: workspace links name `<data>/runtime/current/node_modules`, so pruning never breaks a workspace. `OPENDOC_DESKTOP_RUNTIME` still names a runtime for development and tests, and the copy is made whenever the `APPIMAGE` variable is set.
+
+**The link.** `node_modules` in a workspace is a symlink to the runtime's `node_modules`, checked on every open: a missing link is made, a dangling or foreign one is replaced (a new link under a temporary name, then a rename). A real `node_modules` folder (or a file with that name) is never deleted without asking: the app asks once, "Use the app's OpenDoc" moves it to the trash and links, "Leave it as it is" leaves it and does not open the workspace. A workspace this app has just created with `init` (it ships an npm-installed `node_modules`) is replaced without asking. `.claude/skills -> ../.agents/skills` is made when `.agents/skills` exists and `.claude/skills` is missing or a dangling link; a real `.claude/skills` folder is never replaced.
+
+**Adoption and the marker.** A folder with a `package.json` that pins OpenDoc but no `.opendoc/workspace.json` (a workspace synced from another device) is offered "Use this workspace on this device". On yes the app writes the marker (`formatVersion` from the runtime's CLI, `edition`, `"managed": true`) and the link. An existing marker without `managed` gets `"managed": true` once the link is in place. `"managed": true` says that `node_modules` is a link to an app's runtime. The workspace's `.gitignore` keeps `.opendoc/workspace.json` in git (`!.opendoc/workspace.json`), so for a git user the flag travels to other devices where there may be no app: the CLI (U1) must act on `managed` only when `managedRuntime()` also finds the app's runtime, and otherwise treat the workspace as an npm one. A workspace of the headless edition is refused (the app opens the normal edition only, and switching edition is not an update); a `package.json` that does not pin `npm:@ryanyahya/opendoc@<exact version>` is refused with that explanation.
+
+**The version table.** The pin is `dependencies.opendoc` in `package.json`; the runtime's version is the app's.
+
+| Workspace pin against the app | What happens |
+|---|---|
+| Same minor, older or equal patch | Opens; the pin moves up to the app's version when behind. |
+| Same minor, newer patch | Read-only: "Update the app to edit it." |
+| Older minor (or major) | One dialog: **Upgrade** (backup first), **Open read-only**, or Cancel, with the box "Upgrade my workspaces without asking from now on" (`upgradeWithoutAsking`). |
+| Newer minor (or major) | Read-only: "This workspace was upgraded by OpenDoc x.y. Update the app to edit it." |
+
+The pin only ever moves up. `package.json` is rewritten atomically with its indentation, key order, line endings and final newline kept, and `package-lock.json` is never touched.
+
+**Read-only.** The app passes `readOnly: { reason, message }` (`reason` is `newer-patch`, `newer-minor`, `declined-upgrade` or `restored-backup`) to the service's `prepareOpenDocService`, which refuses writes with `workspace-read-only` and reports `readOnly` in `GET /api/session`. A service says it can do this by returning `readOnlySupported: true` from `prepareOpenDocService`. The app checks that before anything is changed (the runtime's `service.ts` says it), and again inside the host before the service starts: while it is missing, a workspace that would open read-only is refused with the same message and "Back to workspaces", so a workspace is never opened writable by mistake.
+
+**Upgrade.** Back up, run the registry's steps (`workspace/registry.mjs`; empty for now, and a missing entry still upgrades), move the pin, then run `check` and `review` on every document with the workspace as the working directory. The backup is `<data>/backups/<workspace>-<YYYY-MM-DD-HHMMSS>/` with `backup.json` (source, from and to versions, time, file count, bytes) and `workspace/`, a copy of everything except the top-level `node_modules`, `.opendoc` and `output`; free space is checked first. If everything passes the workspace opens, and a message says where the backup is. Otherwise a result screen lists each failing document with its message and offers **Copy prompt for your agent**, **Restore backup** and Close (and "Open anyway" when only checks and reviews failed). Restore first moves the current versions of the backed-up paths into a new `before-restore` backup, then copies the backup back, and the workspace then counts as read-only. Backups are never deleted automatically; File > Workspace Backups… lists them with Reveal and Delete (to the trash, after a question). A crash part-way through an upgrade leaves the backup, and the next open sees the older pin and asks again.
 
 ## Files
 
@@ -60,7 +87,7 @@ On quit, the service is asked to close (it finishes accepted saves first; SIGKIL
 - `window-state.json` beside it: size, position and maximised state of the workspace window. A saved position off every connected display is dropped.
 - `logs/workspace-<id>.log` beside it: what the service printed, and when the app started and restarted it. The crash screen and the Help menu link to it.
 - Per workspace: `.opendoc/desktop.json` (`{ pid, startedAt, version, build }`) while it is open.
-- `config.json` also holds `commandLineNotices` (`{ path, foreign }`): which one-time notices about the `opendoc` command were shown (see "The `opendoc` command").
+- `config.json` also holds `upgradeWithoutAsking` (a boolean, false until the user ticks "Upgrade my workspaces without asking from now on") and `commandLineNotices` (`{ path, foreign }`): which one-time notices about the `opendoc` command were shown (see "The `opendoc` command").
 
 ## Hardening
 
@@ -85,7 +112,7 @@ On quit, the service is asked to close (it finishes accepted saves first; SIGKIL
 
 ## Menus
 
-File: Open Workspace, New Workspace (a new or empty folder, made with the CLI's `init`), Open Recent, Reveal Workspace, Show Log, Quit. Edit: the standard roles (macOS needs them for copy and paste). View: zoom and full screen only, with no reload and no developer tools. Window. Help: a link to the original project; About opendoc-desktop shows the version, the build number and commit, and credits the original OpenDoc project with its link.
+File: Open Workspace, New Workspace (a new or empty folder, made with the CLI's `init`), Open Recent, Reveal Workspace, Workspace Backups…, Show Log, Quit. Edit: the standard roles (macOS needs them for copy and paste). View: zoom and full screen only, with no reload and no developer tools. Window. Help: a link to the original project; About opendoc-desktop shows the version, the build number and commit, and credits the original OpenDoc project with its link.
 
 ## The `opendoc` command
 
@@ -111,6 +138,8 @@ node desktop/tests/shell/run.mjs --unit     # unit tests, no Electron
 The first run builds the OpenDoc package (`pnpm package:pack --edition normal`, or the tarball named by `OPENDOC_SHELL_TEST_TARBALL`), a runtime folder from it, and a template workspace. Creating a workspace runs `npm install` from the npm cache; the first build needs the registry.
 
 The unit tests include one for the transport that runs a stand-in service in plain Node (`unit/transport.test.mjs`: upload, `Range`, a large answer, changes, abort, a dead and a stopped host, the process group, a failed or hung start, credit and a reader that does not read, a cut-off upload, a bad status, a start cancelled by its signal, and `kill -9` of a parent process while its host is starting, busy in a loop or stopped, a request that is over before its upload is read, and nine ways a broken host can answer, a bad status, header or piece, each a 502 or a failed response with the same host serving the next request) and one for the host's request and response objects (`unit/service-host.test.mjs`, including an upload read with `readable` and `read(n)`), and `unit/sentinel.test.mjs`.
+
+The workspace work has its own tests: `unit/workspace-*.test.mjs` (the version table, pin rewriting, links, adoption, backups and Restore, the registry, the AppImage copy, the open flow with a recording UI, and the read-only handshake with a stand-in service) and `workspace-versions.spec.mjs` (every row of the version table, the upgrade with its backup, the result screen and Restore, adoption, repaired links, the backups list and the AppImage copy, in the app). Every launch gets a scratch `HOME` with its own `XDG_*` folders and npm cache under `tmp/shell-tests/`, so backups and runtime copies never land in a real data folder; a workspace made by `newWorkspace()` is linked to the test runtime and marked `managed`, as the app leaves one (`{ npm: true }` keeps the template's real `node_modules`). The test runtime is OpenDoc 0.6.1 and cannot open read-only yet (U4), so the rows that would open read-only are tested as refusals until U4 merges.
 
 `packaged.spec.mjs` runs the app as it ships: `desktop/src` and `package.json` packed into an `app.asar` (with electron-builder's own packer) and started by the same Electron, to prove that the service host (passed to the child as text) and the page work from inside an asar. It does not test the installers; that is the packaging work's.
 

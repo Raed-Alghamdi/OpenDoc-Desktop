@@ -13,7 +13,7 @@ import { createWriteStream, existsSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { hostFlag } from '../host/service-host.mjs';
 import { serviceHost, serviceOrigin, shellScheme } from './identity.mjs';
 import { nodeModeEnvironment } from './runtime.mjs';
@@ -31,7 +31,7 @@ export class TransportError extends Error {
 
 let hostText;
 /** The host's code as text. It is passed on the command line, so the child never reads a file inside app.asar. */
-const hostSource = () => hostText ??= readFile(new URL('../host/service-host.mjs', import.meta.url), 'utf8');
+const hostSource = () => hostText ??= readFile(fileURLToPath(new URL('../host/service-host.mjs', import.meta.url)), 'utf8');
 
 /**
  * `{ entry, tsx }`: the service module and the loader that runs its TypeScript, from the runtime's `node_modules` or,

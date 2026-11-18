@@ -111,6 +111,8 @@ The first run builds the OpenDoc package (`pnpm package:pack --edition normal`, 
 
 The unit tests include one for the transport that runs a stand-in service in plain Node (`unit/transport.test.mjs`: upload, `Range`, a large answer, changes, abort, a dead and a stopped host, the process group, a failed or hung start) and one for the host's request and response objects (`unit/service-host.test.mjs`).
 
+`packaged.spec.mjs` runs the app as it ships: `desktop/src` and `package.json` packed into an `app.asar` (with electron-builder's own packer) and started by the same Electron, to prove that the service host (passed to the child as text) and the page work from inside an asar. It does not test the installers; that is the packaging work's.
+
 Not covered by the tests (they need a person on a real display): native Wayland and fractional scaling, the GPU, input methods, the real clipboard, the real file chooser and file manager, and dropping a file from a file manager.
 
 The agent command has its own spec, `command.spec.mjs`, run against a linux-unpacked layout (this worktree's Electron renamed `opendoc-desktop`, the test runtime in `resources/runtime`, the launchers in `resources/cli`). Point `OPENDOC_SHELL_TEST_UNPACKED` at a real `linux-unpacked` folder to test a real build instead (it is copied, never changed). Every command test uses a scratch `HOME`, and a tripwire `node`, `npm` and `npx` first on the PATH proves that no system Node is used.

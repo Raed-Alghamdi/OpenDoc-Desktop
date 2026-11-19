@@ -505,3 +505,27 @@ test('abandonRestore sets the journal aside inside the safety copy, so nothing i
   assert.equal(await exists(join(root, '.opendoc', 'restore-journal.json')), false);
   assert.equal((await readdir(join(root, '.opendoc'))).some(name => name.startsWith('restore-journal.abandoned-')), true);
 });
+
+test('two "Open anyway" abandons in the same second keep both journals under different names', async () => {
+  const { root } = await fixture();
+  const same = new Date(2026, 10, 19, 10, 0, 0);
+  const names = [];
+  for (const body of ['{ one', '{ two', '{ three']) {
+    await writeFile(join(root, '.opendoc', 'restore-journal.json'), body);
+    assert.equal((await abandonRestore({ root, now: same })).directory, null);
+    assert.equal(await exists(join(root, '.opendoc', 'restore-journal.json')), false);
+  }
+  for (const name of (await readdir(join(root, '.opendoc'))).filter(entry => entry.startsWith('restore-journal.abandoned-'))) names.push([name, await readFile(join(root, '.opendoc', name), 'utf8')]);
+  assert.deepEqual(names.map(([, text]) => text).sort(), ['{ one', '{ three', '{ two']);
+  assert.equal(new Set(names.map(([name]) => name)).size, 3);
+  // The same safety copy named by two journals: the folder keeps both too.
+  const { root: other, dataDir, backup } = await restoring();
+  const crash = async () => restoreBackup({ root: other, dataDir, name: backup.name, now: same, step: async ({ stage }) => { if (stage === 'replace' || stage.startsWith('rollback')) throw new Error('x'); } }).catch(() => {});
+  await crash();
+  const [safety] = (await listBackups(dataDir)).filter(item => item.manifest.kind === 'before-restore');
+  const journal = await readFile(join(other, '.opendoc', 'restore-journal.json'), 'utf8');
+  await abandonRestore({ root: other, now: same });
+  await writeFile(join(other, '.opendoc', 'restore-journal.json'), journal);
+  await abandonRestore({ root: other, now: same });
+  assert.deepEqual((await readdir(safety.directory)).filter(name => name.startsWith('abandoned-restore-journal')).sort(), ['abandoned-restore-journal-2.json', 'abandoned-restore-journal.json']);
+});

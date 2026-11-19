@@ -449,8 +449,12 @@ export async function abandonRestore({ root, now = new Date() }) {
   try { text = await readFile(journalFile(root), 'utf8'); } catch (error) { if (error.code === 'ENOENT') return { directory: null }; throw error; }
   let directory = null;
   try { const journal = JSON.parse(text); if (typeof journal?.beforeDirectory === 'string' && await describe(journal.beforeDirectory)) directory = journal.beforeDirectory; } catch { /* unreadable: kept beside the workspace's own files */ }
-  const target = directory ? join(directory, 'abandoned-restore-journal.json') : join(root, '.opendoc', `restore-journal.abandoned-${stamp(now)}.json`);
-  await writeFile(target, text);
+  // Never over an earlier one: two abandons in the same second (or two journals of the same safety copy) each keep their own file.
+  const [folder, base] = directory ? [directory, 'abandoned-restore-journal'] : [join(root, '.opendoc'), `restore-journal.abandoned-${stamp(now)}`];
+  for (let attempt = 1; ; attempt++) {
+    try { await writeFile(join(folder, `${base}${attempt === 1 ? '' : `-${attempt}`}.json`), text, { flag: 'wx' }); break; }
+    catch (error) { if (error.code !== 'EEXIST') throw error; }
+  }
   await rm(journalFile(root), { force: true });
   return { directory };
 }

@@ -88,7 +88,7 @@ test('pin 0.6.9 without read-only support: refused with the newer-patch message,
   const result = await attempt(context);
   assert.equal(result.ok, false);
   assert.equal(result.code, 'read-only-unsupported');
-  assert.match(result.message, /newer than this app \(0\.6\.1\)\. Update the app to edit it\./);
+  assert.match(result.message, /newer than the 0\.6\.1 in this app\. Update the app to edit it\./);
   assert.deepEqual(await snapshot(context.root), before);
   assert.equal(context.calls.cli.length, 0);
 });
@@ -275,11 +275,20 @@ test('a file named node_modules is asked about as a file', async () => {
   assert.equal(await readFile(join(context.root, 'node_modules'), 'utf8'), 'file');
 });
 
-test('a workspace the app created (created: true) has its fresh npm node_modules replaced without asking', async () => {
-  const context = await setup();
-  await mkdir(join(context.root, 'node_modules', 'opendoc'), { recursive: true });
-  assert.equal((await attempt(context, { created: true })).ok, true);
+test('a workspace the app created (init from the runtime: a link, a managed marker with createdWith) opens with no question and nothing changed', async () => {
+  const context = await setup({ workspace: { marker: { formatVersion: 1, createdWith: '0.6.1', edition: 'normal', managed: true } } });
+  await symlink(context.wanted.path, join(context.root, 'node_modules'), 'dir');
+  const before = await snapshot(context.root);
+  assert.equal((await attempt(context)).ok, true);
   assert.deepEqual(context.calls.ui, []);
+  assert.deepEqual(await snapshot(context.root), before);
+});
+
+test('there is no silent replacement of a real node_modules any more: a fresh npm one in a new folder is asked about like any other', async () => {
+  const context = await setup({ workspace: { marker: { formatVersion: 1, createdWith: '0.6.1', edition: 'normal' } } });
+  await mkdir(join(context.root, 'node_modules', 'opendoc'), { recursive: true });
+  assert.equal((await attempt(context)).ok, true);
+  assert.deepEqual(context.calls.ui, ['real:folder']);
 });
 
 test('a refusal after a "no" to an upgrade question leaves the folder as it was, even with a real node_modules', async () => {
@@ -539,17 +548,6 @@ test('a real node_modules that appears after the questions were asked is not rep
   assert.equal((await lstat(join(context.root, 'node_modules'))).isDirectory(), true);
   assert.deepEqual(context.calls.removed, []);
   assert.equal(await pinOf(context.root), '0.5.0', 'the upgrade did not start');
-});
-
-test('created: true only counts when the marker names createdWith (what init writes)', async () => {
-  const marked = await setup({ workspace: { marker: { formatVersion: 1, edition: 'normal' } } });
-  await mkdir(join(marked.root, 'node_modules', 'x'), { recursive: true });
-  await attempt(marked, { created: true });
-  assert.deepEqual(marked.calls.ui, ['real:folder'], 'asked, because the marker has no createdWith');
-  const made = await setup();
-  await mkdir(join(made.root, 'node_modules', 'x'), { recursive: true });
-  await attempt(made, { created: true });
-  assert.deepEqual(made.calls.ui, []);
 });
 
 // ---- leftovers on open

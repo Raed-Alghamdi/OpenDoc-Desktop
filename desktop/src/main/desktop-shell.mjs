@@ -2,7 +2,7 @@
 import { app, clipboard, dialog, ipcMain, session, shell } from 'electron';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readFile, realpath, rm, rmdir, stat } from 'node:fs/promises';
+import { readFile, realpath, rmdir, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { showAbout } from './about.mjs';
 import { installAppImageShim } from './cli-shim.mjs';
@@ -174,19 +174,18 @@ export class DesktopShell {
 
   /**
    * Open a workspace. Resolves { ok: true }, { ok: false, canceled: true } or { ok: false, code, message, path }.
-   * `created` says this app made the folder moments ago (`opendoc init`), so the node_modules it installed is replaced silently.
    */
-  openWorkspace(input, { created = false } = {}) {
+  openWorkspace(input) {
     if (this.opening) return Promise.resolve({ ok: false, message: 'Another workspace is opening. Wait a moment.' });
     if (this.stopped) return Promise.resolve({ ok: false, canceled: true });
     const opening = { abort: new AbortController(), lock: null };
     this.opening = opening;
-    const task = this.#open(input, opening, created).finally(() => { if (this.opening === opening) this.opening = null; });
+    const task = this.#open(input, opening).finally(() => { if (this.opening === opening) this.opening = null; });
     this.openTask = task;
     return task;
   }
 
-  async #open(input, opening, created) {
+  async #open(input, opening) {
     const { signal } = opening.abort;
     let lock = null;
     let left = false;
@@ -221,10 +220,10 @@ export class DesktopShell {
 
       // Everything that can change the workspace or refuse it, before the open workspace is let go of and before the host starts.
       const prepared = await prepareWorkspace({
-        root, runtime, wanted: { path: this.modules }, exact: this.appImage, created,
+        root, runtime, wanted: { path: this.modules }, exact: this.appImage,
         readOnlySupport: await readOnlySupported(this.runtime),
         upgradeWithoutAsking: await upgradesWithoutAsking(this.config),
-        replaceReal: path => this.#replaceModules(path, created),
+        replaceReal: path => this.#replaceModules(path),
         runCli: (args, options) => runCli(this.runtime, args, options),
         ui: this.#workspaceUi(root, opening), dataDir: this.dataDir, signal, log: line => console.log(`[workspace] ${line}`),
       });
@@ -267,7 +266,7 @@ export class DesktopShell {
         onFailed: reason => void this.#showCrash(current, reason),
       });
       this.#follow(current, transport);
-      await writeDesktopRecord(root, { version: this.version, build: this.build?.build ?? null });
+      await writeDesktopRecord(root, { version: this.version, build: this.build?.build ?? null, readOnly: prepared.readOnly });
       await rememberWorkspace(this.config, root);
       current.window = new WorkspaceWindow({ session: ses, stateFile: this.windowStateFile });
       await current.window.ready;
@@ -345,12 +344,11 @@ export class DesktopShell {
     try { result = await runCli(this.runtime, ['init', target, '--no-start', '--json'], { cwd: dirname(target) }); }
     catch (error) { return { ok: false, code: 'init-failed', message: `Creating the workspace failed: ${error.message}` }; }
     if (result.code !== 0) return { ok: false, code: 'init-failed', message: lastLine(result.stderr) || lastLine(result.stdout) || 'Creating the workspace failed.' };
-    return this.openWorkspace(target, { created: true });
+    return this.openWorkspace(target);
   }
 
-  /** A real node_modules goes to the trash, never to oblivion. The one `opendoc init` just made (`created`) is ours and is removed. */
-  async #replaceModules(path, created) {
-    if (created) { await rm(path, { recursive: true, force: true }); return; }
+  /** A real node_modules goes to the trash, never to oblivion. */
+  async #replaceModules(path) {
     try { await shell.trashItem(path); }
     catch (error) { throw new Error(`The node_modules folder could not be moved to the trash (${error.message}), so it was left as it is.`); }
   }

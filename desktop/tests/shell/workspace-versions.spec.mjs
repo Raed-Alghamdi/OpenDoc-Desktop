@@ -1,15 +1,16 @@
-// E3 part 1 (plan 3.4): linking a workspace to the app's OpenDoc, the version table, the upgrade with its backup, the result
-// screen and Restore, the AppImage's runtime copy, and the backups list. Every launch has a scratch HOME with its own XDG
-// folders (support/app.mjs), so backups and runtime copies land inside tmp/shell-tests, never in the real data folder.
-// The test runtime is OpenDoc 0.6.1 and does not support read-only yet (U4), so the read-only rows (a newer patch or minor,
-// "Open read-only", Restore) are refused here: part 2 turns them into rows that open read-only.
+// E3 (plan 3.4): linking a workspace to the app's OpenDoc, the version table, read-only for real, the upgrade with its backup,
+// the result screen and Restore, Create without npm, the CLI next to the app, the AppImage's runtime copy, and the backups
+// list. Every launch has a scratch HOME with its own XDG folders (support/app.mjs), so backups and runtime copies land inside
+// tmp/shell-tests, never in the real data folder.
 import { expect, test } from '@playwright/test';
 import { createRequire } from 'node:module';
 import { lstat, mkdir, readFile, readdir, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { launchApp, nativeCalls, newHome, newProfile, newWorkspace, readConfig, setNative, stubNative } from './support/app.mjs';
-import { desktopRecord, hostPid, isWorkspaceUrl, readJson, waitFor, waitForOpen } from './support/helpers.mjs';
-import { runtimeDir } from './support/paths.mjs';
+import { desktopRecord, hostPid, isWorkspaceUrl, libraryReady, nextHostPid, readJson, waitFor, waitForOpen } from './support/helpers.mjs';
+import { runtimeDir, workDir } from './support/paths.mjs';
 import { commandLine, waitForNoElectron } from './support/processes.mjs';
 
 const modulesOf = workspace => join(workspace, 'node_modules');
@@ -74,8 +75,8 @@ async function opened(app, workspace) {
 const asked = async (app, title) => (await nativeCalls(app)).messages.filter(message => message.title === title);
 
 test.describe('refusals: nothing is changed, the lock is released, and the picker says why', () => {
-  test('a newer patch, a newer minor, a headless pin, a declined upgrade and a real node_modules kept', async () => {
-    const { app, picker } = await pickerApp({ native: { messageChoice: { 'Upgrade this workspace?': 'Open read-only', 'Replace node_modules?': 'Leave it as it is' } } });
+  test('a cancelled upgrade, a real node_modules kept and a headless pin', async () => {
+    const { app, picker } = await pickerApp({ native: { messageChoice: { 'Upgrade this workspace?': 'Cancel', 'Replace node_modules?': 'Leave it as it is' } } });
     try {
       const refuse = async (workspace, text) => {
         const lock = await withLock(workspace);
@@ -88,31 +89,17 @@ test.describe('refusals: nothing is changed, the lock is released, and the picke
         await lock.unchanged();
       };
 
-      const patch = await newWorkspace('newer-patch');
-      await setPin(patch, '0.6.9');
-      await refuse(patch, 'newer than this app (0.6.1). Update the app to edit it.');
-      expect(await pinOf(patch)).toBe(pin('0.6.9'));
-
-      const minor = await newWorkspace('newer-minor');
-      await setPin(minor, '0.7.0');
-      await refuse(minor, 'This workspace was upgraded by OpenDoc 0.7. Update the app to edit it.');
-      expect(await pinOf(minor)).toBe(pin('0.7.0'));
-
-      // "Open read-only" in the upgrade dialog: refused while the service cannot open read-only; no backup, no change.
+      // "Cancel" in the upgrade dialog: not opened, nothing changed, no backup.
       const declined = await newWorkspace('declined');
       await setPin(declined, '0.5.0');
-      await refuse(declined, 'Opening a workspace read-only needs a newer OpenDoc service');
-      expect(await pinOf(declined)).toBe(pin('0.5.0'));
+      await setNative(app, { messageChoice: { 'Upgrade this workspace?': 'Cancel' } });
+      const before = await listing(declined);
+      await chooseInPicker(app, picker, declined);
+      await waitFor(async () => (await asked(app, 'Upgrade this workspace?')).length === 1, { what: 'the question' });
       const [question] = await asked(app, 'Upgrade this workspace?');
       expect(question.buttons).toEqual(['Upgrade', 'Open read-only', 'Cancel']);
       expect(question.checkboxLabel).toBe('Upgrade my workspaces without asking from now on');
       expect(await exists(join(app.dataFolder, 'backups'))).toBe(false);
-
-      // "Cancel" in that dialog: not opened, nothing changed.
-      await setNative(app, { messageChoice: { 'Upgrade this workspace?': 'Cancel' } });
-      const before = await listing(declined);
-      await chooseInPicker(app, picker, declined);
-      await waitFor(async () => (await asked(app, 'Upgrade this workspace?')).length === 2, { what: 'the second question' });
       await waitFor(() => exists(join(declined, '.opendoc', 'update.lock')).then(found => !found), { what: 'the lock to be released' });
       expect(workspaceWindow(app)).toBeUndefined();
       expect(await listing(declined)).toEqual(before);
@@ -251,6 +238,268 @@ test.describe.serial('opening: the link, adoption and the pin', () => {
   });
 });
 
+// ---- read-only for real (U4): the service opens the workspace read-only, the banner shows the app's message, a write is refused
+
+const patchMessage = 'This workspace is on OpenDoc 0.6.9, newer than the 0.6.1 in this app. Update the app to edit it.';
+const minorMessage = 'This workspace was upgraded by OpenDoc 0.7. Update the app to edit it.';
+const declinedMessage = 'You chose to open this workspace read-only. It is still on OpenDoc 0.5.0; upgrade it to 0.6.1 to edit it.';
+const restoredMessage = 'This workspace was restored from a backup and is on OpenDoc 0.5.0 again. It stays read-only here; open it again to upgrade it.';
+
+/** What the page sees of the service: the session (does it say read-only?) and what a write (a logo upload) gets. */
+async function pageView(page) {
+  return page.evaluate(async () => {
+    const session = await (await fetch('/api/session')).json();
+    const refused = await fetch('/api/assets/logo', { method: 'POST', headers: { 'x-opendoc-token': session.token, 'content-type': 'application/json' }, body: '{}' });
+    return { readOnly: session.readOnly, status: refused.status, body: await refused.json().catch(() => null) };
+  });
+}
+
+/** The workspace's files outside `.opendoc/` and `output/`, as a listing, to show a read-only open changed none of them. */
+async function userFiles(workspace) {
+  const all = await listing(workspace);
+  return Object.fromEntries(Object.entries(all).filter(([path]) => !path.startsWith('./.opendoc') && !path.startsWith('./output')));
+}
+
+async function expectReadOnly(app, workspace, reason, message) {
+  const page = workspaceWindow(app);
+  await libraryReady(page);
+  await expect(page.locator('.read-only-banner')).toHaveText(message);
+  const view = await pageView(page);
+  expect(view.readOnly).toEqual({ reason, message });
+  expect(view.status).toBe(403);
+  expect(view.body).toMatchObject({ code: 'workspace-read-only', error: message });
+  expect((await desktopRecord(workspace)).readOnly).toEqual({ reason, message });
+}
+
+test.describe.serial('read-only rows open read-only for real', () => {
+  test.describe.configure({ timeout: 600_000 });
+  let app; let picker;
+  test.beforeAll(async () => { ({ app, picker } = await pickerApp({ native: { messageChoice: { 'Upgrade this workspace?': 'Open read-only' } } })); });
+  test.afterAll(async () => { await app?.close().catch(() => {}); });
+  let first = true;
+  async function open(workspace) {
+    if (first) { first = false; await chooseInPicker(app, picker, workspace); } else await openByMenu(app, workspace);
+    await opened(app, workspace);
+  }
+
+  test('a newer patch opens read-only: the banner, a refused write, desktop.json says so, and nothing in the workspace changes', async () => {
+    const workspace = await newWorkspace('ro-patch');
+    await setPin(workspace, '0.6.9');
+    const lock = await withLock(workspace);
+    const before = await userFiles(workspace);
+    const manifest = await readFile(join(workspace, 'package.json'), 'utf8');
+    const marker = await readFile(join(workspace, '.opendoc', 'workspace.json'), 'utf8');
+    await open(workspace);
+    await expectReadOnly(app, workspace, 'newer-patch', patchMessage);
+    expect(await pinOf(workspace)).toBe(pin('0.6.9'));
+    expect(await readFile(join(workspace, 'package.json'), 'utf8')).toBe(manifest);
+    expect(await readFile(join(workspace, '.opendoc', 'workspace.json'), 'utf8')).toBe(marker);
+    expect(await userFiles(workspace)).toEqual(before);
+    expect(await exists(join(app.dataFolder, 'backups'))).toBe(false);
+    await lock.unchanged();
+  });
+
+  test('a newer minor opens read-only with its own message; the service is read-only again after a restart of the host', async () => {
+    const workspace = await newWorkspace('ro-minor');
+    await setPin(workspace, '0.7.0');
+    const lock = await withLock(workspace);
+    await open(workspace);
+    await expectReadOnly(app, workspace, 'newer-minor', minorMessage);
+    expect(await pinOf(workspace)).toBe(pin('0.7.0'));
+    // The supervisor starts every replacement host the same way: kill the host, and the new one is read-only too.
+    const old = hostPid(app);
+    process.kill(old, 'SIGKILL');
+    await nextHostPid(app, old);
+    await waitFor(async () => pageView(workspaceWindow(app)).then(view => view.status === 403 && view.readOnly?.reason === 'newer-minor', () => false), { timeout: 120_000, what: 'the restarted host to be read-only' });
+    await expectReadOnly(app, workspace, 'newer-minor', minorMessage);
+    await lock.unchanged();
+  });
+
+  test('"Open read-only" in the upgrade dialog opens read-only (declined-upgrade): no backup, the pin stays', async () => {
+    const workspace = await newWorkspace('ro-declined');
+    await setPin(workspace, '0.5.0');
+    const lock = await withLock(workspace);
+    const before = await userFiles(workspace);
+    await open(workspace);
+    await expectReadOnly(app, workspace, 'declined-upgrade', declinedMessage);
+    expect(await pinOf(workspace)).toBe(pin('0.5.0'));
+    expect(await exists(join(app.dataFolder, 'backups'))).toBe(false);
+    expect(await userFiles(workspace)).toEqual(before);
+    await lock.unchanged();
+  });
+
+  test('a workspace with no marker (a synced folder) pinned newer opens read-only, and nothing is written: no marker, no adoption question', async () => {
+    const workspace = await newWorkspace('ro-nomarker');
+    await setPin(workspace, '0.6.9');
+    await rm(join(workspace, '.opendoc'), { recursive: true });
+    const before = await userFiles(workspace);
+    const lock = await withLock(workspace);
+    await open(workspace);
+    await expectReadOnly(app, workspace, 'newer-patch', patchMessage);
+    expect(await exists(join(workspace, '.opendoc', 'workspace.json'))).toBe(false);
+    expect(await asked(app, 'Use this workspace on this device?')).toEqual([]);
+    expect(await userFiles(workspace)).toEqual(before);
+    expect(await readlink(modulesOf(workspace))).toBe(linkedRuntime);
+    await lock.unchanged();
+  });
+
+  test('a writable workspace has no readOnly in desktop.json or in the session, and a write is accepted', async () => {
+    const workspace = await newWorkspace('rw-after');
+    await open(workspace);
+    expect(await desktopRecord(workspace)).not.toHaveProperty('readOnly');
+    const page = workspaceWindow(app);
+    await libraryReady(page);
+    await expect(page.locator('.read-only-banner')).toHaveCount(0);
+    const view = await page.evaluate(async () => {
+      const session = await (await fetch('/api/session')).json();
+      const response = await fetch('/api/context', { method: 'POST', headers: { 'content-type': 'application/json', 'x-opendoc-token': session.token }, body: JSON.stringify({ documentId: 'welcome', blockId: null }) });
+      return { has: 'readOnly' in session, status: response.status };
+    });
+    expect(view.has).toBe(false);
+    expect(view.status).toBeLessThan(500);
+    const refused = await page.evaluate(async () => { const session = await (await fetch('/api/session')).json(); return (await fetch('/api/assets/logo', { method: 'POST', headers: { 'x-opendoc-token': session.token }, body: new FormData() })).status; });
+    expect(refused).not.toBe(403);
+  });
+});
+
+// ---- the CLI next to the app, and on its own
+
+const execute = promisify(execFile);
+const cliEntry = join(runtimeDir, 'node_modules', 'opendoc', 'bin', 'opendoc.mjs');
+
+/** Run the runtime's CLI as a user's agent would (plain Node, in the workspace); `--json` failures carry a code. */
+async function cli(workspace, args, home) {
+  const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, '.config'), XDG_DATA_HOME: join(home, '.local', 'share'), XDG_CACHE_HOME: join(home, '.cache') };
+  for (const name of ['ELECTRON_RUN_AS_NODE', 'ELECTRON_FORCE_IS_PACKAGED']) delete env[name];
+  try { const { stdout, stderr } = await execute(process.execPath, [cliEntry, ...args, '--json'], { cwd: workspace, env, timeout: 180_000 }); return { code: 0, text: `${stdout}\n${stderr}` }; }
+  catch (error) { return { code: error.code ?? 1, text: `${error.stdout ?? ''}\n${error.stderr ?? ''}` }; }
+}
+const writeAttempt = (workspace, home) => cli(workspace, ['documents', 'rename', 'no-such-document', 'Whatever'], home);
+
+test.describe.serial('the CLI next to the app: check works, a write is refused with the app\'s message', () => {
+  test.describe.configure({ timeout: 600_000 });
+  test('with the app holding a newer workspace read-only, check works and a write says what the banner says; once the app is closed the CLI\'s own table says the same', async () => {
+    const workspace = await newWorkspace('cli-under');
+    await setPin(workspace, '0.6.9');
+    const lock = await withLock(workspace);
+    const { app, picker } = await pickerApp();
+    const home = app.home;
+    try {
+      await chooseInPicker(app, picker, workspace);
+      await opened(app, workspace);
+      await expectReadOnly(app, workspace, 'newer-patch', patchMessage);
+      const check = await cli(workspace, ['check'], home);
+      expect(check.code, check.text).toBe(0);
+      const write = await writeAttempt(workspace, home);
+      expect(write.code).not.toBe(0);
+      expect(write.text).toContain('workspace-read-only');
+      expect(write.text).toContain(patchMessage);
+    } finally { await app.close(); }
+    expect(await exists(join(workspace, '.opendoc', 'desktop.json'))).toBe(false);
+    const after = await writeAttempt(workspace, home);
+    expect(after.text).toContain('workspace-read-only');
+    expect(after.text).toContain(patchMessage);
+    expect((await cli(workspace, ['check'], home)).code).toBe(0);
+    await lock.unchanged();
+    expect(await waitForNoElectron(5000)).toEqual([]);
+  });
+
+  test('a workspace the app holds read-only because the user declined the upgrade: a write is refused (today with the CLI\'s upgrade message, see the request to stream U); once the app is closed the CLI\'s own table answers', async () => {
+    const workspace = await newWorkspace('cli-declined');
+    await setPin(workspace, '0.5.0');
+    const lock = await withLock(workspace);
+    const { app, picker } = await pickerApp({ native: { messageChoice: { 'Upgrade this workspace?': 'Open read-only' } } });
+    const home = app.home;
+    try {
+      await chooseInPicker(app, picker, workspace);
+      await opened(app, workspace);
+      await expectReadOnly(app, workspace, 'declined-upgrade', declinedMessage);
+      // The CLI's managedApplication refuses an older minor before the read-only gate is reached, so `check` fails and a write
+      // gets the upgrade message instead of the app's. U must let the desktop.json readOnly state through (reports/e3-part2.md).
+      const write = await writeAttempt(workspace, home);
+      expect(write.code).not.toBe(0);
+      expect(write.text).toContain('Open this workspace in opendoc-desktop to upgrade it.');
+    } finally { await app.close(); }
+    expect(await exists(join(workspace, '.opendoc', 'desktop.json'))).toBe(false);
+    const after = await writeAttempt(workspace, home);
+    expect(after.code).not.toBe(0);
+    expect(after.text).toContain('Open this workspace in opendoc-desktop to upgrade it.');
+    expect(after.text).not.toContain('workspace-read-only');
+    await lock.unchanged();
+    expect(await waitForNoElectron(5000)).toEqual([]);
+  });
+
+  test('without the app the CLI\'s table gives the app\'s answer for every row (and the same words for the two newer rows)', async () => {
+    const home = newHome('cli-table');
+    const rows = [['0.6.0', 'open'], ['0.6.1', 'open'], ['0.6.9', 'newer-patch'], ['0.7.0', 'newer-minor'], ['0.5.0', 'upgrade'], ['1.0.0', 'newer-minor']];
+    const decide = (await import('../../src/main/workspace/versions.mjs')).decideVersion;
+    for (const [version, expected] of rows) {
+      const workspace = await newWorkspace(`cli-row-${version}`);
+      await setPin(workspace, version);
+      const app = decide(version, '0.6.1');
+      expect(app.kind === 'readonly' ? app.reason : app.kind, `the app's answer for ${version}`).toBe(expected);
+      const result = await writeAttempt(workspace, home);
+      if (expected === 'open') { expect(result.text, version).not.toMatch(/workspace-read-only|desktop to upgrade|opendoc-desktop to upgrade/); }
+      else if (expected === 'upgrade') expect(result.text, version).toContain('Open this workspace in opendoc-desktop to upgrade it.');
+      else { expect(result.text, version).toContain('workspace-read-only'); expect(result.text, version).toContain(app.message); }
+      const check = await cli(workspace, ['check'], home);
+      if (expected === 'upgrade') expect(check.code, version).not.toBe(0); else expect(check.code, `${version}: ${check.text}`).toBe(0);
+      expect(await pinOf(workspace), 'the CLI never moves the pin').toBe(pin(version));
+    }
+  });
+});
+
+// ---- Create new workspace: `opendoc init <folder> --no-start` from the app's runtime, no npm
+
+/** Create through the picker, with a PATH that has no npm (and no tarball for npm to install), and wait for the new workspace. */
+async function createWorkspaceByPicker(name, env = {}) {
+  const target = join(workDir, name);
+  const bin = join(workDir, `${name}-empty-path`);
+  await mkdir(bin, { recursive: true });
+  const { app, picker } = await pickerApp({ env: { PATH: bin, OPENDOC_PACKAGE_TARBALL: '', npm_config_cache: join(bin, 'no-npm-cache'), ...env } });
+  await stubNative(app, { openDialog: { canceled: false, filePaths: [target] } });
+  await picker.getByRole('button', { name: /Create new workspace/ }).click();
+  await opened(app, target);
+  await libraryReady(workspaceWindow(app));
+  return { app, target, bin };
+}
+
+test.describe('Create new workspace needs no npm', () => {
+  test.describe.configure({ timeout: 600_000 });
+
+  test('with no npm on the PATH: node_modules is a link to the runtime, the marker says managed, no package-lock.json, no question, and it opens writable', async () => {
+    const { app, target } = await createWorkspaceByPicker('create-no-npm');
+    try {
+      expect(await readlink(modulesOf(target))).toBe(linkedRuntime);
+      expect(await readJson(join(target, '.opendoc', 'workspace.json'))).toMatchObject({ formatVersion: 1, edition: 'normal', managed: true, createdWith: '0.6.1' });
+      expect(await exists(join(target, 'package-lock.json'))).toBe(false);
+      expect(await pinOf(target)).toBe(pin('0.6.1'));
+      expect(await asked(app, 'Replace node_modules?')).toEqual([]);
+      expect(await asked(app, 'Use this workspace on this device?')).toEqual([]);
+      expect(await asked(app, 'Upgrade this workspace?')).toEqual([]);
+      expect((await nativeCalls(app)).trashed).toEqual([]);
+      expect(await desktopRecord(target)).not.toHaveProperty('readOnly');
+      expect(await readFile(join(target, 'AGENTS.md'), 'utf8')).not.toMatch(/npm install|npx opendoc update/);
+      expect((await pageView(workspaceWindow(app))).readOnly).toBeUndefined();
+    } finally { await app.close(); }
+    expect(await waitForNoElectron(5000)).toEqual([]);
+  });
+
+  test('on an AppImage the link ends at runtime/current/node_modules on the first open after Create (init writes the copy\'s own path, the exact check rewrites it)', async () => {
+    const home = newHome('create-appimage-home');
+    const { app, target } = await createWorkspaceByPicker('create-appimage', { HOME: home, APPIMAGE: join(home, 'no-such.AppImage') });
+    try {
+      const runtimes = join(app.dataFolder, 'runtime');
+      expect(await readlink(modulesOf(target))).toBe(join(runtimes, 'current', 'node_modules'));
+      expect(await readlink(join(runtimes, 'current'))).toBe('0.6.1-7');
+      expect(await readJson(join(target, '.opendoc', 'workspace.json'))).toMatchObject({ managed: true });
+      expect(await asked(app, 'Replace node_modules?')).toEqual([]);
+      const entry = commandLine(hostPid(app)).find(argument => argument.endsWith('/src/server/service.ts'));
+      expect(entry).toContain(join(runtimes, '0.6.1-7'));
+    } finally { await app.close(); }
+  });
+});
+
 test.describe.serial('upgrade', () => {
   /** A workspace with the documents `ids` only (the template's welcome, and a document that cannot render when asked). */
   async function oldWorkspace(name, { broken = false } = {}) {
@@ -350,8 +599,11 @@ test.describe.serial('upgrade', () => {
       expect(await exists(join(workspace, 'documents', 'welcome', '.history'))).toBe(true); // review wrote it
 
       await result.getByRole('button', { name: 'Restore backup' }).click().catch(() => {}); // the click closes the window it is in
-      // Restore counts as read-only, which this service cannot do yet: refused, with the files restored.
-      await expect(picker.locator('#message')).toContainText('restored from a backup', { timeout: 120_000 });
+      // Restore opens the workspace read-only (restored-backup), with the files back as they were.
+      await opened(app, workspace);
+      await expectReadOnly(app, workspace, 'restored-backup', restoredMessage);
+      const [note] = await waitFor(async () => { const found = await asked(app, 'Backup restored'); return found.length ? found : null; }, { what: 'the restore note' });
+      expect(note.detail).toContain(join(app.dataFolder, 'backups'));
       expect(await pinOf(workspace)).toBe(pin('0.5.0'));
       expect(await exists(join(workspace, 'documents', 'welcome', '.history'))).toBe(false);
       expect(await exists(join(workspace, 'documents', 'broken', 'index.tsx'))).toBe(true);

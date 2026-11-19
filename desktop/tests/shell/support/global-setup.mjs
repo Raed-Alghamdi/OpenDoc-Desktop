@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { copyFile, chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { assertVirtualDisplay } from './environment.mjs';
-import { cache, cliResources, desktopDir, electronExecutable, goldenWorkspace, npmCache, repo, runtimeDir, unpackedDir, workDir } from './paths.mjs';
+import { cache, cliResources, desktopDir, electronExecutable, goldenWorkspace, npmCache, npmGoldenWorkspace, repo, runtimeDir, unpackedDir, workDir } from './paths.mjs';
 import { killElectronProcesses } from './processes.mjs';
 
 const gentle = ['nice', '-n', '19', 'ionice', '-c', '3'];
@@ -59,6 +59,28 @@ async function unpackedApp(runtimeMarker) {
   }
 }
 
+/**
+ * A workspace as npm leaves one (what a user has who synced a folder from a device that installed with npm): a real
+ * node_modules, a package-lock.json, the exact pin, and a marker without `managed`. Made from the template by an npm install
+ * of the same tarball, as the pre-U1 `init` did.
+ */
+async function npmWorkspace(tarballFile) {
+  await rm(npmGoldenWorkspace, { recursive: true, force: true });
+  run('cp', ['-a', '--reflink=auto', goldenWorkspace, npmGoldenWorkspace]);
+  await rm(join(npmGoldenWorkspace, 'node_modules'), { force: true });
+  const markerFile = join(npmGoldenWorkspace, '.opendoc', 'workspace.json');
+  const { managed, ...marker } = JSON.parse(await readFile(markerFile, 'utf8'));
+  await writeFile(markerFile, `${JSON.stringify(marker, null, 2)}\n`);
+  const manifestFile = join(npmGoldenWorkspace, 'package.json');
+  const manifest = JSON.parse(await readFile(manifestFile, 'utf8'));
+  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-exact', `opendoc@file:${tarballFile}`], { cwd: npmGoldenWorkspace });
+  await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+  const lockFile = join(npmGoldenWorkspace, 'package-lock.json');
+  const lock = JSON.parse(await readFile(lockFile, 'utf8'));
+  lock.packages[''].dependencies.opendoc = manifest.dependencies.opendoc;
+  await writeFile(lockFile, `${JSON.stringify(lock, null, 2)}\n`);
+}
+
 export default async function globalSetup() {
   assertVirtualDisplay();
   killElectronProcesses(); // Leftovers of an interrupted run.
@@ -68,6 +90,7 @@ export default async function globalSetup() {
   if (!existsSync(marker) || await readFile(marker, 'utf8') !== file) {
     await rm(runtimeDir, { recursive: true, force: true });
     await rm(goldenWorkspace, { recursive: true, force: true });
+    await rm(npmGoldenWorkspace, { recursive: true, force: true });
     await mkdir(runtimeDir, { recursive: true });
     await writeFile(join(runtimeDir, 'package.json'), JSON.stringify({ name: 'opendoc-desktop-test-runtime', private: true, dependencies: { opendoc: `file:${file}` } }));
     run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: runtimeDir });
@@ -77,8 +100,10 @@ export default async function globalSetup() {
   await unpackedApp(await readFile(marker, 'utf8'));
   if (!existsSync(join(goldenWorkspace, '.opendoc', 'workspace.json'))) {
     await rm(goldenWorkspace, { recursive: true, force: true });
-    run(process.execPath, [join(runtimeDir, 'node_modules', 'opendoc', 'bin', 'opendoc.mjs'), 'init', goldenWorkspace, '--no-start', '--json'], { env: { ...process.env, OPENDOC_PACKAGE_TARBALL: file } });
+    // From the runtime, as the app's "Create new workspace" does: no npm, node_modules is a link to the runtime, `managed: true`.
+    run(process.execPath, [join(runtimeDir, 'node_modules', 'opendoc', 'bin', 'opendoc.mjs'), 'init', goldenWorkspace, '--no-start', '--json']);
   }
+  if (!existsSync(join(npmGoldenWorkspace, 'package-lock.json'))) await npmWorkspace(file);
   await rm(workDir, { recursive: true, force: true });
   await mkdir(workDir, { recursive: true });
   process.env.OPENDOC_SHELL_TEST_TARBALL = file;

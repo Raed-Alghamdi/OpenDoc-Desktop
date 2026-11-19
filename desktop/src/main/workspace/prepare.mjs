@@ -21,14 +21,13 @@ const unsupportedSuffix = ' Opening a workspace read-only needs a newer OpenDoc 
  * @param options.exact true when the link must name `wanted.path` itself (the AppImage's `current` link)
  * @param options.readOnlySupport whether the runtime's service can open read-only (runtime-info.mjs)
  * @param options.upgradeWithoutAsking the config key
- * @param options.created the folder was made by this app moments ago: a real node_modules in it is ours and is replaced without asking
  * @param options.replaceReal(path) removes a real node_modules (the shell moves it to the trash)
  * @param options.runCli(args, { cwd }) the app's CLI
  * @param options.ui { askAdopt(root), askRealModules(root, kind), askUpgrade({ root, from, to }), remember(), progress(text), showResult(info) }
  * @returns { ok: true, readOnly, notes } | { ok: false, code, message, path } | { ok: false, canceled: true }
  */
 export async function prepareWorkspace(options) {
-  const { root, runtime, wanted, exact = false, readOnlySupport, upgradeWithoutAsking = false, created = false, replaceReal, runCli, ui, dataDir, registry, log = () => {}, signal, now, free, runStep } = options;
+  const { root, runtime, wanted, exact = false, readOnlySupport, upgradeWithoutAsking = false, replaceReal, runCli, ui, dataDir, registry, log = () => {}, signal, now, free, runStep } = options;
   const fail = (code, message) => ({ ok: false, code, message, path: root });
   const canceled = { ok: false, canceled: true };
   const notes = [];
@@ -83,11 +82,9 @@ export async function prepareWorkspace(options) {
   const adopt = marker.state === 'none' && !readOnly;
   if (adopt && !(await ui.askAdopt(root))) return canceled;
   const modules = await inspectModules(root, wanted, { exact });
-  // A marker that says which OpenDoc made the workspace (`createdWith`) is what `init` writes; only then is a fresh node_modules the app's own.
-  const ours = created && marker.state === 'ok' && typeof marker.marker.createdWith === 'string';
   let approvedReal = false;
   if (modules.state === 'real') {
-    approvedReal = ours || await ui.askRealModules(root, modules.kind);
+    approvedReal = await ui.askRealModules(root, modules.kind);
     if (!approvedReal) return fail('modules-kept', `The ${modules.kind === 'file' ? 'file' : 'folder'} node_modules in this workspace was left as it is, so the workspace was not opened. Opening it needs node_modules to be a link to the app's OpenDoc.`);
   }
   let upgrade = false;

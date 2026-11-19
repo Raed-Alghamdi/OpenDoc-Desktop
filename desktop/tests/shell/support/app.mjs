@@ -6,20 +6,22 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { cp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { electronEnvironment } from './environment.mjs';
-import { electronExecutable, goldenWorkspace, mainEntry, npmCache, runtimeDir, workDir } from './paths.mjs';
+import { electronExecutable, goldenWorkspace, mainEntry, npmCache, npmGoldenWorkspace, runtimeDir, workDir } from './paths.mjs';
 
 let counter = 0;
 
 /**
- * A new scratch workspace: a reflink copy of the template, so the copy is cheap and independent.
- * By default it is set up the way the app leaves a workspace it opened: node_modules is a link to the test runtime and the
- * marker says `managed`. `{ npm: true }` keeps the template's own npm node_modules (a real folder) and its marker as they are.
+ * A new scratch workspace: a reflink copy of a template, so the copy is cheap and independent.
+ * By default it is set up the way the app leaves a workspace it opened: node_modules is a link to the test runtime, the
+ * marker says `managed`, and it has the package-lock.json an npm device would have synced with it (the app must never touch
+ * that file; `{ lock: false }` leaves it out, as in a workspace the app created). `{ npm: true }` is the workspace as npm
+ * leaves it: a real node_modules folder, the lock, and a marker without `managed`.
  */
-export async function newWorkspace(name = 'ws', { npm = false } = {}) {
+export async function newWorkspace(name = 'ws', { npm = false, lock = true } = {}) {
   const target = join(workDir, `${name}-${++counter}`);
   await mkdir(workDir, { recursive: true });
   if (npm) {
-    const copy = spawnSync('cp', ['-a', '--reflink=auto', goldenWorkspace, target], { encoding: 'utf8' });
+    const copy = spawnSync('cp', ['-a', '--reflink=auto', npmGoldenWorkspace, target], { encoding: 'utf8' });
     if (copy.status !== 0) throw new Error(`Could not copy the template workspace: ${copy.stderr}`);
   } else {
     await mkdir(target);
@@ -31,6 +33,7 @@ export async function newWorkspace(name = 'ws', { npm = false } = {}) {
     await symlink(join(runtimeDir, 'node_modules'), join(target, 'node_modules'), 'dir');
     const marker = join(target, '.opendoc', 'workspace.json');
     await writeFile(marker, `${JSON.stringify({ ...JSON.parse(await readFile(marker, 'utf8')), managed: true }, null, 2)}\n`);
+    if (lock) await cp(join(npmGoldenWorkspace, 'package-lock.json'), join(target, 'package-lock.json'));
   }
   await rm(join(target, '.opendoc', 'server.json'), { force: true });
   return target;

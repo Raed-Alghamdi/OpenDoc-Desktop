@@ -43,7 +43,7 @@ export function decideVersion(pin, runtime) {
   if (!p || !r) throw new TypeError('decideVersion needs two exact versions.');
   if (p.major === r.major && p.minor === r.minor) {
     if (p.patch <= r.patch) return { kind: 'open', movePin: p.patch < r.patch };
-    return { kind: 'readonly', reason: 'newer-patch', message: `This workspace was last used with OpenDoc ${pin}, which is newer than this app (${runtime}). Update the app to edit it.` };
+    return { kind: 'readonly', reason: 'newer-patch', message: `This workspace is on OpenDoc ${pin}, newer than the ${runtime} in this app. Update the app to edit it.` }; // the CLI says the same (src/cli/read-only.ts)
   }
   if (p.major < r.major || (p.major === r.major && p.minor < r.minor)) return { kind: 'upgrade', from: pin, to: runtime };
   return { kind: 'readonly', reason: 'newer-minor', message: `This workspace was upgraded by OpenDoc ${p.major}.${p.minor}. Update the app to edit it.` };

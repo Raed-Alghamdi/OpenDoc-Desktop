@@ -14,7 +14,10 @@
   "scripts": {
     "start": "electron .",
     "test:shell": "node tests/shell/run.mjs",
-    "test:shell:unit": "node tests/shell/run.mjs --unit"
+    "test:shell:unit": "node tests/shell/run.mjs --unit",
+    "runtime": "node runtime/build.mjs",
+    "dist": "node runtime/dist.mjs",
+    "test": "node --test \"tests/packaging/*.test.mjs\" tests/smoke/runtime.test.mjs"
   },
   "dependencies": {
     "electron-updater": "6.8.11"
@@ -28,10 +31,5 @@
     "name": "opendoc-desktop contributors",
     "email": "Raed-Alghamdi@users.noreply.github.com"
   },
-  "desktopName": "opendoc-desktop.desktop",
-  "scripts": {
-    "runtime": "node runtime/build.mjs",
-    "dist": "node runtime/dist.mjs",
-    "test": "node --test \"tests/packaging/*.test.mjs\" tests/smoke/runtime.test.mjs"
-  }
+  "desktopName": "opendoc-desktop.desktop"
 }

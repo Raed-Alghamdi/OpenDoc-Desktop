@@ -71,6 +71,21 @@ export interface DocumentSelection {
   revision?: number;
 }
 
+/**
+ * The rules for a list of selections (C1): only the first may be a phrase, and each block
+ * appears once. Returns the problem in words, or undefined when the list is acceptable.
+ */
+export function selectionListError(selections: DocumentSelection[]): string | undefined {
+  if (!selections.length) return 'Select at least one component before commenting.';
+  const seen = new Set<string>();
+  for (const [index, selection] of selections.entries()) {
+    if (seen.has(selection.blockId)) return `Select ${selection.blockId} only once; a comment names each component one time.`;
+    seen.add(selection.blockId);
+    if (index > 0 && (selection.targetId !== undefined || selection.start !== undefined || selection.end !== undefined)) return 'Only the first selection can be a phrase; select the other places as whole components.';
+  }
+  return undefined;
+}
+
 export interface TextAnchor {
   targetId: string;
   start: number;

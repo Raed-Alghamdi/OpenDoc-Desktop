@@ -29,6 +29,7 @@ export const failureCodes = {
   'service-running': 'The browser edition\'s service is running and the command needs it stopped.',
   'service-unavailable': 'The recorded service did not answer.',
   'owner-shutting-down': 'The previous OpenDoc session is still finishing its shutdown.',
+  'workspace-read-only': 'The workspace is open read-only (a newer version made it, an upgrade was declined, or a backup was restored), so a command that writes was refused. The message says why.',
   'owner-unconfirmed': 'A session record (.opendoc/server.json or desktop.json) is unreadable, or its owner could not be confirmed.',
   timeout: 'The command waited for something that did not happen in time.',
   'invalid-record': 'A workspace file the command reads, such as .opendoc/current.json, is not valid.',

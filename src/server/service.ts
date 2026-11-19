@@ -43,6 +43,7 @@ import { HistoryError, HistoryRecorder, HistoryStore } from './history';
 import { blockHistory, compareVersion, restoreVersion, RestoreRefusal } from './history-restore';
 import type { RestoreScope } from '../shared/history';
 import { builtClient } from './client';
+import { readOnlyCode, readOnlyState, type ReadOnlyState } from '../shared/read-only';
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
 
@@ -75,7 +76,20 @@ async function body(req: IncomingMessage, limit = 32_000) {
   return value;
 }
 
+/**
+ * What a read-only workspace still accepts as a non-GET request: sharing the current selection, exporting, and the export
+ * history. Everything else that is not a read is refused, so a route added later is covered without being listed.
+ */
+const readOnlyWrites: [method: string, path: RegExp][] = [
+  ['POST', /^\/api\/context$/],
+  ['POST', /^\/api\/documents\/[^/]+\/export$/],
+  ['DELETE', /^\/api\/exports\/[a-f0-9-]+$/],
+  ['POST', /^\/api\/exports\/[a-f0-9-]+\/(?:reveal|copy|restore)$/],
+];
+
 export interface PreparedOpenDocService {
+  /** The literal `readOnlySupported: true` below is what the desktop app looks for before it opens a workspace read-only. */
+  readOnlySupported: true;
   service: OpenDocService;
   /** Starts the watcher, the first refresh and history capture; until then the service answers requests but watches nothing. */
   start(): Promise<void>;
@@ -86,8 +100,11 @@ export interface PreparedOpenDocService {
  * the caller owns the transport (an HTTP listener, or the desktop app's request channel) and the process.
  * Workspace code (themes, documents) runs in this process, so its working directory must be `root`.
  */
-export async function prepareOpenDocService(options: { root: string; production: boolean; client?: Handler }): Promise<PreparedOpenDocService> {
+export async function prepareOpenDocService(options: { root: string; production: boolean; client?: Handler; readOnly?: ReadOnlyState | null }): Promise<PreparedOpenDocService> {
   const { root, production } = options;
+  // A read-only request that cannot be understood must never fall back to a writable service.
+  const readOnly = options.readOnly == null ? null : readOnlyState(options.readOnly);
+  if (options.readOnly != null && !readOnly) throw new Error('The readOnly option needs a reason (newer-patch, newer-minor, declined-upgrade or restored-backup) and a message.');
   const workspace = new Workspace(root);
   const edits = new TextEditService(root);
   const exports = new ExportStore(root);
@@ -113,7 +130,11 @@ export async function prepareOpenDocService(options: { root: string; production:
       if (!url.pathname.startsWith('/api/')) { await client(req, res); return; }
       // Write guard: every non-GET request needs the session token. Read-only mode adds its refusal here.
       if (!['GET', 'HEAD'].includes(req.method ?? 'GET') && req.headers['x-opendoc-token'] !== token) { json(res, { error: 'This write must come from the local OpenDoc session.' }, 403); return; }
-      if (req.method === 'GET' && url.pathname === '/api/session') { json(res, { token }); return; }
+      // Read-only guard, one check for every route: a non-GET request that is not on the short list above is refused before routing.
+      if (readOnly && !['GET', 'HEAD'].includes(req.method ?? 'GET') && !readOnlyWrites.some(([method, path]) => method === req.method && path.test(url.pathname))) {
+        json(res, { error: readOnly.message, code: readOnlyCode, readOnly }, 403); return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/session') { json(res, readOnly ? { token, readOnly } : { token }); return; }
       if (req.method === 'GET' && url.pathname === '/api/guides') { json(res, await readGuide(root, url.searchParams.get('path'))); return; }
       // Pack routes (/api/packs/...) are hooked in here.
       if (await handleAssetRequest(root, assets, req, res, url, json, body, () => workspace.changed())) return;
@@ -228,7 +249,7 @@ export async function prepareOpenDocService(options: { root: string; production:
         if (action === 'guide') { json(res, { file: `themes/${id}/design.md`, markdown: await readThemeGuide(root, id) }); return; }
         if (action === 'preview') { json(res, await themes.preview(id)); return; }
         const bytes = await themes.pdf(id, url.searchParams.get('hash') ?? '');
-        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': bytes.length, 'Cache-Control': 'no-store' }); res.end(bytes); return;
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': bytes.length, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(bytes); return;
       }
       if (req.method === 'GET' && url.pathname === '/api/templates') { json(res, await templates.list()); return; }
       const templateRoute = url.pathname.match(/^\/api\/templates\/([a-z0-9-]+)\/(pdf|documents|guide|preview)$/);
@@ -238,7 +259,7 @@ export async function prepareOpenDocService(options: { root: string; production:
       }
       if (templateRoute?.[2] === 'pdf' && req.method === 'GET') {
         const bytes = await templates.pdf(templateRoute[1], url.searchParams.get('hash') ?? '');
-        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': bytes.length, 'Cache-Control': 'no-store' }); res.end(bytes); return;
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': bytes.length, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(bytes); return;
       }
       if (templateRoute?.[2] === 'documents' && req.method === 'POST') {
         const created = await createFromTemplate(root, templateRoute[1], await body(req));
@@ -319,7 +340,7 @@ export async function prepareOpenDocService(options: { root: string; production:
       const draftPDF = url.pathname.match(/^\/api\/documents\/([^/]+)\/edits\/previews\/([a-f0-9-]+)\/pdf$/);
       if (draftPDF && req.method === 'GET' && validId(draftPDF[1])) {
         const bytes = await edits.previewPDF(draftPDF[1], draftPDF[2]);
-        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': bytes.length, 'Cache-Control': 'no-store' }); res.end(bytes); return;
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': bytes.length, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(bytes); return;
       }
       const editPreview = url.pathname.match(/^\/api\/documents\/([^/]+)\/edits\/preview$/);
       if (editPreview && req.method === 'POST' && validId(editPreview[1])) {
@@ -380,7 +401,7 @@ export async function prepareOpenDocService(options: { root: string; production:
         const output = workspace.output(id, url.searchParams.get('hash') ?? '');
         if (!output) { json(res, { error: 'This preview was replaced. Reload the document.' }, 409); return; }
         const bytes = await readFile(resolve(output.directory, 'document.pdf'));
-        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': bytes.length, 'Cache-Control': 'no-store' }); res.end(bytes); return;
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': bytes.length, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(bytes); return;
       }
       if (action === 'cover' && req.method === 'GET') {
         const output = workspace.output(id, url.searchParams.get('hash') ?? '');
@@ -399,7 +420,7 @@ export async function prepareOpenDocService(options: { root: string; production:
         const bytes = format === 'pptx' ? await readPresentationBytes(output.directory, hash) : await readFile(resolve(output.directory, 'document.pdf'));
         if (state.status !== 'ready' || state.revision !== revision) throw new Conflict('The document changed during export. Try again.');
         await publishFile(root, id, bytes, format, () => workspace.states.get(id) === state && state.status === 'ready' && state.revision === revision && state.artifact?.hash === hash);
-        res.writeHead(200, { 'Content-Type': info.mime, 'Content-Length': bytes.length, 'Content-Disposition': `attachment; filename="${id}${info.extension}"`, 'Cache-Control': 'no-store' }); res.end(bytes); return;
+        res.writeHead(200, { 'Content-Type': info.mime, 'Content-Length': bytes.length, 'Content-Disposition': `attachment; filename="${id}${info.extension}"`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(bytes); return;
       }
       if (action === 'comments') {
         if (req.method === 'GET') {
@@ -470,7 +491,7 @@ export async function prepareOpenDocService(options: { root: string; production:
           if (/^themes\/.*\.md$/.test(relative(root, path))) return;
           if (path.endsWith('comments.json')) { workspace.changed(); return; }
           // Debounced, so one save or one burst of agent writes becomes one version.
-          history.noteChange(path);
+          if (!readOnly) history.noteChange(path);
           // Documents may import modules or read local assets in any format (CSV, text,
           // diagrams, and fonts included). Dependency handling decides what is affected.
           workspace.noteChange(path);
@@ -478,7 +499,7 @@ export async function prepareOpenDocService(options: { root: string; production:
         workspace.on('workspace-error', error => console.error('Workspace refresh failed:', error));
         await workspace.refresh();
         // Record any change made while OpenDoc was closed, and apply the retention period.
-        void (async () => { for (const id of workspace.states.keys()) await history.record(id, 'external').catch(error => console.error('Could not record document history:', error)); })();
+        if (!readOnly) void (async () => { for (const id of workspace.states.keys()) await history.record(id, 'external').catch(error => console.error('Could not record document history:', error)); })();
       } catch (error) { await close(); throw error; }
     })();
     return started;
@@ -497,11 +518,11 @@ export async function prepareOpenDocService(options: { root: string; production:
     return closing;
   }
   const service: OpenDocService = { handle, token, close, onChange: listener => { workspace.on('change', listener); return () => { workspace.off('change', listener); }; } };
-  return { service, start };
+  return { readOnlySupported: true, service, start };
 }
 
 /** The usual way in: a service that is already watching, with its first refresh done. */
-export async function createOpenDocService(options: { root: string; production: boolean; client?: Handler }): Promise<OpenDocService> {
+export async function createOpenDocService(options: { root: string; production: boolean; client?: Handler; readOnly?: ReadOnlyState | null }): Promise<OpenDocService> {
   const { service, start } = await prepareOpenDocService(options);
   await start();
   return service;

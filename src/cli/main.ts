@@ -131,6 +131,8 @@ export async function main(rawArgs = process.argv.slice(2)) {
     }
     if (!root) throw failing(`No OpenDoc workspace found. Run npx --yes ${identity.name} init <folder>, or use --workspace <folder> for an existing workspace.`, 'no-workspace');
     const flags = [...(json ? ['--json'] : []), ...args];
+    // A workspace the app opened read-only refuses every command that writes (plan 3.4); reading, rendering and exporting go on.
+    await (await import('./read-only')).refuseReadOnlyWrite(root, command, args);
     const dispatch = async () => {
       switch (command) {
         case 'start': await (await import('./start')).runStart(flags, root); break;

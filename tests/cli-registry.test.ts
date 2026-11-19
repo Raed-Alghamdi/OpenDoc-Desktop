@@ -417,6 +417,7 @@ test('failureOf derives each code from the error\'s class, status, parse failure
     [new OwnerShuttingDown(), 'owner-shutting-down'],
     [new Error('The recorded OpenDoc process is still running or finishing shutdown. Wait.'), 'owner-shutting-down'],
     [new InvalidOwnerRecord(), 'owner-unconfirmed'],
+    [codedError('This workspace was upgraded by OpenDoc 0.7. Update the app to edit it.', 'workspace-read-only'), 'workspace-read-only'],
     [new Error('Cannot read the OpenDoc session. Check .opendoc/server.json before starting another server.'), 'owner-unconfirmed'],
     [new Error('The opendoc-desktop record .opendoc/desktop.json cannot be read. If opendoc-desktop is not running, delete .opendoc/desktop.json and try again.'), 'owner-unconfirmed'],
     [new Error('Document not found.'), 'not-found'],

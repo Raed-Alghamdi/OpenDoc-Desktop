@@ -1,6 +1,22 @@
-import { mkdir, open, readFile, unlink } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { link, mkdir, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+
+/**
+ * Create the lock with its content already in it: write a temporary file beside it and hard-link that to the lock name (EEXIST
+ * means taken, as with an exclusive create). A kill can then never leave an empty lock nobody can confirm stale. The desktop app
+ * takes the same lock the same way. A file system without hard links gets the plain exclusive create.
+ */
+async function createWhole(file: string, contents: string) {
+  const temporary = resolve(dirname(file), `.update.lock.${randomUUID()}.opendoc-${process.pid}.part`);
+  await writeFile(temporary, contents, { flag: 'wx', mode: 0o600 });
+  try { await link(temporary, file); }
+  catch (error) {
+    if (!['EPERM', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+    const handle = await open(file, 'wx', 0o600);
+    try { await handle.writeFile(contents); } finally { await handle.close(); }
+  } finally { await rm(temporary, { force: true }).catch(() => {}); }
+}
 
 /** Startup, update activation, and Headless commands share the workspace runtime lock. */
 export async function withWorkspaceLock<T>(root: string, action: () => Promise<T>): Promise<T> {
@@ -8,8 +24,7 @@ export async function withWorkspaceLock<T>(root: string, action: () => Promise<T
   await mkdir(resolve(root, '.opendoc'), { recursive: true });
   const contents = JSON.stringify({ pid: process.pid, id: randomUUID() });
   try {
-    const handle = await open(file, 'wx', 0o600);
-    try { await handle.writeFile(contents); } finally { await handle.close(); }
+    await createWhole(file, contents);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     const recovery = `Confirm no OpenDoc command is running, then remove ${file} and retry.`;

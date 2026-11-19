@@ -254,3 +254,42 @@ test('opendoc start never serves a writable UI on a workspace whose pin is newer
   assert.equal(write.status, 403);
   assert.equal(((await write.json()) as { code: string }).code, 'workspace-read-only');
 });
+
+/** An ordinary process that the CLI's name check accepts as the app: a copy of `sleep` named opendoc-desktop. */
+async function standInForApp(t: TestContext) {
+  const folder = await scratch(t);
+  const program = resolve(folder, 'opendoc-desktop');
+  await cp((await run('which', ['sleep'])).stdout.trim(), program);
+  const child = spawn(program, ['600'], { stdio: 'ignore' });
+  t.after(() => { child.kill('SIGKILL'); });
+  await new Promise(accept => setTimeout(accept, 100));
+  return child.pid!;
+}
+
+for (const reason of ['declined-upgrade', 'restored-backup'] as const) {
+  test(`an older-minor pin the app holds read-only (${reason}) reads and checks, and writes get the app's own message; without the app it is the upgrade message`, { timeout: 300_000, skip: minor === 0 }, async t => {
+    const workspace = await created(t);
+    const manifest = JSON.parse(await readFile(resolve(workspace, 'package.json'), 'utf8'));
+    manifest.dependencies.opendoc = pinFor(`${major}.${minor - 1}.0`);
+    await writeFile(resolve(workspace, 'package.json'), JSON.stringify(manifest));
+    const message = `Your choice is kept (${reason}): this workspace stays read-only until you upgrade it in the app.`;
+    const record = resolve(workspace, '.opendoc/desktop.json');
+    await writeFile(record, JSON.stringify({ pid: await standInForApp(t), startedAt: '2026-01-01T00:00:00.000Z', version: pkg.version, build: 1, readOnly: { reason, message } }));
+    const json = (text: string) => JSON.parse(text.trim().split('\n').at(-1)!);
+    for (const args of [['projects', 'list'], ['documents', 'trash'], ['check']]) {
+      const result = await opendoc(workspace, ...args);
+      assert.equal(result.code, 0, `${args.join(' ')}: ${result.stdout}${result.stderr}`);
+    }
+    const write = await opendoc(workspace, 'documents', 'rename', 'welcome', 'Renamed', '--json');
+    assert.equal(write.code, 1);
+    assert.deepEqual(json(write.stdout), { ok: false, error: message, code: 'workspace-read-only' });
+    // The app has gone: only the app can upgrade, and the message says so.
+    await rm(record);
+    const gone = await opendoc(workspace, 'projects', 'list', '--json');
+    assert.equal(gone.code, 1);
+    assert.match(json(gone.stdout).error, /Open this workspace in opendoc-desktop to upgrade it\./);
+    // A record whose app has stopped does not count either.
+    await writeFile(record, JSON.stringify({ pid: 2 ** 22 - 3, startedAt: '2026-01-01T00:00:00.000Z', version: pkg.version, build: 1, readOnly: { reason, message } }));
+    assert.match(json((await opendoc(workspace, 'projects', 'list', '--json')).stdout).error, /to upgrade it\./);
+  });
+}

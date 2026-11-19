@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { launchApp, nativeCalls, newProfile, newWorkspace, setNative, stubNative } from './support/app.mjs';
-import { libraryReady, readJson, serverRecord, slow, waitFor, waitForExit } from './support/helpers.mjs';
+import { hostPid, libraryReady, readJson, slow, waitFor, waitForExit } from './support/helpers.mjs';
 import { waitForNoElectron } from './support/processes.mjs';
 
 const closeWindow = app => app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].close(); });
@@ -51,12 +51,12 @@ test.describe.serial('unsaved edits', () => {
     await waitFor(async () => (await leaveDialogs(app)).length === 2, { what: 'the second Leave/Stay dialog' });
     expect(await windowCount(app)).toBe(1);
     expect(await serviceAnswers(page)).toBe(true);
-    expect((await serverRecord(workspace)).pid).toBeGreaterThan(0);
+    expect(hostPid(app)).toBeGreaterThan(0);
   });
 
   test('Leave closes the window, ends the app and stops the service', async () => {
     const child = app.process();
-    const service = (await serverRecord(workspace)).pid;
+    const service = hostPid(app);
     await setNative(app, { messageChoice: 'Leave' });
     await closeWindow(app);
     expect(await waitForExit(child, 30_000)).toBe(true);

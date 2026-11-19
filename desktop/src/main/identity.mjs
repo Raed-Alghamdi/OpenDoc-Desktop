@@ -8,6 +8,10 @@ export const originalProject = { name: 'OpenDoc', author: 'RyanYahya', url: 'htt
 export const shellScheme = 'app';
 export const shellHost = 'shell';
 export const shellOrigin = `${shellScheme}://${shellHost}`;
+// The OpenDoc service's pages and API, on the same scheme. The main process answers them through the service host's
+// channel; nothing listens on a port.
+export const serviceHost = 'opendoc';
+export const serviceOrigin = `${shellScheme}://${serviceHost}`;
 
 // Settings read from the environment. They exist for tests and development builds only.
 export const environment = {

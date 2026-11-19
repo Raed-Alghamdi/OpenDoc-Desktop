@@ -3,7 +3,7 @@ import { BrowserWindow, app, dialog, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { copyFile, rename, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { contentSecurityPolicy, crossOriginMutation, isWebLink, permissionAllowed, requestAllowed, revealRequest } from './policy.mjs';
+import { contentSecurityPolicy, crossOriginMutation, isWebLink, originOf, permissionAllowed, requestAllowed } from './policy.mjs';
 import { serveShell } from './shell-pages.mjs';
 import { shellHost, shellScheme } from './identity.mjs';
 
@@ -49,32 +49,25 @@ export function handleDownload(item, contents) {
 
 /**
  * Call once for each session. `ses` is an Electron Session.
- * @param workspace what the session serves, read each time so a restarted service can move to a new address:
- *   { origins(): string[], transport(): the current transport or null, revealPath(id): Promise<string | null> }
+ * @param workspace what the session serves, read each time so a restarted service is found at once:
+ *   { origins(): string[], transport(): the current transport or null }
  */
 export function applySessionPolicy(ses, workspace) {
   ses.setSpellCheckerEnabled(false); // The spell checker downloads dictionaries from the network.
-  ses.setPermissionRequestHandler((_contents, permission, callback, details) => callback(permissionAllowed(permission) && workspace.origins().some(origin => details.requestingUrl.startsWith(origin))));
+  ses.setPermissionRequestHandler((_contents, permission, callback, details) => callback(permissionAllowed(permission) && workspace.origins().includes(originOf(details.requestingUrl))));
   ses.setPermissionCheckHandler((_contents, permission, requestingOrigin) => permissionAllowed(permission) && workspace.origins().includes(requestingOrigin));
   ses.setDevicePermissionHandler(() => false);
   // Cancelled: other addresses, and changes to the service that the app's own page did not make.
   ses.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !requestAllowed(details.url, workspace.origins()) || crossOriginMutation(details, workspace.origins()) }));
   ses.on('will-download', (_event, item, contents) => handleDownload(item, contents));
 
-  // The page talks to the service only through the main process: it adds the content security policy, and it
-  // answers "Show in folder" itself (the service host must never start user programs; its environment is not theirs).
+  // The page talks to the service only through the main process: it adds the content security policy and carries
+  // each request to the service host. No route is answered here; the service answers all of them.
   const forward = async request => {
     const transport = workspace.transport();
     // Only the service's own address is answered (any other host gets 403), and nothing is sent to a transport that was closed.
-    if (!transport || new URL(request.url).origin !== transport.origin) return new Response('Not found.', { status: 403 });
+    if (!transport || originOf(request.url) !== transport.origin) return new Response('Not found.', { status: 403 });
     if (!transport.running) return new Response('The OpenDoc service is not running.', { status: 503 });
-    const id = revealRequest(request, transport.origin);
-    if (id) {
-      const path = await workspace.revealPath(id);
-      if (!path) return Response.json({ error: 'This exported file is no longer available.' }, { status: 404 });
-      shell.showItemInFolder(path);
-      return Response.json({ ok: true });
-    }
     let response;
     try { response = await transport.handle(request); }
     catch (error) {
@@ -82,15 +75,14 @@ export function applySessionPolicy(ses, workspace) {
       return new Response('The OpenDoc service failed to answer.', { status: 500 });
     }
     const headers = new Headers(response.headers);
-    headers.set('Content-Security-Policy', contentSecurityPolicy(transport.origin));
+    // The app's policy is added next to the service's own (for example default-src 'none'; sandbox on SVG assets). Several
+    // policies all apply, and the stricter one wins, so the service's policy is never replaced. Other headers pass through.
+    headers.append('Content-Security-Policy', contentSecurityPolicy());
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   };
-  // One handler per scheme the app's windows use: app:// carries the shell's own pages (and, after U3, the service),
-  // http:// carries the temporary adapter's service. Any other address on either scheme is refused.
-  const dispatch = request => {
+  // One handler for the app's scheme: app://shell is the shell's own pages, app://opendoc is the service. Any other host is refused.
+  ses.protocol.handle(shellScheme, request => {
     const url = new URL(request.url);
-    return url.protocol === `${shellScheme}:` && url.host === shellHost ? serveShell(request) : forward(request);
-  };
-  ses.protocol.handle(shellScheme, dispatch);
-  ses.protocol.handle('http', dispatch);
+    return url.host === shellHost ? serveShell(request) : forward(request);
+  });
 }

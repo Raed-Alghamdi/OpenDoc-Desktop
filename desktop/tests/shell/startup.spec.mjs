@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { access, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { launchApp, nativeCalls, newProfile, newWorkspace, readConfig, setNative, stubNative } from './support/app.mjs';
-import { deadPid, desktopRecord, libraryReady, serverRecord, slow, waitFor } from './support/helpers.mjs';
+import { deadPid, desktopRecord, hostPid, isWorkspaceUrl, libraryReady, serverRecord, slow, waitFor } from './support/helpers.mjs';
 import { runtimeDir, workDir } from './support/paths.mjs';
 import { electronProcesses, waitForNoElectron } from './support/processes.mjs';
 
@@ -25,7 +25,9 @@ test.describe('startup', () => {
       expect(record).toMatchObject({ version: '0.6.1', build: 7 });
       expect(record.pid).toBe(app.process().pid);
       // The host runs with the workspace as its working directory (theme modules are read relative to it).
-      expect(await realpath(`/proc/${(await serverRecord(workspace)).pid}/cwd`)).toBe(await realpath(workspace));
+      expect(await realpath(`/proc/${hostPid(app)}/cwd`)).toBe(await realpath(workspace));
+      // No listener, so no browser-edition session record either.
+      await gone(join(workspace, '.opendoc', 'server.json'));
       const config = await readConfig(profile);
       expect(config.defaultWorkspace).toBe(workspace);
       expect(config.recentWorkspaces).toEqual([workspace]);
@@ -48,8 +50,8 @@ test.describe('startup', () => {
       await expect(picker.getByText('No workspaces yet.')).toBeVisible();
       expect(await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.find(item => item.label === 'File').submenu.items.find(item => item.label === 'Reveal Workspace').enabled)).toBe(false);
       await picker.getByRole('button', { name: /Open existing workspace/ }).click();
-      await waitFor(() => app.windows().some(page => page.url().startsWith('http://127.0.0.1:')), { timeout: 120_000, what: 'the workspace window' });
-      const page = app.windows().find(item => item.url().startsWith('http://127.0.0.1:'));
+      await waitFor(() => app.windows().some(page => isWorkspaceUrl(page.url())), { timeout: 120_000, what: 'the workspace window' });
+      const page = app.windows().find(item => isWorkspaceUrl(item.url()));
       await libraryReady(page);
       expect(app.windows().length).toBe(1);
       expect(await readConfig(profile)).toMatchObject({ defaultWorkspace: workspace, recentWorkspaces: [workspace] });
@@ -64,8 +66,8 @@ test.describe('startup', () => {
       await stubNative(app, { openDialog: { canceled: false, filePaths: [target] } });
       const picker = await app.firstWindow();
       await picker.getByRole('button', { name: /Create new workspace/ }).click();
-      await waitFor(() => app.windows().some(page => page.url().startsWith('http://127.0.0.1:')), { timeout: 240_000, what: 'the new workspace window' });
-      await libraryReady(app.windows().find(item => item.url().startsWith('http://127.0.0.1:')));
+      await waitFor(() => app.windows().some(page => isWorkspaceUrl(page.url())), { timeout: 240_000, what: 'the new workspace window' });
+      await libraryReady(app.windows().find(item => isWorkspaceUrl(item.url())));
       expect(JSON.parse(await readFile(join(target, '.opendoc', 'workspace.json'), 'utf8')).edition).toBe('normal');
       expect(await readConfig(profile)).toMatchObject({ defaultWorkspace: target });
       expect((await nativeCalls(app)).opens[0]).toMatchObject({ properties: expect.arrayContaining(['openDirectory', 'createDirectory']) });
@@ -88,7 +90,7 @@ test.describe('startup', () => {
       await expect(picker.locator('ul.recent li')).toHaveCount(2);
       expect((await readConfig(profile)).recentWorkspaces).toEqual([first, second]);
       await picker.getByRole('button', { name: /recent-b/ }).first().click();
-      await waitFor(() => app.windows().some(page => page.url().startsWith('http://127.0.0.1:')), { timeout: 120_000, what: 'the workspace window' });
+      await waitFor(() => app.windows().some(page => isWorkspaceUrl(page.url())), { timeout: 120_000, what: 'the workspace window' });
       expect((await readConfig(profile)).recentWorkspaces).toEqual([second, first]);
     } finally { await app.close(); }
   });
@@ -142,7 +144,7 @@ test.describe('startup', () => {
       await expect(picker.locator('#message')).toContainText('stopped before it released');
       expect(await readFile(lock, 'utf8')).toContain('left-behind'); // not cleared by itself
       await picker.getByRole('button', { name: 'Clear stale lock' }).click();
-      await waitFor(() => app.windows().some(page => page.url().startsWith('http://127.0.0.1:')), { timeout: 120_000, what: 'the workspace window' });
+      await waitFor(() => app.windows().some(page => isWorkspaceUrl(page.url())), { timeout: 120_000, what: 'the workspace window' });
       await waitFor(() => access(lock).then(() => false, () => true), { timeout: 60_000, what: 'the lock to be released once the workspace is open' });
     } finally { await app.close(); }
   });

@@ -29,7 +29,7 @@ async function run() {
   const here = fileURLToPath(new URL('.', import.meta.url));
   const runtime = runtimeLocation({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, developmentRoot: join(here, '..', '..') });
   const templatePath = appImageTemplatePath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, developmentRoot: join(here, '..', '..') });
-  const shell = new DesktopShell({ runtime, templatePath });
+  const shell = new DesktopShell({ runtime, templatePath, fallbackRoot: app.isPackaged ? undefined : join(here, '..', '..', '..') });
 
   app.on('second-instance', () => shell.secondInstance());
   app.on('window-all-closed', () => { if (!shell.keepAlive) app.quit(); });

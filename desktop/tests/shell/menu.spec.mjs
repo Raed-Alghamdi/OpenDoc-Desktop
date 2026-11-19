@@ -2,7 +2,7 @@
 import { expect, test } from '@playwright/test';
 import { realpath } from 'node:fs/promises';
 import { launchApp, nativeCalls, newProfile, newWorkspace, readConfig, setNative, stubNative } from './support/app.mjs';
-import { desktopRecord, libraryReady, waitFor } from './support/helpers.mjs';
+import { desktopRecord, isWorkspaceUrl, libraryReady, waitFor } from './support/helpers.mjs';
 
 const menuLabels = (app, path = []) => app.evaluate(({ Menu }, names) => {
   let items = Menu.getApplicationMenu().items;
@@ -70,12 +70,12 @@ test.describe.serial('menus', () => {
   test('Open Workspace switches: one window, one workspace, desktop.json follows', async () => {
     await clickItem(app, ['File', 'Open Workspace…']);
     await waitFor(async () => (await desktopRecord(second).catch(() => null))?.pid === app.process().pid, { timeout: 120_000, what: 'the second workspace' });
-    await waitFor(() => app.windows().some(window => window.url().startsWith('http://127.0.0.1:')), { what: 'the window' });
+    await waitFor(() => app.windows().some(window => isWorkspaceUrl(window.url())), { what: 'the window' });
     expect(await desktopRecord(first).catch(() => null)).toBeNull();
     const windows = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
     expect(windows).toBe(1);
     expect((await readConfig(profile)).recentWorkspaces).toEqual([await realpath(second), await realpath(first)]);
-    await libraryReady(app.windows().find(window => window.url().startsWith('http://127.0.0.1:')));
+    await libraryReady(app.windows().find(window => isWorkspaceUrl(window.url())));
     expect(await menuLabels(app, ['File', 'Open Recent'])).toHaveLength(2);
   });
 

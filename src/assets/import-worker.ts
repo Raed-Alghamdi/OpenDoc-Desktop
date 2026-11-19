@@ -10,6 +10,9 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { preparedFile, type PreparedFonts, type PreparedLogo, type UploadFile } from './imports';
 import { imageInfo } from '../media/files';
 import { runtimeResolve } from '../runtime/paths';
+import { exitWithParent } from '../server/parent-watch';
+
+exitWithParent();
 
 const crcTable = Array.from({ length: 256 }, (_, value) => {
   let crc = value;

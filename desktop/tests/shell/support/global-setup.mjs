@@ -20,7 +20,9 @@ function run(command, args, options = {}) {
 async function tarball() {
   if (process.env.OPENDOC_SHELL_TEST_TARBALL) return process.env.OPENDOC_SHELL_TEST_TARBALL;
   const { version } = JSON.parse(await readFile(join(repo, 'package.json'), 'utf8'));
-  const file = join(cache, `ryanyahya-opendoc-${version}.tgz`);
+  // Named by the version and the committed source it was built from, so a merge that changes src/ builds a new one.
+  const source = run('git', ['rev-parse', '--short=12', 'HEAD:src'], { cwd: repo }).trim();
+  const file = join(cache, `ryanyahya-opendoc-${version}-${source}.tgz`);
   if (existsSync(file)) return file;
   console.log('Building the OpenDoc package for the tests (pnpm package:pack --edition normal)...');
   run('pnpm', ['package:pack', '--edition', 'normal', '--output', join(cache, 'packages')], { cwd: repo });

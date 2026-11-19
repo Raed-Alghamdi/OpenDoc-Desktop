@@ -199,9 +199,12 @@ export const commandRegistry: Entry[] = [
   { path: ['comments', 'reopen'], summary: 'Reopen a resolved comment.', args: ['<doc>', '<comment-id>'] },
   { path: ['comments', 'delete'], summary: 'Delete a comment; it stays restorable for 90 days.', args: ['<doc>', '<comment-id>'] },
   { path: ['comments', 'restore'], summary: 'Restore a deleted comment.', args: ['<doc>', '<comment-id>'] },
-  { path: ['comments', 'add'], summary: 'Add a comment on a block, or on exact words in it.', args: ['<doc>', '<block-id>', '<text...>'], options: [
+  { path: ['comments', 'add'], summary: 'Add a comment on a block, or on exact words in it, or on several places.', args: ['<doc>', '<block-id>', '<text...>'], options: [
     text('phrase', 'Anchor the comment to these exact words in the block.'),
     text('target', 'The text field, when the words appear in more than one; with --phrase.'),
+    text('also', 'Put the comment on another block too. Repeat for each place; a block once.', { repeatable: true }),
+    text('also-phrase', 'Anchor the --also just before it to these exact words. Needs OpenDoc stopped.', { repeatable: true }),
+    text('also-target', 'The text field for that --also-phrase, when the words appear in more than one.', { repeatable: true }),
   ] },
   { path: ['comments', 'edit'], summary: 'Replace the text of an open or resolved comment.', args: ['<doc>', '<comment-id>', '<text...>'], options: [
     text('expected-version', 'Refuse the edit when the comment is no longer at this version.'),

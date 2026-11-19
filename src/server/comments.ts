@@ -2,9 +2,11 @@ import { mkdir, rm } from 'node:fs/promises';
 import { lstatSync, readFileSync, rmSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { atomicWrite, readJSON, containedFile } from './files';
 import { documentEntry } from './render';
-import type { Comment } from '../shared/types';
+import { maxSelections } from './selection';
+import type { Comment, CommentTarget } from '../shared/types';
 import type { TextAnchor } from '../shared/selection';
 
 export class Conflict extends Error {}
@@ -21,6 +23,21 @@ function validAnchor(anchor: unknown): anchor is TextAnchor {
     && typeof value.prefix === 'string' && value.prefix.length <= 40
     && typeof value.suffix === 'string' && value.suffix.length <= 40;
 }
+function validTarget(target: unknown): target is CommentTarget {
+  if (!target || typeof target !== 'object') return false;
+  const value = target as CommentTarget;
+  return nonempty(value.blockId) && typeof value.quote === 'string' && (value.anchor === undefined || validAnchor(value.anchor));
+}
+/**
+ * `targets` only adds places: the first one must be the top-level block, quote and anchor older
+ * readers see. One place or many is accepted on read, and the number of places is capped only
+ * when a comment is made, so a file written elsewhere never locks the document's feedback.
+ */
+function validTargets(row: Comment) {
+  if (row.targets === undefined) return true;
+  return Array.isArray(row.targets) && row.targets.length > 0 && row.targets.every(validTarget)
+    && row.targets[0].blockId === row.blockId && row.targets[0].quote === row.quote && isDeepStrictEqual(row.targets[0].anchor, row.anchor);
+}
 export async function readComments(root: string, id: string): Promise<Comment[]> {
   const entry = await documentEntry(root, id);
   const file = resolve(dirname(entry), 'comments.json');
@@ -33,7 +50,7 @@ export async function readComments(root: string, id: string): Promise<Comment[]>
     || row.history.some((event: Comment['history'][number]) => !event || !validDate(event.at)
       || !['created', 'resolved', 'reopened', 'edited', 'deleted', 'restored'].includes(event.action)
       || (event.previousText !== undefined && typeof event.previousText !== 'string'))
-    || (row.anchor !== undefined && !validAnchor(row.anchor)))) throw new Error(`Invalid comments file for ${id}. Restore valid JSON; existing feedback has not been overwritten.`);
+    || (row.anchor !== undefined && !validAnchor(row.anchor)) || !validTargets(row))) throw new Error(`Invalid comments file for ${id}. Restore valid JSON; existing feedback has not been overwritten.`);
   return rows as Comment[];
 }
 
@@ -86,13 +103,32 @@ async function mutate(root: string, id: string, fn: (rows: Comment[]) => Comment
   });
 }
 
-export async function addComment(root: string, id: string, input: { blockId: string; text: string; quote: string; anchor?: TextAnchor; exactQuote?: boolean }, unchanged?: () => boolean) {
+/** One place of a new comment; `exactQuote` keeps a selected passage whole instead of the 500-character block preview. */
+export interface CommentPlace { blockId: string; quote: string; anchor?: TextAnchor; exactQuote?: boolean }
+
+/**
+ * A comment on one place (`blockId`, `quote`, `anchor`) or on several (`targets`, at least 2, each
+ * block once). Several places are saved as `targets` and the first is also written to the top-level
+ * fields, so a comment on one place is stored exactly as before.
+ */
+type SinglePlaceComment = CommentPlace & { text: string; targets?: undefined };
+type MultiPlaceComment = { text: string; targets: CommentPlace[]; blockId?: undefined; quote?: undefined; anchor?: undefined; exactQuote?: undefined };
+export async function addComment(root: string, id: string, input: SinglePlaceComment | MultiPlaceComment, unchanged?: () => boolean) {
   if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 8000) throw new Error('Write a comment between 1 and 8,000 characters.');
-  if (typeof input.blockId !== 'string' || !input.blockId) throw new Error('Select a document element first.');
-  if (typeof input.quote !== 'string') throw new Error('Select the document element again before commenting.');
-  if (input.anchor !== undefined && !validAnchor(input.anchor)) throw new Error('Select the phrase again before commenting.');
+  if (input.targets !== undefined && (input.blockId !== undefined || input.quote !== undefined || input.anchor !== undefined || input.exactQuote !== undefined)) throw new Error('Give either one place or a list of places, not both.');
+  if (input.targets !== undefined && (!Array.isArray(input.targets) || !input.targets.length)) throw new Error('Select a document element first.');
+  const places = input.targets ?? [input];
+  if (places.length > maxSelections) throw new Error(`Comment on at most ${maxSelections} places at once.`);
+  for (const place of places) {
+    if (!place || typeof place.blockId !== 'string' || !place.blockId) throw new Error('Select a document element first.');
+    if (typeof place.quote !== 'string') throw new Error('Select the document element again before commenting.');
+    if (place.anchor !== undefined && !validAnchor(place.anchor)) throw new Error('Select the phrase again before commenting.');
+  }
+  if (new Set(places.map(place => place.blockId)).size !== places.length) throw new Error('A comment names each component once. Remove the repeated component.');
+  const targets: CommentTarget[] = places.map(place => ({ blockId: place.blockId, quote: place.anchor?.quote ?? place.quote.slice(0, place.exactQuote ? 8000 : 500), ...(place.anchor ? { anchor: place.anchor } : {}) }));
+  const [first] = targets;
   const at = new Date().toISOString();
-  return mutate(root, id, rows => [...rows, { id: randomUUID(), blockId: input.blockId, text: input.text.trim(), quote: input.anchor?.quote ?? input.quote.slice(0, input.exactQuote ? 8000 : 500), ...(input.anchor ? { anchor: input.anchor } : {}), status: 'open', createdAt: at, updatedAt: at, version: 1, history: [{ at, action: 'created' }] }], unchanged);
+  return mutate(root, id, rows => [...rows, { id: randomUUID(), blockId: first.blockId, text: input.text.trim(), quote: first.quote, ...(first.anchor ? { anchor: first.anchor } : {}), ...(targets.length > 1 ? { targets } : {}), status: 'open', createdAt: at, updatedAt: at, version: 1, history: [{ at, action: 'created' }] }], unchanged);
 }
 
 /** Every mutation checks the same current record before appending its history. */

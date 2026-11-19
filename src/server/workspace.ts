@@ -12,7 +12,7 @@ import { documentDependencies, includesDependency, type DocumentDependencies, is
 import { readMedia, mediaFreshness } from '../media/files';
 import { readAssetHead, readAssetRevision, readDocumentAssets, readThemeAssetDefaults } from '../assets/files';
 import { documentName, getBlock, type DocumentState, type WorkspaceContext, type RenderArtifact } from '../shared/types';
-import { getEditableSelection, getTextTarget, resolveCommentAnchor } from '../shared/anchors';
+import { getEditableSelection, getTextTarget, resolveCommentStatus } from '../shared/anchors';
 import type { ManualEditSummary } from '../shared/selection';
 
 export class Workspace extends EventEmitter {
@@ -161,8 +161,8 @@ export class Workspace extends EventEmitter {
       const project = manifest.projects.find(project => project.id === projectId) ?? null;
       let comments: unknown[] = [], commentsError: string | undefined;
       if (state) try { comments = (await readComments(this.root, state.id)).filter(c => c.status === 'open').map(c => {
-        const resolved = resolveCommentAnchor(state.artifact, c);
-        return { ...c, targetAvailable: resolved.status !== 'missing', anchorStatus: resolved.status, selection: resolved.selection };
+        const resolved = resolveCommentStatus(state.artifact, c);
+        return { ...c, ...(c.targets ? { targets: resolved.targets } : {}), targetAvailable: resolved.status !== 'missing', anchorStatus: resolved.status, selection: resolved.selection };
       }); }
       catch (e) { commentsError = String(e); }
       let selectedMedia: unknown = null;
@@ -218,6 +218,7 @@ export class Workspace extends EventEmitter {
         renderHash: state?.artifact?.hash, source: selectedBlock?.source ?? null,
         selectedBlock: selectedBlock ?? null,
         selection: selection ?? null,
+        selections: this.context.selections ?? (selection ? [selection] : []),
         selectionCurrent,
         selectedText: selectedTarget ? {
           targetId: selectedTarget.id, blockId: selectedTarget.blockId, slot: selectedTarget.slot,

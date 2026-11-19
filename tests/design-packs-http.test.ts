@@ -9,7 +9,9 @@ import { collectPack } from '../src/packs/collect';
 import { writeArchive } from '../src/packs/archive';
 import { digest, type PackManifest } from '../src/packs/manifest';
 import { handlePacksRequest, stagedLifetime, type PackHooks } from '../src/server/packs-http';
-import { projectRoot } from './helpers';
+import { createOpenDocService } from '../src/server/service';
+import { exportPack, installPack } from '../src/packs/packs';
+import { fixture, projectRoot, until } from './helpers';
 
 async function put(root: string, path: string, source: string | Buffer) { await mkdir(dirname(resolve(root, path)), { recursive: true }); await writeFile(resolve(root, path), source); }
 async function workspaces(t: TestContext) {
@@ -252,4 +254,54 @@ test('pack HTTP leaves other routes alone and answers only the documented method
   assert.equal((await server.get('/api/packs')).status, 404);
   assert.equal((await server.get('/api/packs/install')).status, 404);
   assert.equal((await server.send('/api/packs/staged/x/previews/y.pdf', {})).status, 404);
+});
+
+test('a running service installs a pack for Import, shows the new design without a restart, and the CLI still refuses', { timeout: 120_000 }, async t => {
+  const f = await workspaces(t);
+  const zip = resolve(f.container, 'acme.opendoc.zip');
+  await exportPack(f.source, { themes: ['acme'], output: zip });
+  const recipient = await fixture();
+  // The service may still write its context file while it stops, so removal retries.
+  t.after(() => rm(recipient.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
+  await rm(resolve(recipient.root, 'assets')); // The fixture links the repository's assets; an installing workspace owns its own.
+  await mkdir(resolve(recipient.root, 'assets'));
+  const service = await createOpenDocService({ root: recipient.root, production: false, client: (_req, res) => { res.end('client'); } });
+  t.after(() => service.close());
+  const server = createServer((req, res) => { service.handle(req, res).catch(() => {}); });
+  await new Promise<void>(accept => server.listen(0, '127.0.0.1', accept));
+  t.after(async () => { server.closeAllConnections(); await new Promise<void>(accept => server.close(() => accept())); });
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const origin = `http://127.0.0.1:${address.port}`;
+  // The record the CLI and `installPack` read to learn that a service owns this workspace.
+  await put(recipient.root, '.opendoc/server.json', JSON.stringify({ origin, pid: process.pid, token: service.token }));
+  const themes = async () => (await (await fetch(origin + '/api/themes')).json() as { id: string }[]).map(theme => theme.id);
+  assert.ok(!(await themes()).includes('acme'));
+  await assert.rejects(installPack(recipient.root, zip, { trust: true }), /Stop OpenDoc/);
+  assert.ok(!(await themes()).includes('acme'));
+
+  const archive = await readFile(zip);
+  const form = new FormData(); form.set('file', new Blob([new Uint8Array(archive)]), 'acme.opendoc.zip');
+  const guard = { 'X-OpenDoc-Token': service.token };
+  // Writes need the session token, as everywhere else in the service.
+  assert.equal((await fetch(origin + '/api/packs/inspect', { method: 'POST', body: form })).status, 403);
+  const inspected = await good<Inspected>(await fetch(origin + '/api/packs/inspect', { method: 'POST', headers: guard, body: form }), 201);
+  assert.deepEqual(inspected.conflicts, []);
+  const install = (value: unknown) => fetch(origin + '/api/packs/install', { method: 'POST', headers: { ...guard, 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+  assert.equal((await install({ stagedId: inspected.stagedId })).status, 400);
+  assert.ok(!(await themes()).includes('acme'));
+  const installed = await good<{ installed: { id: string }[] }>(await install({ stagedId: inspected.stagedId, trust: true }));
+  assert.ok(installed.installed.some(item => item.id === 'acme'));
+  assert.ok((await themes()).includes('acme'), 'the catalog lists the new theme without a restart');
+  const preview = await good<{ artifact?: { hash: string } }>(await fetch(origin + '/api/themes/acme/preview'));
+  assert.ok(preview.artifact, 'the new theme renders in the running service');
+  // The watcher is listening again: an edit to the new theme is noticed by its catalog.
+  const revision = async () => (await (await fetch(origin + '/api/themes')).json() as { id: string; revision?: string }[]).find(theme => theme.id === 'acme')?.revision;
+  const before = await revision();
+  await writeFile(resolve(recipient.root, 'themes/acme/design.md'), '# Acme\nChanged after install.\n');
+  await until(async () => (await revision()) !== before);
+  // A conflict reaches the client as 409.
+  const again = await good<Inspected>(await fetch(origin + '/api/packs/inspect', { method: 'POST', headers: guard, body: form }), 201);
+  assert.ok(again.conflicts.includes('themes/acme/design.md'));
+  assert.equal((await install({ stagedId: again.stagedId, trust: true })).status, 409);
 });

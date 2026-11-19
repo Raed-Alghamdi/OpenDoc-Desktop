@@ -150,7 +150,7 @@ async function validateSnapshot(root: string, manifest: PackManifest) {
   for (const asset of collected.assets) if (!manifest.assets.some(candidate => candidate.kind === asset.kind && candidate.id === asset.id && candidate.revision === asset.revision)) throw new Error(`Pack has an undeclared asset revision: ${asset.id}.`);
 }
 
-export async function installPack(root: string, file: string, options: { trust?: boolean; dryRun?: boolean } = {}) {
+export async function installPack(root: string, file: string, options: { trust?: boolean; dryRun?: boolean; calledByOwner?: boolean } = {}) {
   root = await realpath(root);
   const pack = await readPack(file);
   if (options.dryRun) return { installed: false, manifest: pack.manifest, plan: await planInstall(root, pack) };
@@ -158,7 +158,8 @@ export async function installPack(root: string, file: string, options: { trust?:
   const control = await exists(resolve(root, '.opendoc'));
   if (control && (!control.isDirectory() || control.isSymbolicLink())) throw new Error('OpenDoc needs an ordinary .opendoc directory for installation.');
   return withWorkspaceLock(root, async () => {
-    if ((await packageMetadata()).opendoc?.edition !== 'headless') {
+    // The owning service passes `calledByOwner` for Import: it pauses its own watcher around this call. The CLI never does.
+    if (!options.calledByOwner && (await packageMetadata()).opendoc?.edition !== 'headless') {
       const owner = await workspaceOwner(root);
       if (owner.mode === 'desktop') throw new Error(`This workspace is open in opendoc-desktop. Use Import in the app, or close it before installing a pack. ${desktopRecordAdvice}`);
       if (owner.mode === 'service') throw new Error('Stop OpenDoc with Ctrl+C before installing a pack, then restart with npx opendoc start. This keeps partially installed source out of the running catalog.');

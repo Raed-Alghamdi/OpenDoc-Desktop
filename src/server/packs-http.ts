@@ -25,10 +25,6 @@ const stagedName = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12
 const previewName = /^(?:theme|template)-[a-z0-9]+(?:-[a-z0-9]+)*\.pdf$/;
 const installing = new Set<string>();
 
-/** Install requests name an option `packs.ts` must grow (A2): skip the "a backend is running" refusal when the owning service calls. */
-type OwnedInstallOptions = Parameters<typeof installPack>[2] & { calledByOwner?: boolean };
-const installAsOwner = installPack as (root: string, file: string, options: OwnedInstallOptions) => ReturnType<typeof installPack>;
-
 function exact(value: unknown, fields: string[]): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !fields.includes(key))) throw new PackHttpError('Invalid pack request. Reload and try again.');
   return value as Record<string, unknown>;
@@ -188,7 +184,7 @@ export async function handlePacksRequest(root: string, req: IncomingMessage, res
     }
     await hooks.pauseWatching();
     let result: Awaited<ReturnType<typeof installPack>>;
-    try { result = await installAsOwner(root, file, { trust: true, calledByOwner: true }); }
+    try { result = await installPack(root, file, { trust: true, calledByOwner: true }); }
     finally { await hooks.resumeWatching(); }
     changed(); // Rescan, so the catalog shows the new designs without a restart.
     await rm(folder, { recursive: true, force: true });

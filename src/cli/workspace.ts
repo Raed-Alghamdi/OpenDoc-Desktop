@@ -1,17 +1,34 @@
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { lstat, readFile, realpath, rm, stat, symlink } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { applicationRoot } from '../runtime/paths';
+import { applicationRoot, managedRuntime } from '../runtime/paths';
 
 export const workspaceFormat = 1;
 export type Edition = 'normal' | 'headless';
 export const packageNames = { normal: '@ryanyahya/opendoc', headless: '@ryanyahya/opendoc-headless' } as const;
 export type PackageIdentity = { name: typeof packageNames[Edition]; version: string; edition: Edition };
 export type PackageMetadata = { name: string; version: string; bin?: string | Record<string, string>; dependencies?: Record<string, string>; opendoc?: { edition?: unknown } };
-export type WorkspaceMarker = { formatVersion: number; createdWith?: string; edition?: Edition };
+/** `managed` says node_modules is a link to the desktop app's runtime. It is per device and travels with git, so it counts only where managedRuntime() finds that runtime. */
+export type WorkspaceMarker = { formatVersion: number; createdWith?: string; edition?: Edition; managed?: boolean };
 
 export function isStableVersion(value: unknown): boolean {
   if (typeof value !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value)) return false;
   return value.split('.').every(part => Number.isSafeInteger(Number(part)));
+}
+
+/**
+ * Where a workspace's pin stands against the running OpenDoc (plan 3.4):
+ * `current` is the same minor with the same or an older patch (it opens normally and the app moves the pin up),
+ * `newer-patch` and `newer-minor` open read-only, and `older-minor` is an upgrade only the app can run.
+ */
+export type PinStatus = 'current' | 'newer-patch' | 'older-minor' | 'newer-minor';
+
+const parts = (version: string) => version.split('.').map(Number) as [number, number, number];
+
+export function comparePin(pin: string, running: string): PinStatus {
+  if (!isStableVersion(pin) || !isStableVersion(running)) throw new Error('OpenDoc versions must be exact stable versions.');
+  const [pinMajor, pinMinor, pinPatch] = parts(pin), [major, minor, patch] = parts(running);
+  if (pinMajor !== major || pinMinor !== minor) return pinMajor < major || (pinMajor === major && pinMinor < minor) ? 'older-minor' : 'newer-minor';
+  return pinPatch > patch ? 'newer-patch' : 'current';
 }
 
 /** Published packages declare their edition and must match its exact registry identity. */
@@ -53,6 +70,7 @@ export async function readWorkspaceMarker(root: string): Promise<WorkspaceMarker
   }
   if (!marker || marker.formatVersion !== workspaceFormat) throw new Error(`Unsupported OpenDoc workspace format ${marker?.formatVersion ?? '(missing)'}. This runtime supports format ${workspaceFormat}. No files were changed.`);
   if (marker.edition !== undefined && !['normal', 'headless'].includes(marker.edition)) throw new Error('Unsupported OpenDoc workspace edition. No files were changed.');
+  if (marker.managed !== undefined && typeof marker.managed !== 'boolean') throw new Error('Unsupported OpenDoc workspace marker: managed must be true or false. No files were changed.');
   return marker;
 }
 
@@ -77,13 +95,55 @@ export async function packageMetadata(root = applicationRoot): Promise<PackageMe
   return JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
 }
 
+/** In a workspace the desktop app manages, node_modules is only a link to the app's runtime: create it when missing, replace it when dangling or foreign, never touch a real folder. */
+export async function ensureRuntimeLink(root: string, nodeModules: string) {
+  const link = resolve(root, 'node_modules');
+  let existing;
+  try { existing = await lstat(link); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  if (existing && !existing.isSymbolicLink()) return;
+  if (existing) {
+    try { if (await realpath(link) === await realpath(nodeModules)) return; } catch { /* dangling */ }
+    await rm(link);
+  }
+  await symlink(nodeModules, link, 'dir');
+}
+
+/** Whether the desktop app manages this workspace here: its marker says so and this runtime is the app's. */
+export async function isManagedHere(root: string) {
+  return Boolean((await readWorkspaceMarker(root)).managed && managedRuntime());
+}
+
+/**
+ * The installed application of a workspace the desktop app manages, which is the app's own runtime. The 3.4 version
+ * table applies instead of the exact npm pin, and the CLI never says "npm install": a workspace from an older minor
+ * is the app's to upgrade. A newer pin returns the runtime and the read-only guard (read-only.ts) keeps writes out.
+ */
+async function managedApplication(root: string, runtime: NonNullable<ReturnType<typeof managedRuntime>>, marker: WorkspaceMarker) {
+  await ensureRuntimeLink(root, runtime.nodeModules);
+  const app = resolve(root, 'node_modules/opendoc');
+  let installed;
+  try { installed = await packageMetadata(app); }
+  catch { throw new Error('The OpenDoc runtime of the desktop app is missing or damaged here. Reinstall opendoc-desktop, then open this workspace in it.'); }
+  const expected = workspaceIdentity(await packageMetadata(root), marker);
+  let identity;
+  try { identity = packageIdentity(installed); } catch { throw new Error('The OpenDoc runtime of the desktop app is missing or damaged here. Reinstall opendoc-desktop, then open this workspace in it.'); }
+  if (identity.name !== expected.name || identity.edition !== expected.edition) throw new Error('The workspace edition does not match the OpenDoc edition of the desktop app. Edition switching is not an update.');
+  if (comparePin(expected.version, identity.version) === 'older-minor') {
+    throw new Error(`This workspace was made with OpenDoc ${expected.version} and this app has ${identity.version}. Open this workspace in opendoc-desktop to upgrade it.`);
+  }
+  return await realpath(app);
+}
+
 export async function installedApplication(root: string) {
+  const marker = await readWorkspaceMarker(root);
+  const runtime = marker.managed ? managedRuntime() : null;
+  if (runtime) return managedApplication(root, runtime, marker);
   const app = resolve(root, 'node_modules/opendoc');
   let installed;
   try { installed = await packageMetadata(app); }
   catch { throw new Error(`OpenDoc is not installed in ${root}. Run npm install in that folder, then npx opendoc check.`); }
   const manifest = await packageMetadata(root);
-  const expected = workspaceIdentity(manifest, await readWorkspaceMarker(root));
+  const expected = workspaceIdentity(manifest, marker);
   const mismatch = `The workspace's pinned OpenDoc version or edition does not match its installation. Run npm install in ${root} to repair it.`;
   let identity;
   try { identity = packageIdentity(installed); } catch { throw new Error(mismatch); }

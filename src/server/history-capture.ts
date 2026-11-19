@@ -4,6 +4,7 @@ import { validId } from './render';
 import { HistoryStore, type HistoryVersion } from './history';
 import { historyDisabledVariable } from './history-paths';
 import { workspaceOwner } from '../cli/owner';
+import { workspaceReadOnly } from '../cli/read-only';
 
 /** Whether a local OpenDoc service or the desktop app owns this workspace; its file watcher then records history itself. */
 export async function historyService(root: string) {
@@ -31,6 +32,8 @@ export async function historyService(root: string) {
  */
 export async function recordAgentChanges(root: string, ids: Iterable<string>, warn: (message: string) => void = message => console.error(message)): Promise<HistoryVersion[]> {
   if (process.env[historyDisabledVariable] === 'off' || await historyService(root)) return [];
+  // A read-only workspace takes no new versions, whoever edited it.
+  try { if (await workspaceReadOnly(root)) return []; } catch { return []; }
   const store = new HistoryStore(root);
   const recorded: HistoryVersion[] = [];
   for (const id of new Set(ids)) {

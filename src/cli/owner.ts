@@ -4,13 +4,14 @@ import { basename, resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { codedError } from './errors';
+import { readOnlyState, type ReadOnlyState } from '../shared/read-only';
 
 /**
  * Who has a workspace open: the browser edition's service (`.opendoc/server.json`), the
  * desktop app (`.opendoc/desktop.json`), or nobody. Every command that must behave differently
  * beside an owner asks here instead of reading those files itself.
  */
-export interface WorkspaceOwner { mode: 'service' | 'desktop' | null; pid?: number; origin?: string }
+export interface WorkspaceOwner { mode: 'service' | 'desktop' | null; pid?: number; origin?: string; readOnly?: ReadOnlyState }
 
 /** An unreadable or malformed session file. Unless its message already says what to do (advice ''), the caller adds that. */
 export class InvalidOwnerRecord extends Error {
@@ -65,7 +66,7 @@ async function isDesktopApp(pid: number): Promise<boolean> {
 /** Replaceable in tests, which stand in for the app with an ordinary process. */
 export const ownerProbe = { isDesktopApp };
 
-async function desktopRecord(root: string): Promise<{ pid?: unknown } | null> {
+async function desktopRecord(root: string): Promise<{ pid?: unknown; readOnly?: unknown } | null> {
   const text = await readRecord(root, 'desktop.json');
   if (text === null) return null;
   const record = JSON.parse(text);
@@ -78,8 +79,8 @@ async function desktopRecord(root: string): Promise<{ pid?: unknown } | null> {
  * pid, or a pid that now belongs to another program is stale. A file that cannot be read or understood
  * is not: the app may be rewriting it, so it is read once more, and then refused rather than ignored.
  */
-async function desktopOwner(root: string): Promise<{ pid: number } | null> {
-  let record: { pid?: unknown } | null;
+async function desktopOwner(root: string): Promise<{ pid: number; readOnly?: ReadOnlyState } | null> {
+  let record: { pid?: unknown; readOnly?: unknown } | null;
   try { record = await desktopRecord(root); }
   catch {
     await setTimeout(100);
@@ -87,7 +88,8 @@ async function desktopOwner(root: string): Promise<{ pid: number } | null> {
     catch { throw new InvalidOwnerRecord(`The opendoc-desktop record .opendoc/desktop.json cannot be read. ${desktopRecordAdvice}`, ''); }
   }
   const pid = record?.pid;
-  return alive(pid) && await ownerProbe.isDesktopApp(pid) ? { pid } : null;
+  const readOnly = readOnlyState(record?.readOnly);
+  return alive(pid) && await ownerProbe.isDesktopApp(pid) ? { pid, ...(readOnly ? { readOnly } : {}) } : null;
 }
 
 /** Just the recorded process of a running service, however little else of its record can be trusted. */
@@ -150,7 +152,7 @@ async function verifiedService(root: string): Promise<{ origin: string; token: s
  */
 export async function workspaceSession(root: string, options: { verify?: boolean; pidOnly?: boolean } = {}): Promise<{ owner: WorkspaceOwner; token?: string }> {
   const desktop = await desktopOwner(root);
-  if (desktop) return { owner: { mode: 'desktop', pid: desktop.pid } };
+  if (desktop) return { owner: { mode: 'desktop', pid: desktop.pid, ...(desktop.readOnly ? { readOnly: desktop.readOnly } : {}) } };
   if (options.pidOnly) {
     const recorded = await recordedProcess(root);
     return { owner: recorded ? { mode: 'service', pid: recorded.pid, ...(recorded.origin ? { origin: recorded.origin } : {}) } : { mode: null } };

@@ -21,8 +21,8 @@ import { readPresentationBytes } from './pptx';
 import { ExportStore, ExportError, exportFormat } from './exports';
 import { canCopyFile } from './clipboard';
 import { getBlock, summarizeDocument } from '../shared/types';
-import { anchorForSelection, getTextTarget } from '../shared/anchors';
-import { readSelection } from './selection';
+import { anchorForSelection, commentTargets, commentTargetsForSelections, getTextTarget } from '../shared/anchors';
+import { readSelection, readSelections, selectionContext } from './selection';
 import { TextEditService } from './edits';
 import { ThemeCatalog, readThemeGuide, themeFile } from './themes';
 import { TemplateCatalog, createFromTemplate, readTemplateGuide } from './templates';
@@ -285,7 +285,7 @@ export async function prepareOpenDocService(options: { root: string; production:
         const state = workspace.states.get(value.documentId);
         if (value.blockId && !getBlock(state?.artifact, value.blockId)) {
           const comments = await readComments(root, value.documentId);
-          if (!comments.some(c => c.blockId === value.blockId)) throw new Error('Unknown block.');
+          if (!comments.some(c => commentTargets(c).some(place => place.blockId === value.blockId))) throw new Error('Unknown block.');
         }
         const contextPages = Math.max(state?.artifact?.pages.length ?? 1, value.draftPreview === true && state ? edits.previewPageCount(state.id) : 1);
         if (!Number.isInteger(value.page) || value.page < 1 || value.page > contextPages) throw new Error('Invalid page.');
@@ -309,11 +309,13 @@ export async function prepareOpenDocService(options: { root: string; production:
           selectedAsset = { kind: asset.kind, id: asset.id, revision: asset.revision,
             ...(requested.variation !== undefined ? { variation: requested.variation } : {}), ...(requested.face !== undefined ? { face: requested.face } : {}) };
         }
-        const selection = readSelection(value.selection, value.blockId);
+        // One selection, or a list (C1): `selection` stays the first of `selections`.
+        if (value.selection != null && value.selections != null) throw new Error('Send selection or selections, not both.');
+        const selections = value.selections != null ? readSelections(value.selections, value.blockId) : [readSelection(value.selection, value.blockId)].filter(item => item !== null);
         if (value.editing !== undefined && typeof value.editing !== 'boolean') throw new Error('Invalid editor state.');
         if (value.pendingEdits !== undefined && (!Number.isInteger(value.pendingEdits) || value.pendingEdits < 0 || value.pendingEdits > 100)) throw new Error('Invalid pending edit count.');
         if (value.draftPreview !== undefined && typeof value.draftPreview !== 'boolean') throw new Error('Invalid draft preview state.');
-        await workspace.setContext({ themeId, projectId, selectedAsset, documentId: value.documentId, blockId: value.blockId, page: value.page, mediaId: value.mediaId ?? null, selection, editing: value.editing ?? false, pendingEdits: value.pendingEdits ?? 0, draftPreview: value.draftPreview ?? false });
+        await workspace.setContext({ themeId, projectId, selectedAsset, documentId: value.documentId, blockId: value.blockId, page: value.page, mediaId: value.mediaId ?? null, ...selectionContext(selections), editing: value.editing ?? false, pendingEdits: value.pendingEdits ?? 0, draftPreview: value.draftPreview ?? false });
         json(res, { ok: true }); return;
       }
       const draftPDF = url.pathname.match(/^\/api\/documents\/([^/]+)\/edits\/previews\/([a-f0-9-]+)\/pdf$/);
@@ -409,6 +411,15 @@ export async function prepareOpenDocService(options: { root: string; production:
         if (req.method === 'POST' && !commentId) {
           const value = await body(req);
           if (state.status !== 'ready' || state.artifact?.hash !== value.hash) throw new Conflict('The preview changed. Wait for the latest version before commenting.');
+          if (value.selections != null) {
+            // Several places: a list of selections, the first of which may be a phrase (C1). `blockId` is optional and, if sent, is the first place.
+            if (value.selection != null) throw new Error('Send selection or selections, not both.');
+            const selections = readSelections(value.selections, value.blockId ?? (Array.isArray(value.selections) ? value.selections[0]?.blockId : null) ?? null);
+            if (value.blockId !== undefined && value.blockId !== selections[0]?.blockId) throw new Error('The first selection must be the comment\'s block.');
+            for (const selection of selections) if (selection.renderHash !== undefined && selection.renderHash !== value.hash
+              || selection.revision !== undefined && selection.revision !== state.revision) throw new Conflict('This selection changed. Select the components again before commenting.');
+            json(res, (await addComment(root, id, { text: value.text, targets: commentTargetsForSelections(state.artifact, selections) })).filter(comment => comment.status !== 'deleted')); workspace.changed(); return;
+          }
           const block = getBlock(state.artifact, value.blockId);
           if (!block) throw new Error('The selected block is no longer available.');
           const selection = readSelection(value.selection, value.blockId);

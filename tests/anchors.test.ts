@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { anchorForSelection, commentTargets, commentTargetsForSelections, getEditableSelection, resolveCommentAnchor, resolveCommentTargets, resolveCommentStatus, worstAnchorStatus } from '../src/shared/anchors';
+import { anchorForSelection, commentTargets, commentTargetsForSelections, getEditableSelection, resolveCommentAnchor, resolveCommentTargets, resolveCommentStatus, wholeBlockSelection, worstAnchorStatus } from '../src/shared/anchors';
 import type { RenderArtifact } from '../src/shared/types';
 
 function artifact(text = 'An exact phrase and a citation [1].'): RenderArtifact {
@@ -135,4 +135,13 @@ test('resolveCommentAnchor keeps meaning the first place, whatever happens to th
   const noParagraph = threeBlocks(); delete noParagraph.blocks.paragraph;
   assert.equal(resolveCommentAnchor(noParagraph, comment).status, 'missing');
   assert.equal(resolveCommentStatus(withoutSecond, comment).status, 'missing', 'The whole-comment helper reports the worst place.');
+});
+
+test('a whole-block selection names the block, its page and the render, with no phrase', () => {
+  const value = threeBlocks();
+  value.pages.push({ width: 595, height: 842, fragments: [{ id: 'later', x: 0, y: 0, width: 10, height: 10 }] });
+  value.blocks.later = { id: 'later', kind: 'paragraph', text: 'On page two.' };
+  assert.deepEqual(wholeBlockSelection(value, 'second'), { blockId: 'second', page: 1, renderHash: 'pdf-hash' });
+  assert.equal(wholeBlockSelection(value, 'later').page, 2);
+  assert.equal(wholeBlockSelection(value, 'unknown').page, 1, 'A block with no fragment is placed on page 1, as a comment target is.');
 });

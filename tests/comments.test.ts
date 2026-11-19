@@ -1,12 +1,16 @@
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFile, readFile, symlink, mkdir, utimes } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { addComment, changeComment, editComment, deleteComment, restoreComment, readComments, Conflict } from '../src/server/comments';
 import { documentEntry } from '../src/server/render';
 import { Workspace } from '../src/server/workspace';
-import { getBlock } from '../src/shared/types';
-import { fixture, settled, source } from './helpers';
+import { getBlock, type Comment } from '../src/shared/types';
+import { fixture, settled, source, until } from './helpers';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { runCommentsCli } from '../src/server/comments-cli';
+import { createOpenDocService } from '../src/server/service';
 
 test('concurrent feedback is retained and stale updates are rejected', async () => {
   const f = await fixture();
@@ -265,4 +269,183 @@ test('the place cap and a one-entry targets list apply when a comment is made, n
     const single = (await addComment(f.root, 'proof', { text: 'Never written.', targets: [{ blockId: 'target', quote: 'a' }] })).at(-1)!;
     assert.equal(single.targets, undefined, 'This version never writes a one-place list.');
   } finally { await f.cleanup(); }
+});
+
+// --- The CLI and the service: several places in one comment ---------------------------------------
+
+const second = '<Paragraph id="second">The second place to review.</Paragraph><Paragraph id="third">The third place to review.</Paragraph>';
+function lines(t: TestContext) {
+  const out: string[] = [];
+  t.mock.method(console, 'log', (line: string) => { out.push(line); });
+  t.mock.method(console, 'error', () => {});
+  return () => out.splice(0);
+}
+const savedComments = async (root: string) => JSON.parse(await readFile(resolve(root, 'documents/proof/comments.json'), 'utf8')) as Comment[];
+
+test('comments add --also puts one comment on several places, and a plain add is stored as before', { timeout: 60_000 }, async t => {
+  const f = await fixture();
+  const out = lines(t);
+  try {
+    await writeFile(f.entry, source(second));
+    await runCommentsCli(['add', 'proof', 'target', 'Plain', 'comment.'], f.root, { mode: 'direct' });
+    assert.equal(out().at(-1), 'Added comment on target');
+    assert.equal('targets' in (await savedComments(f.root))[0], false, 'Without --also the comment has no targets.');
+
+    await runCommentsCli(['add', 'proof', 'title', 'Make', 'these', 'agree.', '--phrase', 'first draft', '--also', 'second', '--also-phrase', 'second place', '--also', 'third', '--json'], f.root, { mode: 'direct' });
+    const printed = JSON.parse(out().at(-1)!) as Comment[];
+    const [made] = (await savedComments(f.root)).slice(-1);
+    assert.deepEqual(printed.at(-1), made);
+    assert.deepEqual(made.targets!.map(place => place.blockId), ['title', 'second', 'third']);
+    assert.equal(made.blockId, 'title'); assert.equal(made.quote, 'first draft'); assert.deepEqual(made.anchor, made.targets![0].anchor);
+    assert.equal(made.targets![0].anchor?.quote, 'first draft');
+    assert.equal(made.targets![1].anchor?.quote, 'second place', 'A later place can carry its own phrase.');
+    assert.equal(made.targets![1].quote, 'second place');
+    assert.equal(made.targets![2].anchor, undefined);
+    assert.equal(made.targets![2].quote, 'The third place to review.');
+    await runCommentsCli(['add', 'proof', 'target', 'Two.', '--also', 'third'], f.root, { mode: 'direct' });
+    assert.equal(out().at(-1), 'Added comment on target, third');
+    await runCommentsCli(['add', 'proof', 'target', 'Phrases.', '--phrase', 'stable paragraph', '--also', 'second', '--also-phrase', 'second place'], f.root, { mode: 'direct' });
+    assert.equal(out().at(-1), 'Added comment on target at “stable paragraph”, second at “second place”');
+  } finally { await f.cleanup(); }
+});
+
+test('comments add --also refuses what it cannot place, and writes nothing', { timeout: 60_000 }, async t => {
+  const f = await fixture();
+  lines(t);
+  try {
+    await writeFile(f.entry, source(second));
+    const add = (...args: string[]) => runCommentsCli(['add', 'proof', 'target', 'Text.', ...args], f.root, { mode: 'direct' });
+    await assert.rejects(add('--also', 'target'), /once/);
+    await assert.rejects(add('--also', 'second', '--also', 'second'), /once/);
+    await assert.rejects(add('--also', 'no-such-block'), /no-such-block does not exist/);
+    await assert.rejects(add('--also-phrase', 'words'), /after the --also it belongs to/);
+    await assert.rejects(add('--also-target', 'second:children'), /after the --also it belongs to/);
+    await assert.rejects(add('--also', 'second', '--also-target', 'second:children'), /with --also-phrase/);
+    await assert.rejects(add('--also', 'second', '--also-phrase', 'a', '--also-phrase', 'b'), /one --also-phrase/);
+    await assert.rejects(add('--also', 'second', '--also-phrase', 'absent words'), /does not appear/);
+    await assert.rejects(runCommentsCli(['list', 'proof', '--also', 'second'], f.root, { mode: 'direct' }), /belongs to comments add/);
+    await assert.rejects(runCommentsCli(['resolve', 'proof', 'x', '--also-phrase', 'a'], f.root, { mode: 'direct' }), /belongs to comments add/);
+    await assert.rejects(readFile(resolve(f.root, 'documents/proof/comments.json'), 'utf8'), { code: 'ENOENT' });
+  } finally { await f.cleanup(); }
+});
+
+test('comments list --anchors gives each place its status and the comment the worst, single places unchanged', { timeout: 60_000 }, async t => {
+  const f = await fixture();
+  const out = lines(t);
+  try {
+    await writeFile(f.entry, source(second));
+    await runCommentsCli(['add', 'proof', 'target', 'Single.'], f.root, { mode: 'direct' });
+    await runCommentsCli(['add', 'proof', 'target', 'Three.', '--also', 'second', '--also', 'third'], f.root, { mode: 'direct' });
+    out();
+    const anchors = async () => { await runCommentsCli(['list', 'proof', '--anchors'], f.root, { mode: 'direct' }); return JSON.parse(out().at(-1)!) as (Comment & { anchorStatus: string; targetAvailable: boolean })[]; };
+    let [single, three] = await anchors();
+    assert.deepEqual(Object.keys(single).sort(), ['anchorStatus', 'blockId', 'createdAt', 'history', 'id', 'quote', 'status', 'targetAvailable', 'text', 'updatedAt', 'version'], 'A single place keeps today\'s keys.');
+    assert.equal(three.anchorStatus, 'attached');
+    assert.deepEqual(three.targets!.map(place => Object.keys(place).sort()), Array(3).fill(['anchorStatus', 'blockId', 'quote', 'targetAvailable']));
+
+    await writeFile(f.entry, source('<Paragraph id="third">The third place to review.</Paragraph>'));
+    [single, three] = await anchors();
+    assert.equal(single.anchorStatus, 'attached');
+    assert.deepEqual(three.targets!.map(place => [place.blockId, (place as { anchorStatus?: string }).anchorStatus, (place as { targetAvailable?: boolean }).targetAvailable]), [['target', 'attached', true], ['second', 'missing', false], ['third', 'attached', true]]);
+    assert.equal(three.anchorStatus, 'missing'); assert.equal(three.targetAvailable, false);
+    await runCommentsCli(['list', 'proof'], f.root, { mode: 'direct' });
+    assert.equal((JSON.parse(out().at(-1)!) as Comment[])[1].targets!.length, 3, 'The plain list keeps all three places.');
+  } finally { await f.cleanup(); }
+});
+
+async function listen(service: Awaited<ReturnType<typeof createOpenDocService>>) {
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => { service.handle(req, res).catch(() => {}); });
+  await new Promise<void>(accept => server.listen(0, '127.0.0.1', accept));
+  return { origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, close: () => new Promise<void>(accept => { server.close(() => accept()); server.closeAllConnections(); }) };
+}
+const client = (_req: IncomingMessage, res: ServerResponse) => { res.writeHead(200); res.end(); };
+
+test('the service takes selections for a comment and for the context, and the CLI reaches it', { timeout: 120_000 }, async t => {
+  const f = await fixture();
+  const out = lines(t);
+  await writeFile(f.entry, source(second));
+  const service = await createOpenDocService({ root: f.root, production: false, client });
+  const listener = await listen(service);
+  try {
+    const { origin } = listener;
+    const headers = { 'Content-Type': 'application/json', 'X-OpenDoc-Token': service.token };
+    const documents = () => fetch(`${origin}/api/documents`).then(r => r.json()) as Promise<{ id: string; status: string; revision: number; artifact?: { hash: string } }[]>;
+    await until(async () => (await documents()).every(d => d.status === 'ready'));
+    const { revision, artifact } = (await documents())[0];
+    const hash = artifact!.hash;
+    const post = (path: string, body: object) => fetch(`${origin}${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+    const comment = (body: object) => post('/api/documents/proof/comments', { hash, ...body });
+    const place = (blockId: string, extra: object = {}) => ({ blockId, page: 1, renderHash: hash, revision, ...extra });
+    const phrase = place('title', { targetId: 'title:children', start: 2, end: 7, quote: 'first' });
+
+    // Three places: the first may be a phrase, the others are whole components.
+    const made = await comment({ text: 'Make these agree.', selections: [place('target'), place('second'), place('third')] });
+    assert.equal(made.status, 200);
+    const [row] = await made.json() as Comment[];
+    assert.deepEqual(row.targets!.map(item => item.blockId), ['target', 'second', 'third']);
+    assert.equal(row.blockId, 'target');
+    assert.deepEqual(await fetch(`${origin}/api/documents/proof/comments`).then(r => r.json()), await readComments(f.root, 'proof'), 'The route lists what the file holds.');
+    assert.deepEqual((await savedComments(f.root))[0].targets, row.targets, 'It round-trips through the file.');
+    const withPhrase = await comment({ text: 'Phrase first.', blockId: 'title', selections: [phrase, place('second')] });
+    assert.equal(withPhrase.status, 200);
+    const phraseRow = (await withPhrase.json() as Comment[]).at(-1)!;
+    assert.equal(phraseRow.anchor?.quote, 'first'); assert.deepEqual(phraseRow.targets![0].anchor, phraseRow.anchor);
+    // One selection in a list is a single-place comment, stored as before.
+    const one = (await (await comment({ text: 'One.', selections: [place('second')] })).json() as Comment[]).at(-1)!;
+    assert.equal('targets' in one, false);
+    // The single-selection body still works.
+    assert.equal((await comment({ text: 'Old shape.', blockId: 'target' })).status, 200);
+
+    const refused = async (body: object, status: number, pattern: RegExp) => {
+      const response = await comment({ text: 'Refused.', ...body });
+      assert.equal(response.status, status, JSON.stringify(body));
+      assert.match((await response.json()).error, pattern);
+    };
+    const total = (await readComments(f.root, 'proof')).length;
+    await refused({ selections: [place('target'), place('target')] }, 400, /only once/);
+    await refused({ selections: [place('target'), phrase] }, 400, /Only the first selection can be a phrase/);
+    await refused({ selections: [place('target'), place('gone')] }, 400, /no longer available/);
+    await refused({ selections: [place('target'), place('second', { renderHash: 'old' })] }, 409, /Select the components again/);
+    await refused({ selections: [place('target'), place('second', { revision: revision + 1 })] }, 409, /Select the components again/);
+    await refused({ selections: [place('target')], selection: place('target'), blockId: 'target' }, 400, /not both/);
+    await refused({ selections: [place('target'), place('second')], blockId: 'second' }, 400, /first selection must be/);
+    await refused({ selections: [] }, 400, /at least one/);
+    await refused({ selections: 'target' }, 400, /Invalid selections/);
+    assert.equal((await readComments(f.root, 'proof')).length, total, 'A refused comment writes nothing.');
+
+    // The context route: selection stays the first of selections.
+    const list = [place('second'), place('third'), place('target')];
+    assert.equal((await post('/api/context', { documentId: 'proof', blockId: 'third', page: 1, selections: list })).status, 200);
+    const current = async () => JSON.parse(await readFile(resolve(f.root, '.opendoc/current.json'), 'utf8'));
+    let written = await current();
+    assert.deepEqual(written.selections, list); assert.deepEqual(written.selection, list[0]);
+    assert.equal((await post('/api/context', { documentId: 'proof', blockId: 'third', page: 1, selections: list, selection: list[0] })).status, 400);
+    assert.equal((await post('/api/context', { documentId: 'proof', blockId: 'gone', page: 1, selections: list })).status, 400, 'The active block must be in the list.');
+    assert.equal((await post('/api/context', { documentId: 'proof', blockId: 'second', page: 1, selections: [list[0], phrase] })).status, 400);
+    assert.equal((await post('/api/context', { documentId: 'proof', blockId: 'target', page: 1, selection: place('target') })).status, 200);
+    written = await current();
+    assert.deepEqual(written.selections, [place('target')]); assert.deepEqual(written.selection, written.selections[0]);
+    assert.equal((await post('/api/context', { documentId: 'proof', blockId: null, page: 1 })).status, 200);
+    written = await current();
+    assert.deepEqual([written.selection, written.selections], [null, []]);
+
+    // The CLI reaches the same route when the service runs: whole components only.
+    await mkdir(resolve(f.root, '.opendoc'), { recursive: true });
+    await writeFile(resolve(f.root, '.opendoc/server.json'), JSON.stringify({ origin, token: service.token, pid: process.pid }));
+    out();
+    await runCommentsCli(['add', 'proof', 'target', 'Through', 'the', 'service.', '--also', 'second', '--also', 'third', '--json'], f.root);
+    const viaService = (JSON.parse(out().at(-1)!) as Comment[]).at(-1)!;
+    assert.deepEqual(viaService.targets!.map(item => item.blockId), ['target', 'second', 'third']);
+    assert.deepEqual((await savedComments(f.root)).at(-1)!.targets, viaService.targets);
+    await assert.rejects(runCommentsCli(['add', 'proof', 'target', 'No.', '--also', 'second', '--also-phrase', 'second place'], f.root), /needs OpenDoc stopped/);
+    await runCommentsCli(['add', 'proof', 'target', 'Phrase through the service.', '--phrase', 'stable paragraph', '--json'], f.root);
+    assert.equal((JSON.parse(out().at(-1)!) as Comment[]).at(-1)!.anchor?.quote, 'stable paragraph', 'The single-place CLI request is unchanged.');
+
+    // A block that is only a later place of a comment is still a known context block once removed.
+    await writeFile(f.entry, source('<Paragraph id="third">The third place to review.</Paragraph>'));
+    await until(async () => { const [d] = await documents(); return d.status === 'ready' && d.artifact?.hash !== hash; });
+    const after = (await documents())[0];
+    assert.equal((await post('/api/context', { documentId: 'proof', blockId: 'second', page: 1, selection: { blockId: 'second', page: 1, renderHash: after.artifact!.hash, revision: after.revision } })).status, 200);
+    assert.equal((await post('/api/context', { documentId: 'proof', blockId: 'nowhere', page: 1 })).status, 400);
+  } finally { await listener.close(); await service.close(); await f.cleanup(); }
 });

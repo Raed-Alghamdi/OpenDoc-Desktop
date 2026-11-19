@@ -97,6 +97,12 @@ function resolveTarget(artifact: RenderArtifact | null | undefined, comment: Com
   return { status: 'attached', selection: { ...blockSelection, targetId: target.id, start, end, quote: anchor.quote, page: line?.page ?? blockSelection.page } };
 }
 
+/** A whole-block selection, as the reader makes when a component is clicked: the block, its page, and no phrase. */
+export function wholeBlockSelection(artifact: RenderArtifact | null | undefined, blockId: string): DocumentSelection {
+  const page = (artifact?.pages.findIndex(item => item.fragments.some(fragment => fragment.id === blockId)) ?? -1) + 1;
+  return { blockId, page: Math.max(1, page), renderHash: artifact?.hash };
+}
+
 /** Every place a comment is about: its `targets`, or the one place its top-level fields describe. */
 export function commentTargets(comment: Pick<Comment, 'blockId' | 'quote' | 'anchor' | 'targets'>): CommentTarget[] {
   return comment.targets?.length ? comment.targets : [{ blockId: comment.blockId, quote: comment.quote, ...(comment.anchor ? { anchor: comment.anchor } : {}) }];

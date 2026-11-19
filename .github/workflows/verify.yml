@@ -17,7 +17,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Fork only, remove before upstreaming: GitHub often has no Apple Silicon runner for this fork,
+        # so an Intel Mac job runs too. A pull request merges when Ubuntu and either Mac job pass.
+        os: [ubuntu-latest, macos-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     env:

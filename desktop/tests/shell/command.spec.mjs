@@ -97,8 +97,9 @@ test.describe.serial('the Linux packages\' launcher', () => {
     const closed = new Promise(accept => child.once('close', (code, signal) => accept({ code, signal })));
     child.kill('SIGTERM');
     expect((await closed).signal).toBe('SIGTERM');
+    // An unknown command is a usage error, which the CLI ends with exit status 2 (C2).
     const unknown = await run(launcher, ['no-such-command'], { cwd: workspace, env: environment });
-    expect(unknown.code).toBe(1);
+    expect(unknown.code).toBe(2);
   });
 
   test('arguments reach the CLI byte for byte', async () => {
@@ -207,7 +208,8 @@ test.describe.serial('the AppImage command', () => {
     const result = await run(command, ['export', odd], { cwd: workspace, env: environment });
     expect(result.code).not.toBe(0);
     expect(result.stdout + result.stderr).toContain(odd);
-    expect((await run(command, ['no-such-command'], { cwd: workspace, env: environment })).code).toBe(1);
+    // An unknown command is a usage error, which the CLI ends with exit status 2 (C2).
+    expect((await run(command, ['no-such-command'], { cwd: workspace, env: environment })).code).toBe(2);
   });
 
   test('a moved AppImage is explained, and writing the command again repairs it', async () => {

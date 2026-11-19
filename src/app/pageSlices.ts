@@ -9,6 +9,8 @@ export interface PageSlice {
   commented: ReadonlySet<string>;
   /** Open phrase comments whose text appears on this page. */
   commentPhrases: DocumentSelection[];
+  /** Components on this page chosen in addition to the main selection. */
+  multi: ReadonlySet<string>;
 }
 
 type PageMembers = { blocks: Set<string>; targets: Set<string> };
@@ -39,6 +41,7 @@ export function pageSlices(
   commented: ReadonlySet<string>,
   commentPhrases: DocumentSelection[],
   previous: readonly PageSlice[] = [],
+  additional: readonly DocumentSelection[] = [],
 ): PageSlice[] {
   if (!artifact) return [];
   return pageMembers(artifact).map(({ blocks, targets }, index) => {
@@ -46,11 +49,13 @@ export function pageSlices(
     const shown = selection && (blocks.has(selection.blockId) || (!!selection.targetId && targets.has(selection.targetId))) ? selection : null;
     const markers = [...blocks].filter(id => commented.has(id));
     const phrases = commentPhrases.filter(phrase => !!phrase.targetId && targets.has(phrase.targetId));
+    const chosen = additional.filter(item => blocks.has(item.blockId)).map(item => item.blockId);
     const next: PageSlice = {
       selection: shown,
+      multi: before && before.multi.size === chosen.length && chosen.every(id => before.multi.has(id)) ? before.multi : new Set(chosen),
       commented: before && before.commented.size === markers.length && markers.every(id => before.commented.has(id)) ? before.commented : new Set(markers),
       commentPhrases: before && before.commentPhrases.length === phrases.length && phrases.every((phrase, at) => sameRange(phrase, before.commentPhrases[at])) ? before.commentPhrases : phrases,
     };
-    return before && before.selection === next.selection && before.commented === next.commented && before.commentPhrases === next.commentPhrases ? before : next;
+    return before && before.selection === next.selection && before.commented === next.commented && before.commentPhrases === next.commentPhrases && before.multi === next.multi ? before : next;
   });
 }

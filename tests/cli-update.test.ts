@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { dependencyPin, workspaceIdentity, packageNames } from '../src/cli/workspace.js';
 import { latestCompatibleVersion, updateWorkspace, type UpdateDependencies } from '../src/cli/update.js';
+import { acceptAsApp } from './helpers-owner';
 
 const published = ['0.2.9', '0.3.1', '0.3.8', '0.3.9-beta.1', '0.4.0', '1.0.0'];
 
@@ -565,5 +566,82 @@ test('update candidate checks have an empty document catalog without copying use
       assert.equal(after[file], bytes, `${file} remains unchanged`);
     }
     assert.equal(await readFile(join(root, 'documents/my-document/index.tsx'), 'utf8'), 'user authored source');
+  });
+});
+
+acceptAsApp(process.pid);
+
+async function appRecord(root: string, pid: number) {
+  await writeFile(join(root, '.opendoc/desktop.json'), JSON.stringify({ pid, startedAt: '2026-01-01T00:00:00.000Z', version: '0.3.1', build: 1 }));
+}
+
+test('C3: update beside the desktop app says to update the app, before staging anything', async () => {
+  await fixture(async (root, container) => {
+    await appRecord(root, process.pid);
+    const before = await snapshot(root), executor = fakeNpm();
+    await assert.rejects(updateWorkspace(root, {}, executor), /open in opendoc-desktop\. Update the app instead\..*delete \.opendoc\/desktop\.json/);
+    assert.deepEqual(await snapshot(root), before);
+    assert.deepEqual(executor.calls.map(call => call.args[0]), ['view'], 'Only the registry lookup ran; nothing was installed.');
+    assert.deepEqual(await readdir(container), ['workspace']);
+    // Looking for updates changes nothing, so it stays available.
+    assert.equal((await updateWorkspace(root, { check: true }, fakeNpm())).status, 'available');
+  });
+});
+
+test('C3: an app that opens the workspace while dependencies install blocks final activation', async () => {
+  await fixture(async root => {
+    let expected: Awaited<ReturnType<typeof snapshot>> | undefined;
+    await assert.rejects(updateWorkspace(root, {}, {
+      ...fakeNpm(), beforeActivate: async () => { await appRecord(root, process.pid); expected = await snapshot(root); },
+    }), /open in opendoc-desktop\. Update the app instead\..*delete \.opendoc\/desktop\.json/);
+    assert.deepEqual(await snapshot(root), expected);
+  });
+});
+
+test('C3: a desktop record whose process is gone does not block an update', async () => {
+  await fixture(async root => {
+    const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+    const pid = child.pid;
+    assert.ok(pid);
+    await once(child, 'exit');
+    await appRecord(root, pid);
+    assert.equal((await updateWorkspace(root, {}, fakeNpm())).status, 'updated');
+  });
+});
+
+test('C3: update refuses beside an unreadable desktop record, naming the file', async () => {
+  await fixture(async root => {
+    await writeFile(join(root, '.opendoc/desktop.json'), 'not json');
+    const before = await snapshot(root);
+    await assert.rejects(updateWorkspace(root, {}, fakeNpm()), error => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /\.opendoc\/desktop\.json.*delete \.opendoc\/desktop\.json/);
+      return true;
+    });
+    assert.deepEqual(await snapshot(root), before);
+  });
+});
+
+test('update says one clear thing when a service record cannot be confirmed', async () => {
+  await fixture(async root => {
+    await writeFile(join(root, '.opendoc/server.json'), 'garbage');
+    await assert.rejects(updateWorkspace(root, {}, fakeNpm()), error => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /could not confirm that its local server has stopped.*server\.json.*Ctrl\+C.*npx opendoc start/);
+      assert.doesNotMatch(error.message, /starting another server|\(/);
+      return true;
+    });
+  });
+});
+
+test('a pid-less session record behind a refused port does not block an update', async () => {
+  await fixture(async root => {
+    const server = createServer();
+    await new Promise<void>(accept => server.listen(0, '127.0.0.1', accept));
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    await closeServer(server);
+    await writeFile(join(root, '.opendoc/server.json'), JSON.stringify({ origin: `http://127.0.0.1:${address.port}`, token: 'old-token' }));
+    assert.equal((await updateWorkspace(root, {}, fakeNpm())).status, 'updated');
   });
 });

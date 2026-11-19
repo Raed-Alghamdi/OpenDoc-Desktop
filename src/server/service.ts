@@ -31,6 +31,7 @@ import { ThemeFoldersError, themeFoldersFile } from './theme-folders';
 import { handleThemeFoldersRequest } from './theme-folders-http';
 import { TagsError, tagsFile } from './tags';
 import { handleTagsRequest } from './tags-http';
+import { clearPendingPackUploads, handlePacksRequest, PackHttpError, type PackHooks } from './packs-http';
 import { sourceLanguage } from './language';
 import { sourceFiles, sourceUpdatedAt } from './source-files';
 import { coverImage } from './covers';
@@ -104,6 +105,21 @@ export async function prepareOpenDocService(options: { root: string; production:
     if (!materialCache || materialCache.version !== materialsVersion) materialCache = { version: materialsVersion, result: scanMaterials(root, workspace.list()) };
     return materialCache.result.catch(error => { materialCache = undefined; throw error; });
   }
+  // Pack block (P1): Import pauses the watcher for the catalog folders while files are published, then replays what it missed.
+  let packsPaused = false;
+  const pausedPaths = new Set<string>();
+  const packHooks: PackHooks = {
+    pauseWatching: () => { packsPaused = true; },
+    resumeWatching: async () => {
+      packsPaused = false;
+      // The catalogs first: every entry that could depend on these folders is invalidated.
+      await Promise.all(['themes', 'templates', 'assets'].flatMap(folder => [templates.noteChange(resolve(root, folder)), themes.noteChange(resolve(root, folder))]));
+      // Then each dropped event goes through the watcher's own callback, so documents that failed for a missing theme
+      // re-render and history sees edits made during the install, exactly as if nothing had been paused.
+      const missed = [...pausedPaths]; pausedPaths.clear();
+      for (const path of missed) watcher?.emit('all', 'change', path);
+    },
+  };
   const served = options.client ?? (production ? await builtClient(applicationRoot) : undefined);
   if (!served) throw new Error('A development service needs the middleware that serves the app.');
   const client: Handler = served;
@@ -115,7 +131,7 @@ export async function prepareOpenDocService(options: { root: string; production:
       if (!['GET', 'HEAD'].includes(req.method ?? 'GET') && req.headers['x-opendoc-token'] !== token) { json(res, { error: 'This write must come from the local OpenDoc session.' }, 403); return; }
       if (req.method === 'GET' && url.pathname === '/api/session') { json(res, { token }); return; }
       if (req.method === 'GET' && url.pathname === '/api/guides') { json(res, await readGuide(root, url.searchParams.get('path'))); return; }
-      // Pack routes (/api/packs/...) are hooked in here.
+      if (await handlePacksRequest(root, req, res, url, json, body, () => workspace.changed(), packHooks)) return;
       if (await handleAssetRequest(root, assets, req, res, url, json, body, () => workspace.changed())) return;
       if (req.method === 'GET' && url.pathname === '/api/exports/capabilities') { json(res, { copyFile: canCopyFile }); return; }
       const exportRoute = url.pathname.match(/^\/api\/exports\/([a-f0-9-]+)(?:\/(download|open|reveal|copy|restore))?$/);
@@ -455,7 +471,7 @@ export async function prepareOpenDocService(options: { root: string; production:
         }
       }
       json(res, { error: 'Not found.' }, 404);
-    } catch (error) { json(res, { error: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'That local file is missing. Restore it or reload the library.' : error instanceof Error ? error.message : String(error) }, error instanceof CreateDocumentError || error instanceof ProjectError || error instanceof ThemeFoldersError || error instanceof TagsError || error instanceof ExportError || error instanceof AssetError || error instanceof GuideError || error instanceof HistoryError ? error.status : error instanceof RestoreRefusal ? 422 : error instanceof Conflict || error instanceof ExportChangedError ? 409 : (error as NodeJS.ErrnoException).code === 'ENOENT' ? 404 : 400); }
+    } catch (error) { json(res, { error: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'That local file is missing. Restore it or reload the library.' : error instanceof Error ? error.message : String(error) }, error instanceof CreateDocumentError || error instanceof ProjectError || error instanceof ThemeFoldersError || error instanceof TagsError || error instanceof ExportError || error instanceof AssetError || error instanceof GuideError || error instanceof HistoryError || error instanceof PackHttpError ? error.status : error instanceof RestoreRefusal ? 422 : error instanceof Conflict || error instanceof ExportChangedError ? 409 : (error as NodeJS.ErrnoException).code === 'ENOENT' ? 404 : 400); }
   }
   const active = new Set<Promise<void>>();
   let closed = false;
@@ -476,9 +492,11 @@ export async function prepareOpenDocService(options: { root: string; production:
     started ??= (async () => {
       if (closed) throw new Error('OpenDoc is closing.');
       try {
+        await clearPendingPackUploads(root); // Half-staged uploads of a crashed run would hold upload slots for an hour.
         // One source watcher feeds the catalogs, history and the workspace. Pack installs (P1) pause and resume it from here.
         watcher = watch([...new Set([root, resolve(applicationRoot, 'src'), resolve(applicationRoot, 'package.json'), resolve(applicationRoot, 'pnpm-lock.yaml'), resolve(applicationRoot, 'tsconfig.workspace.json')])], { ignoreInitial: true, ignored: path => ignoredByWatcher(applicationRoot, root, path) });
         watcher.on('all', (_event, path) => {
+          if (packsPaused && /^(themes|templates|assets)(\/|$)/.test(relative(root, path))) { pausedPaths.add(path); return; } // A pack install is publishing files; resumeWatching replays this.
           if (relative(root, path) === 'projects.json') {
             void workspace.refreshProjects().catch(error => workspace.emit('workspace-error', error)); return;
           }

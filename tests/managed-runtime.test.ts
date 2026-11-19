@@ -21,7 +21,8 @@ const pinFor = (version: string) => `npm:@ryanyahya/opendoc@${version}`;
 let runtimePromise: Promise<{ directory: string; opendoc: string; cli: string }> | undefined;
 function managedRuntime() {
   runtimePromise ??= (async () => {
-    const directory = await mkdtemp(resolve(tmpdir(), 'opendoc-runtime-'));
+    // Real paths: on macOS the temporary folder is under /var, a link to /private/var, and the CLI resolves links.
+    const directory = await realpath(await mkdtemp(resolve(tmpdir(), 'opendoc-runtime-')));
     const nodeModules = resolve(directory, 'node_modules'), opendoc = resolve(nodeModules, 'opendoc');
     await mkdir(opendoc, { recursive: true });
     for (const entry of ['src', 'bin', '.agents', 'docs', 'vendor', 'AGENTS.md', 'CLAUDE.md', 'package.json', 'tsconfig.workspace.json']) await cp(resolve(projectRoot, entry), resolve(opendoc, entry), { recursive: true });
@@ -69,7 +70,7 @@ async function opendoc(cwd: string, ...args: string[]) {
 }
 
 async function scratch(t: TestContext) {
-  const folder = await mkdtemp(resolve(tmpdir(), 'opendoc-managed-'));
+  const folder = await realpath(await mkdtemp(resolve(tmpdir(), 'opendoc-managed-')));
   t.after(async () => { await run('chmod', ['-R', 'u+w', folder]).catch(() => {}); await rm(folder, { recursive: true, force: true }); });
   return folder;
 }

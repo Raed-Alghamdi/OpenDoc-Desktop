@@ -1,8 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import type { Comment } from '../shared/types';
+import type { Comment, CommentTarget } from '../shared/types';
 import { textLang } from '../shared/language';
 import { blockName } from '../shared/history';
-import type { CommentTarget } from './commentPlaces';
 import { Button, IconButton } from './ui';
 import { Icon } from './ui/Icon';
 import { CommentHandoff } from './CommentHandoff';

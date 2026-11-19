@@ -1,19 +1,8 @@
-import { getBlock, type Comment, type RenderArtifact } from '../shared/types';
-import type { DocumentSelection, TextAnchor } from '../shared/selection';
-import { getTextTarget, resolveCommentAnchor } from '../shared/anchors';
+import { getBlock, type Comment, type CommentTarget, type RenderArtifact } from '../shared/types';
+import type { DocumentSelection } from '../shared/selection';
+import { commentTargets, getTextTarget, resolveCommentTargets } from '../shared/anchors';
 
-/** One place a comment is about (contract C1). */
-export interface CommentTarget { blockId: string; quote: string; anchor?: TextAnchor }
-/** A comment as the reader sees it: `targets` is present only when it covers two or more places. */
-export type CommentWithTargets = Comment & { targets?: CommentTarget[] };
-
-/** Every place a comment covers, the first being the comment's own block, quote, and anchor. */
-export function commentTargets(comment: CommentWithTargets): CommentTarget[] {
-  return comment.targets && comment.targets.length > 1 ? comment.targets
-    : [{ blockId: comment.blockId, quote: comment.quote, ...(comment.anchor ? { anchor: comment.anchor } : {}) }];
-}
-
-export const commentBlockIds = (comment: CommentWithTargets) => commentTargets(comment).map(target => target.blockId);
+export const commentBlockIds = (comment: Comment) => commentTargets(comment).map(target => target.blockId);
 
 export interface CommentPlace {
   target: CommentTarget;
@@ -46,11 +35,9 @@ export function selectionsByPlace(artifact: RenderArtifact | null | undefined, s
   return sortByPlace(selections, selection => positionOf(artifact, selection));
 }
 
-/** A comment's places in page order, each resolved against the current render. */
-export function commentPlaces(artifact: RenderArtifact | null | undefined, comment: CommentWithTargets): CommentPlace[] {
-  const places = commentTargets(comment).map((target): CommentPlace => {
-    const { status, selection } = resolveCommentAnchor(artifact, target);
-    return { target, status, selection, kind: getBlock(artifact, target.blockId)?.kind ?? 'component' };
-  });
+/** A comment's places in page order, each resolved on its own against the current render. */
+export function commentPlaces(artifact: RenderArtifact | null | undefined, comment: Comment): CommentPlace[] {
+  const places = resolveCommentTargets(artifact, comment).map(({ anchorStatus, targetAvailable, selection, ...target }): CommentPlace =>
+    ({ target, status: anchorStatus, selection, kind: getBlock(artifact, target.blockId)?.kind ?? 'component' }));
   return sortByPlace(places, place => place.selection && positionOf(artifact, place.selection));
 }

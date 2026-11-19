@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { commentBlockIds, commentPlaces, commentTargets, selectionsByPlace, type CommentWithTargets } from '../src/app/commentPlaces';
-import type { RenderArtifact } from '../src/shared/types';
+import { commentBlockIds, commentPlaces, selectionsByPlace } from '../src/app/commentPlaces';
+import { commentTargets } from '../src/shared/anchors';
+import type { Comment, RenderArtifact } from '../src/shared/types';
 
 const box = (id: string, x: number, y: number) => ({ id, x, y, width: 100, height: 20 });
 const block = (id: string, kind: string, text: string) => [id, { id, kind, text }] as const;
@@ -17,7 +18,7 @@ const artifact = {
   textTargets: [],
 } as unknown as RenderArtifact;
 
-const comment = (targets?: { blockId: string; quote: string }[]): CommentWithTargets => ({
+const comment = (targets?: { blockId: string; quote: string }[]): Comment => ({
   id: 'c1', blockId: 'chart', quote: '', text: 'Make these consistent.', status: 'open', createdAt: '', updatedAt: '', version: 1, history: [],
   ...(targets ? { targets } : {}),
 });
@@ -46,4 +47,10 @@ test('a place whose component left the document is missing, listed last, and the
 test('the composer lists chosen components in page order', () => {
   const ordered = selectionsByPlace(artifact, [{ blockId: 'chart', page: 2 }, { blockId: 'right', page: 1 }, { blockId: 'title', page: 1 }]);
   assert.deepEqual(ordered.map(item => item.blockId), ['title', 'right', 'chart']);
+});
+
+test('a place whose phrase can no longer be found is the only one marked changed', () => {
+  const lost = { targetId: 'summary:children', start: 0, end: 7, quote: 'Revenue', prefix: '', suffix: ' grew.' };
+  const places = commentPlaces(artifact, { ...comment(), targets: [{ blockId: 'title', quote: 'Report' }, { blockId: 'summary', quote: 'Revenue', anchor: lost }, { blockId: 'chart', quote: '' }] });
+  assert.deepEqual(places.map(place => [place.target.blockId, place.status]), [['title', 'attached'], ['summary', 'changed'], ['chart', 'attached']]);
 });

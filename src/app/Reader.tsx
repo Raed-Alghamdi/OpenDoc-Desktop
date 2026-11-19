@@ -12,14 +12,14 @@ import { closePanel, isShowing, loadPanelPreference, panelFromPreference, savePa
 import { saveBarStatus, saveBarVisible } from "./saveBar";
 import { unionBox, useAnchoredPanel } from "./anchoredPanel";
 import { applyCommentsPrompt } from "./agentPrompts";
-import { api, failureMessage } from "./api";
+import { api, ApiError, failureMessage } from "./api";
 import { ExportMenu } from "./ExportMenu";
-import { getBlock, documentFormat, documentName, type Comment, type DocumentState } from "../shared/types";
+import { getBlock, documentFormat, documentName, type Comment, type CommentTarget, type DocumentState } from "../shared/types";
 import { PageNumberInput } from "./PageNumberInput";
 import { commentDraftKey, componentCommentDraftKey, multiCommentDraftKey, commentDrafts, type CommentDrafts } from "./commentDrafts";
-import { commentBlockIds, commentPlaces, commentTargets, selectionsByPlace, type CommentTarget, type CommentWithTargets } from "./commentPlaces";
+import { commentBlockIds, commentPlaces, selectionsByPlace } from "./commentPlaces";
 import type { DocumentSelection, TextAnchor } from "../shared/selection";
-import { anchorForSelection, getTextTarget, resolveCommentAnchor, selectionReason } from "../shared/anchors";
+import { anchorForSelection, commentTargets, getTextTarget, resolveCommentAnchor, selectionReason } from "../shared/anchors";
 import { textLang, type Language } from "../shared/language";
 import { canCorrectComponent, correctionUnavailableReason, selectedTextTarget } from "./componentCorrection";
 import { useNotificationClearance } from "./notificationClearance";
@@ -46,6 +46,8 @@ import {
 const HistoryPanel = lazyView(() => import("./HistoryPanel").then(module => module.HistoryPanel));
 const historyLoading = <section className="history-panel" aria-busy="true"><div className="history-content"><div className="history-skeleton" aria-hidden="true"><span /><span /><span /></div></div></section>;
 
+/** The most places one comment can cover (the service's limit). */
+const maxPlaces = 200;
 type CorrectionDraft = { selection: DocumentSelection; text: string; linked: number; baseline?: EditorBaseline };
 const openEditors = new Map<string, OpenEditorRecord>();
 /** Narrow screens show the side panel, editor, and comment composer as bottom sheets, one at a time. */
@@ -129,7 +131,7 @@ export function Reader({
   const [commentEditor, setCommentEditor] = useState<{ id: string; text: string; version: number } | null>(null);
   const [navigation, setNavigation] = useState(false);
   const [navigationMode, setNavigationMode] = useState("pages");
-  const [comments, setComments] = useState<CommentWithTargets[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
   const [drafts, setDrafts] = useState<CommentDrafts>(() => commentDrafts.read(id));
   const selectedPhrase = isPhrase(selection, getTextTarget(artifact, selection?.targetId));
   // Phrase drafts stay with their phrase; component drafts follow edited wording; several components share one draft.
@@ -186,7 +188,7 @@ export function Reader({
     const version = ++commentRequest.current;
     commentAbort.current = controller;
     const timer = setTimeout(() => {
-      void api<CommentWithTargets[]>(`/api/documents/${id}/comments`, { signal: controller.signal })
+      void api<Comment[]>(`/api/documents/${id}/comments`, { signal: controller.signal })
         .then((value) => {
           if (version === commentRequest.current) { setComments(value); setCommentError(""); }
         })
@@ -328,7 +330,7 @@ export function Reader({
           documentId: id,
           blockId: selected,
           page: safePage,
-          selection,
+          // The list (C1); `selection` stays its first entry on the server, and the two are never sent together.
           selections: selection ? [selection, ...additional] : [],
           editing: !!editor || editing.count > 0,
           pendingEdits: editing.count,
@@ -407,7 +409,8 @@ export function Reader({
   /** The whole selection as a list; the first entry is the main selection. */
   function holdSelections(list: DocumentSelection[]) {
     holdSelection(list[0] ?? null);
-    setAdditional(list.slice(1));
+    // The service takes at most this many places in one comment.
+    setAdditional(list.slice(1, maxPlaces));
   }
   function toggleBlock(block: string, pageNumber: number) {
     if (editor || composing || mutationPending.current || editPending || editError) return;
@@ -636,7 +639,7 @@ export function Reader({
     scrollToBlock(block);
   }
   /** Jump to one place of a comment, or to its first place in page order. */
-  function goToComment(comment: CommentWithTargets, place?: CommentTarget) {
+  function goToComment(comment: Comment, place?: CommentTarget) {
     const next = place ? resolveCommentAnchor(artifact, place).selection : commentPlaces(artifact, comment).find(item => item.selection)?.selection;
     if (!next || editPending || editError) return;
     setEditor(null); forgetOpenEditor();
@@ -696,13 +699,14 @@ export function Reader({
       clearSelection();
       componentTrigger.current?.focus();
     } catch (e) {
-      notify.error(failureMessage(e, 'Your comment is kept here; add it again once it reconnects.'));
+      notify.error(e instanceof ApiError && e.status === 409 ? 'This selection changed while you were commenting. Select the components again; your comment is kept here.'
+        : failureMessage(e, 'Your comment is kept here; add it again once it reconnects.'));
     } finally {
       mutationPending.current = false;
       setSubmitting(false);
     }
   }
-  async function updateSavedComment(comment: CommentWithTargets, action: 'edit' | 'delete') {
+  async function updateSavedComment(comment: Comment, action: 'edit' | 'delete') {
     if (mutationPending.current || !connected || (action === 'edit' && !commentEditor?.text.trim())) return;
     mutationPending.current = true;
     setChanging(comment.id);

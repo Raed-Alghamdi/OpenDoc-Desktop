@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -68,4 +69,39 @@ test('release leaves a lock that someone else replaced', async () => {
   await writeFile(lockPath(root), JSON.stringify({ pid: process.pid, id: 'someone-else' }));
   await lock.release();
   assert.equal(JSON.parse(await readFile(lockPath(root), 'utf8')).id, 'someone-else');
+});
+
+test('a lock file is never seen empty or partial, however closely it is watched while it is taken and released', async () => {
+  const root = await workspace();
+  const url = new URL('../../../src/main/lock.mjs', import.meta.url).href;
+  // Another process takes and releases the lock again and again; this one reads the file in a tight loop.
+  const script = `import { acquireWorkspaceLock } from ${JSON.stringify(url)}; for (let n = 0; n < 1500; n++) { const lock = await acquireWorkspaceLock(process.argv[1]); await lock.release(); }`;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script, root], { stdio: 'ignore' });
+  const finished = new Promise(accept => child.once('exit', accept));
+  let done = false;
+  finished.then(() => { done = true; });
+  let seen = 0;
+  const bad = [];
+  while (!done) {
+    let text;
+    try { text = readFileSync(lockPath(root), 'utf8'); } catch { await new Promise(accept => setImmediate(accept)); continue; }
+    seen++;
+    try { if (!Number.isInteger(JSON.parse(text).pid)) bad.push(text); } catch { bad.push(text); }
+    await new Promise(accept => setImmediate(accept));
+  }
+  assert.ok(seen > 0, 'the file was observed at least once');
+  assert.deepEqual(bad, []);
+  assert.deepEqual((await readdir(join(root, '.opendoc'))).filter(name => name.endsWith('.part')), [], 'no temporary file is left');
+});
+
+test('a kill between the temporary file and the link leaves only a .part file, which is no lock; the lock can be taken, and the next open removes the leftover', async () => {
+  const root = await workspace();
+  await mkdir(join(root, '.opendoc'), { recursive: true });
+  const leftover = join(root, '.opendoc', `.update.lock.abc.opendoc-${await deadPid()}.part`);
+  await writeFile(leftover, JSON.stringify({ pid: 1, id: 'x' }));
+  const lock = await acquireWorkspaceLock(root);
+  assert.equal(JSON.parse(await readFile(lockPath(root), 'utf8')).pid, process.pid);
+  await lock.release();
+  const { cleanStaleTemps } = await import('../../../src/main/workspace/temps.mjs');
+  assert.deepEqual(await cleanStaleTemps(root), [leftover]);
 });

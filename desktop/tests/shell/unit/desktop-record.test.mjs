@@ -25,6 +25,24 @@ test('the record holds pid, startedAt, version and build', async () => {
   assert.ok(!Number.isNaN(Date.parse(record.startedAt)));
 });
 
+test('readOnly { reason, message } is written only while the workspace is open read-only, and the other fields stay as they are', async () => {
+  const root = await workspace();
+  const readOnly = { reason: 'newer-patch', message: 'This workspace is on OpenDoc 0.6.9. Update the app to edit it.', extra: 'dropped' };
+  const first = await writeDesktopRecord(root, { version: '0.6.1', build: 3, readOnly });
+  const written = JSON.parse(await readFile(desktopRecordFile(root), 'utf8'));
+  assert.deepEqual(written.readOnly, { reason: 'newer-patch', message: readOnly.message });
+  assert.deepEqual(Object.keys(written).sort(), ['build', 'pid', 'readOnly', 'startedAt', 'version']);
+  assert.equal(first.version, '0.6.1');
+  // The next open is writable: the key is gone, everything else is as before.
+  await writeDesktopRecord(root, { version: '0.6.1', build: 3, readOnly: null });
+  assert.deepEqual(Object.keys(JSON.parse(await readFile(desktopRecordFile(root), 'utf8'))).sort(), ['build', 'pid', 'startedAt', 'version']);
+  await writeDesktopRecord(root, { version: '0.6.1', build: 3 });
+  assert.equal('readOnly' in JSON.parse(await readFile(desktopRecordFile(root), 'utf8')), false);
+  // A record with the key is still a live record of ours.
+  await writeDesktopRecord(root, { version: '0.6.1', build: 3, readOnly });
+  assert.equal((await inspectDesktopRecord(root)).state, 'none');
+});
+
 test('removing the record only removes our own', async () => {
   const root = await workspace();
   await writeFile(desktopRecordFile(root), JSON.stringify({ pid: process.pid + 100000, startedAt: 'x', version: '0.6.1', build: 1 }));

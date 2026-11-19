@@ -27,3 +27,16 @@ ul.recent .forget { border: 0; color: var(--muted); padding: 8px 12px; }
 #message.error { color: var(--danger); }
 #message .actions { margin-top: 10px; }
 .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 13px; overflow-wrap: anywhere; }
+main.wide { width: min(920px, 100%); }
+.hint { color: var(--muted); font-size: 13px; }
+ul.problems { list-style: none; margin: 0 0 8px; padding: 0; border: 1px solid var(--line); border-radius: 8px; max-height: 220px; overflow: auto; }
+ul.problems li { padding: 10px 14px; border-top: 1px solid var(--line); }
+ul.problems li:first-child { border-top: 0; }
+ul.problems pre { margin: 4px 0 0; white-space: pre-wrap; font: 13px ui-monospace, 'SF Mono', Menlo, monospace; color: var(--danger); }
+table.backups { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.backups th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+table.backups td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.backups td.name { font-weight: 600; overflow-wrap: anywhere; }
+table.backups td:last-child { white-space: nowrap; }
+table.backups td button { margin-left: 6px; padding: 4px 10px; }
+[hidden] { display: none !important; }

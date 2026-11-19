@@ -3,7 +3,7 @@ import { appName, originalProject } from './identity.mjs';
 import { basename } from 'node:path';
 
 /**
- * @param actions { open, create, openRecent(path), reveal, showLog, about, installCommand, checkForUpdates, setAutomaticUpdates(checked), restartToUpdate, openExternal(url) }
+ * @param actions { open, create, openRecent(path), reveal, showLog, backups, about, installCommand, checkForUpdates, setAutomaticUpdates(checked), restartToUpdate, openExternal(url) }
  * @param state { workspaceOpen: boolean, recent: string[], updates?: { show, automatic, checkEnabled, restartReady, installing } }
  */
 export function menuTemplate({ platform = process.platform, actions, state }) {
@@ -23,6 +23,7 @@ export function menuTemplate({ platform = process.platform, actions, state }) {
         { label: 'Open Recent', submenu: recent },
         { type: 'separator' },
         { label: 'Reveal Workspace', enabled: state.workspaceOpen, click: () => actions.reveal() },
+        { label: 'Workspace Backups…', click: () => actions.backups() },
         { label: 'Show Log', click: () => actions.showLog() },
         ...(mac ? [] : [{ type: 'separator' }, { role: 'quit' }]),
       ],

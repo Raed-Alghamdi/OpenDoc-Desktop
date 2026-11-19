@@ -62,3 +62,7 @@ export function forgetWorkspace(config, path) {
     return next;
   });
 }
+
+/** The checkbox "Upgrade my workspaces without asking from now on" (contracts: `upgradeWithoutAsking`, a boolean). */
+export const upgradesWithoutAsking = async config => (await config.read()).upgradeWithoutAsking === true;
+export const setUpgradeWithoutAsking = (config, value) => config.update({ upgradeWithoutAsking: Boolean(value) });

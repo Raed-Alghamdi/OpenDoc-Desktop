@@ -44,7 +44,13 @@ RT="$DATA/runtime/$ver-$bld"
 if [ ! -f "$RT/node_modules/opendoc/bin/opendoc.mjs" ] || ! cmp -s "$res/build-info.json" "$RT/build-info.json"; then
   mkdir -p "$DATA/runtime"
   tmp=$(mktemp -d "$DATA/runtime/.tmp.XXXXXX")
-  cp -a "$res/." "$tmp/" && rm -rf "$RT" && mv "$tmp" "$RT" || { echo "opendoc: could not copy the runtime to $RT" >&2; exit 1; }
+  cp -a "$res/." "$tmp/" || { rm -rf "$tmp"; echo "opendoc: could not copy the runtime to $RT" >&2; exit 1; }
+  # The app (or another call of this command) may have finished the same copy first: a complete copy is kept, never removed.
+  if [ -f "$RT/node_modules/opendoc/bin/opendoc.mjs" ] && cmp -s "$res/build-info.json" "$RT/build-info.json"; then
+    rm -rf "$tmp"
+  else
+    rm -rf "$RT" && mv "$tmp" "$RT" || { rm -rf "$tmp"; echo "opendoc: could not copy the runtime to $RT" >&2; exit 1; }
+  fi
 fi
 
 # Run the CLI in the background so a signal sent to this script reaches it (stdin stays connected).

@@ -2,7 +2,7 @@
 // Every file goes into a temporary folder: nothing here touches a real ~/.local/bin or a real PATH folder.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -14,7 +14,8 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cliFolder = join(here, '../../../resources/cli');
-const scratch = () => mkdtemp(join(tmpdir(), 'opendoc-shim-'));
+// The real path: on macOS the temporary folder is under /var, a link to /private/var, and the launchers resolve links.
+const scratch = async () => realpath(await mkdtemp(join(tmpdir(), 'opendoc-shim-')));
 const isRoot = process.getuid?.() === 0;
 const template = `#!/bin/bash\n# ${shimMarker} (test)\nAPPIMAGE=@APPIMAGE@\necho "$APPIMAGE"\n`;
 const awkward = "/tmp/it's a $dir/\"quoted\"/`tick`/My App.AppImage";

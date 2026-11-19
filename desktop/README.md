@@ -8,10 +8,10 @@ How the app works, what it reads and writes, and how it is hardened: [docs/DESKT
 
 ## Layout
 
-- `src/main/`: the Electron main process (the shell).
+- `src/main/`: the Electron main process (the shell). `src/main/workspace/` holds the workspace link, the version table, the upgrade with its backups, and the AppImage's runtime copy.
 - `src/host/`: the service host, the code that runs in the child process beside the OpenDoc service and carries requests over its IPC channel (no port), and the watchdog that ends it when the app is gone.
 - `src/preload/`: the preload script. It gives the app's own pages their calls to the main process, and the workspace page its two bridge functions (`onChange`, `onHostState`).
-- `src/renderer/`: the app's own pages (workspace picker, crash screen).
+- `src/renderer/`: the app's own pages (workspace picker, crash screen, upgrade progress and result, the backups list).
 - `src/main/updater/`: the in-app updater (install type, build-aware comparison, feed address rules, schedule, package and macOS installs). How it behaves: [docs/DESKTOP.md](../docs/DESKTOP.md#updates).
 - `resources/cli/`: the `opendoc` command for agents: `opendoc` (installed as `/usr/bin/opendoc` by the Linux packages) and `opendoc-appimage.sh` (the template the app fills in and writes to `~/.local/bin/opendoc` for an AppImage).
 - `tests/shell/`: the shell tests. Run them with `node tests/shell/run.mjs`; they open Electron windows only on a virtual display (Xvfb), never on your screen. `--unit` runs the unit tests without Electron.

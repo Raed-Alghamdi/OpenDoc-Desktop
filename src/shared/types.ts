@@ -45,10 +45,14 @@ export function documentName(document: DocumentSummary) { return document.name ?
 /** User-facing format and page-unit words; presentations count slides, documents count pages. */
 export function formatLabel(format: DocumentFormat) { return format === 'presentation' ? 'Presentation' : 'Document'; }
 export function pageUnit(format: DocumentFormat, count = 1) { return `${format === 'presentation' ? 'slide' : 'page'}${count === 1 ? '' : 's'}`; }
+/** One place a comment is about: a whole block, or one phrase of it when `anchor` is present. */
+export interface CommentTarget { blockId: string; quote: string; anchor?: TextAnchor }
 export interface Comment {
   id: string; blockId: string; text: string; quote: string; status: 'open' | 'resolved' | 'deleted';
   anchor?: TextAnchor;
+  /** Present only when the comment covers 2 or more places; `blockId`, `quote` and `anchor` stay `targets[0]` so older readers keep working. */
+  targets?: CommentTarget[];
   createdAt: string; updatedAt: string; version: number;
   history: { at: string; action: 'created' | 'resolved' | 'reopened' | 'edited' | 'deleted' | 'restored'; previousText?: string }[];
 }
-export interface WorkspaceContext { selectedAsset?: SelectedAsset | null; selection?: DocumentSelection | null; editing?: boolean; pendingEdits?: number; draftPreview?: boolean; themeId?: string | null; projectId?: string | null; mediaId?: string | null; documentId: string | null; blockId: string | null; page: number; updatedAt?: string }
+export interface WorkspaceContext { selectedAsset?: SelectedAsset | null; selection?: DocumentSelection | null; selections?: DocumentSelection[]; editing?: boolean; pendingEdits?: number; draftPreview?: boolean; themeId?: string | null; projectId?: string | null; mediaId?: string | null; documentId: string | null; blockId: string | null; page: number; updatedAt?: string }

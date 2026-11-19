@@ -5,12 +5,13 @@ import { runtimeResolve, runtimeSource } from '../runtime/paths';
 import { packageIdentity, packageMetadata } from './workspace';
 import { withWorkspaceLock } from './lock';
 import { validateInstallation } from './check';
+import { externalEnv } from '../server/external-env';
 import { desktopRecordAdvice, workspaceOwner } from './owner';
 
 async function openBrowser(origin: string) {
   const command = process.platform === 'darwin' ? 'open' : 'xdg-open';
   await new Promise<void>(accept => {
-    const child = spawn(command, [origin], { stdio: 'ignore' });
+    const child = spawn(command, [origin], { stdio: 'ignore', env: externalEnv() });
     child.once('error', () => { console.error(`Open ${origin} in your browser.`); accept(); });
     child.once('exit', code => { if (code) console.error(`Open ${origin} in your browser.`); accept(); });
   });

@@ -31,6 +31,7 @@ check() { if eval "$2"; then echo "ok    $1"; else echo "FAIL  $1"; fail=1; fi; 
 
 check "update-disabled marker is a root-owned empty file under /opt" "grep -E '^-rw-r--r-- +0 root +root +0 .* opt/opendoc-desktop/resources/update-disabled\$' <<<\"\$list\" >/dev/null"
 check "/usr/bin/opendoc-desktop points into /opt" "grep -E 'usr/bin/opendoc-desktop -> /opt/opendoc-desktop/opendoc-desktop' <<<\"\$list\" >/dev/null"
+check "/usr/bin/opendoc is a 0755 regular file, the launcher from resources/cli" "grep -E '^-rwxr-xr-x +0 root +root +[0-9]+ .* usr/bin/opendoc\$' <<<\"\$list\" >/dev/null && bsdtar -xOf \"\$pkg\" usr/bin/opendoc | cmp -s - \"\$aur/../resources/cli/opendoc\""
 check "the .desktop file is there" "grep -q ' usr/share/applications/opendoc-desktop.desktop' <<<\"\$list\""
 check "both SVG icons are there" "grep -q 'hicolor/scalable/apps/opendoc-desktop.svg' <<<\"\$list\" && grep -q 'hicolor/symbolic/apps/opendoc-desktop-symbolic.svg' <<<\"\$list\""
 check "licences are installed" "grep -q 'usr/share/licenses/opendoc-desktop-bin/LICENSE.opendoc' <<<\"\$list\" && grep -q 'usr/share/licenses/opendoc-desktop-bin/LICENSE.electron.txt' <<<\"\$list\""

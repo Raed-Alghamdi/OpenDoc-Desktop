@@ -1,35 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
 import { runtimeResolve, runtimeSource } from '../runtime/paths';
 import { packageIdentity, packageMetadata } from './workspace';
 import { withWorkspaceLock } from './lock';
 import { validateInstallation } from './check';
-
-export async function runningSession(root: string): Promise<{ origin: string; pid: number } | null> {
-  let session: { origin: string; token: string; pid: number };
-  try { session = JSON.parse(await readFile(resolve(root, '.opendoc/server.json'), 'utf8')); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw new Error('Cannot read the OpenDoc session. Check .opendoc/server.json before starting another server.'); }
-  if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(session?.origin ?? '') || typeof session.token !== 'string' || !session.token) throw new Error('The OpenDoc session record is invalid. Check .opendoc/server.json before starting another server.');
-  let response;
-  try { response = await fetch(`${session.origin}/api/session`, { signal: AbortSignal.timeout(1500), redirect: 'error' }); }
-  catch (error) {
-    if ((error as { cause?: { code?: string } }).cause?.code === 'ECONNREFUSED') {
-      if (Number.isSafeInteger(session.pid) && session.pid > 0 && session.pid <= 2 ** 31 - 1) {
-        try { process.kill(session.pid, 0); }
-        catch (ownerError) { if ((ownerError as NodeJS.ErrnoException).code === 'ESRCH') return null; throw ownerError; }
-        throw new Error('OpenDoc is still finishing its previous session. Wait for its terminal to stop, then retry.');
-      }
-      return null;
-    }
-    throw new Error('Cannot verify whether OpenDoc is running. Check its terminal before starting another server.');
-  }
-  const live = await response.json().catch(() => null);
-  if (response.ok && live?.token === session.token) return { origin: session.origin, pid: session.pid };
-  throw new Error('The recorded OpenDoc session no longer matches the server at its address. Stop the previous server and remove the stale .opendoc/server.json before retrying.');
-}
+import { desktopRecordAdvice, workspaceOwner } from './owner';
 
 async function openBrowser(origin: string) {
   const command = process.platform === 'darwin' ? 'open' : 'xdg-open';
@@ -56,8 +32,9 @@ export async function runStart(args: string[], root: string) {
   process.on('SIGTERM', forwardTerminate);
   try {
     const ready = await withWorkspaceLock(root, async () => {
-      const existing = await runningSession(root);
-      if (existing) return { ...existing, reused: true };
+      const existing = await workspaceOwner(root);
+      if (existing.mode === 'desktop') throw new Error(`This workspace is open in opendoc-desktop. Close the app before running opendoc start. ${desktopRecordAdvice}`);
+      if (existing.mode === 'service') return { origin: existing.origin!, pid: existing.pid!, reused: true };
       await validateInstallation();
       child = spawn(process.execPath, ['--import', runtimeResolve('tsx'), runtimeSource('server/index.ts'), '--production'], { cwd: root, stdio: ['inherit', values.json ? 'pipe' : 'inherit', 'inherit'] });
       if (values.json) child.stdout?.on('data', data => process.stderr.write(data));
@@ -71,8 +48,8 @@ export async function runStart(args: string[], root: string) {
       while (Date.now() < deadline) {
         if (startupFailure) throw startupFailure;
         if (stopped) throw new Error(`OpenDoc stopped during startup (${stopped.signal ?? stopped.code}).`);
-        const session = await runningSession(root);
-        if (session && child.pid && session.pid === child.pid) return { ...session, reused: false };
+        const session = await workspaceOwner(root);
+        if (session.mode === 'service' && child.pid && session.pid === child.pid) return { origin: session.origin!, pid: session.pid, reused: false };
         await setTimeout(100);
       }
       throw new Error('OpenDoc did not become ready within 30 seconds. See its terminal output.');

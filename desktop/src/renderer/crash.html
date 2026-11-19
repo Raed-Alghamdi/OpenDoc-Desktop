@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenDoc stopped</title>
+<link rel="stylesheet" href="shell.css">
+</head>
+<body>
+<main>
+  <h1>OpenDoc stopped</h1>
+  <p class="lede" id="summary">The part of the app that works on your documents stopped, and starting it again did not help.</p>
+  <p>Your documents are saved in the workspace folder. Nothing in them was changed by this.</p>
+  <p class="mono" id="workspace"></p>
+  <div class="actions">
+    <button id="retry" class="primary" type="button">Try again</button>
+    <button id="log" type="button">Show the log</button>
+    <button id="other" type="button">Choose another workspace</button>
+  </div>
+  <div id="message" role="status" aria-live="polite"></div>
+</main>
+<script src="crash.js"></script>
+</body>
+</html>

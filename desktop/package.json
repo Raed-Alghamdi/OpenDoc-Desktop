@@ -6,9 +6,15 @@
   "description": "A self-contained desktop app for OpenDoc on Linux and macOS, built on the original OpenDoc project.",
   "license": "MIT",
   "type": "module",
+  "main": "src/main/index.mjs",
   "homepage": "https://github.com/RyanYahya/OpenDoc#readme",
   "engines": {
     "node": ">=24"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test:shell": "node tests/shell/run.mjs",
+    "test:shell:unit": "node tests/shell/run.mjs --unit"
   },
   "dependencies": {
     "electron-updater": "6.8.11"

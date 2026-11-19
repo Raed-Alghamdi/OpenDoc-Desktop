@@ -1,0 +1,47 @@
+// opendoc-desktop: the main process. Electron waits for an ES module entry point to finish loading before it
+// emits `ready`, so nothing here awaits app.whenReady() at the top level.
+import { app } from 'electron';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { DesktopShell } from './desktop-shell.mjs';
+import { appName } from './identity.mjs';
+import { appImageTemplatePath } from './command-line-tool.mjs';
+import { runtimeLocation } from './runtime.mjs';
+import { registerSchemes } from './shell-pages.mjs';
+
+app.setName(appName);
+// Settings live where the router skill and the agent integrations expect them: ~/.config/opendoc-desktop on Linux,
+// ~/Library/Application Support/opendoc-desktop on macOS. A --user-data-dir switch (tests) still wins.
+if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', join(app.getPath('appData'), appName));
+
+registerSchemes();
+
+// An uncaught error in the main process would otherwise open a modal error dialog and freeze the app's supervision.
+process.on('uncaughtException', error => console.error('Uncaught error in the main process:', error));
+process.on('unhandledRejection', error => console.error('Unhandled rejection in the main process:', error));
+
+// One instance at a time: a second launch focuses the first and exits.
+const first = app.requestSingleInstanceLock();
+if (!first) app.quit();
+
+async function run() {
+  await app.whenReady();
+  const here = fileURLToPath(new URL('.', import.meta.url));
+  const runtime = runtimeLocation({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, developmentRoot: join(here, '..', '..') });
+  const templatePath = appImageTemplatePath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, developmentRoot: join(here, '..', '..') });
+  const shell = new DesktopShell({ runtime, templatePath, fallbackRoot: app.isPackaged ? undefined : join(here, '..', '..', '..') });
+
+  app.on('second-instance', () => shell.secondInstance());
+  app.on('window-all-closed', () => { if (!shell.keepAlive) app.quit(); });
+  // The service stops in will-quit, never before-quit: a cancelled quit would leave a window whose calls fail.
+  app.on('will-quit', event => {
+    if (shell.stopped) return;
+    event.preventDefault();
+    void shell.shutdown().finally(() => app.exit(0));
+  });
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => app.quit());
+
+  await shell.start();
+}
+
+if (first) run().catch(error => { console.error('opendoc-desktop could not start:', error); app.exit(1); });

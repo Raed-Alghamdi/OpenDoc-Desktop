@@ -1,5 +1,6 @@
 // The sentinel script (transport.mjs) run straight under every POSIX shell this machine has. dash, the /bin/sh of
-// Debian and Ubuntu, rejects `kill -0 -- -PID`, so the script must work with the `-s` forms in all of them.
+// Debian and Ubuntu, rejects `kill -0 -- -PID` and `kill -s 0 -PID`, and busybox sh rejects any `--`, so the script uses
+// the one form all of them accept: `kill -0 -PID` and `kill -KILL -PID`.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { test } from 'node:test';
@@ -60,8 +61,8 @@ for (const command of found) {
   });
 }
 
-test('the script uses the portable forms only (no `kill -0` and no `-KILL` before the pid)', () => {
-  assert.doesNotMatch(sentinelScript, /kill -0|kill -KILL/);
-  assert.match(sentinelScript, /kill -s 0/);
-  assert.match(sentinelScript, /kill -s KILL -- "-\$2"/);
+test('the script uses the form every shell accepts (no `--`, no `-s` before a group)', () => {
+  assert.doesNotMatch(sentinelScript, /--|kill -s/);
+  assert.match(sentinelScript, /kill -0 "-\$2"/);
+  assert.match(sentinelScript, /kill -KILL "-\$2"/);
 });

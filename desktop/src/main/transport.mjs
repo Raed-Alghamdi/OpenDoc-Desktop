@@ -28,9 +28,10 @@ const maxHeaderBytes = 128 * 1024;
 const headerName = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 // Runs outside the host: ends when the host's group is gone, and kills the group if the app is gone first. The group
 // number cannot be given to anything else while a member lives, and the loop stops as soon as the last one is gone.
-// Written for every POSIX shell: dash (/bin/sh on Debian and Ubuntu) rejects `kill -0 -- -PID` ("Illegal number"), so
-// every signal is named with `-s`. $1 is the app's pid, $2 the host's pid (its group number).
-export const sentinelScript = 'while kill -s 0 "$1" 2>/dev/null && kill -s 0 -- "-$2" 2>/dev/null; do sleep 1; done; kill -s 0 "$1" 2>/dev/null || kill -s KILL -- "-$2" 2>/dev/null';
+// Written for every POSIX shell, in the one form they all accept: the signal as `-0` or `-KILL` and the group as `-PID`,
+// with no `--`. dash (/bin/sh on Debian and Ubuntu) rejects `kill -0 -- -PID` ("Illegal number") and `kill -s 0 -PID`
+// ("Illegal option"); busybox sh rejects any `--` ("invalid number"). $1 is the app's pid, $2 the host's pid (its group).
+export const sentinelScript = 'while kill -0 "$1" 2>/dev/null && kill -0 "-$2" 2>/dev/null; do sleep 1; done; kill -0 "$1" 2>/dev/null || kill -KILL "-$2" 2>/dev/null';
 
 export class TransportError extends Error {
   constructor(message, tail = []) { super(message); this.name = 'TransportError'; this.tail = tail; }

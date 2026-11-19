@@ -6,6 +6,7 @@ import type { ViteDevServer } from 'vite';
 import { atomicWrite } from './files';
 import { applicationRoot } from '../runtime/paths';
 import { prepareOpenDocService, json, type OpenDocService } from './service';
+import { workspaceReadOnly } from '../cli/read-only';
 
 const root = process.cwd();
 const events = new WebSocketServer({ noServer: true, maxPayload: 1024 });
@@ -46,7 +47,9 @@ if (!production) {
   vite = await createViteServer({ root: applicationRoot, server: { middlewareMode: true, ws: { server } }, appType: 'spa' });
   client = (req, res) => vite!.middlewares(req, res);
 }
-const prepared = await prepareOpenDocService({ root, production, client });
+// A workspace the app keeps read-only, or whose pin is newer than this runtime (plan 3.4), is never served writable.
+const readOnly = await workspaceReadOnly(root).catch(() => null);
+const prepared = await prepareOpenDocService({ root, production, client, readOnly });
 service = prepared.service;
 let closing = false;
 async function close() {

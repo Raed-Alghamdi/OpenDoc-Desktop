@@ -82,10 +82,15 @@ async function body(req: IncomingMessage, limit = 32_000) {
  */
 const readOnlyWrites: [method: string, path: RegExp][] = [
   ['POST', /^\/api\/context$/],
-  ['POST', /^\/api\/documents\/[^/]+\/export$/],
+  ['POST', /^\/api\/documents\/[^/]+\/exports?$/],
+  // Pack export writes output/packs and inspect stages under .opendoc/pack-uploads; neither installs anything. Only install is refused.
+  ['POST', /^\/api\/packs\/(?:export|inspect)$/],
   ['DELETE', /^\/api\/exports\/[a-f0-9-]+$/],
   ['POST', /^\/api\/exports\/[a-f0-9-]+\/(?:reveal|copy|restore)$/],
 ];
+
+/** Whether a request may go through while the workspace is read-only (everything else that writes is refused). */
+export const readOnlyAllows = (method: string | undefined, pathname: string) => ['GET', 'HEAD'].includes(method ?? 'GET') || readOnlyWrites.some(([allowed, path]) => allowed === method && path.test(pathname));
 
 export interface PreparedOpenDocService {
   /** The literal `readOnlySupported: true` below is what the desktop app looks for before it opens a workspace read-only. */
@@ -131,7 +136,7 @@ export async function prepareOpenDocService(options: { root: string; production:
       // Write guard: every non-GET request needs the session token. Read-only mode adds its refusal here.
       if (!['GET', 'HEAD'].includes(req.method ?? 'GET') && req.headers['x-opendoc-token'] !== token) { json(res, { error: 'This write must come from the local OpenDoc session.' }, 403); return; }
       // Read-only guard, one check for every route: a non-GET request that is not on the short list above is refused before routing.
-      if (readOnly && !['GET', 'HEAD'].includes(req.method ?? 'GET') && !readOnlyWrites.some(([method, path]) => method === req.method && path.test(url.pathname))) {
+      if (readOnly && !readOnlyAllows(req.method, url.pathname)) {
         json(res, { error: readOnly.message, code: readOnlyCode, readOnly }, 403); return;
       }
       if (req.method === 'GET' && url.pathname === '/api/session') { json(res, readOnly ? { token, readOnly } : { token }); return; }

@@ -1,6 +1,6 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { chmod, cp, lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -226,4 +226,30 @@ test('--version still answers in an unmanaged workspace whose install is missing
   const other = await opendoc(folder, 'projects', 'list');
   assert.notEqual(other.code, 0);
   assert.match(other.stderr, /npm install/);
+});
+
+test('opendoc start never serves a writable UI on a workspace whose pin is newer than the app (app closed)', { timeout: 180_000 }, async t => {
+  const workspace = await created(t);
+  const manifest = JSON.parse(await readFile(resolve(workspace, 'package.json'), 'utf8'));
+  manifest.dependencies.opendoc = pinFor(`${major}.${minor}.${patch + 1}`);
+  await writeFile(resolve(workspace, 'package.json'), JSON.stringify(manifest));
+  const { cli } = await managedRuntime();
+  const child = spawn(process.execPath, [cli, 'start', '--no-open', '--json'], { cwd: workspace, env: { ...process.env, PATH: '/nonexistent', OPENDOC_PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let logs = '';
+  child.stdout.on('data', value => { logs += value; }); child.stderr.on('data', value => { logs += value; });
+  const exited = new Promise(accept => child.once('exit', accept));
+  t.after(async () => { child.kill('SIGINT'); await exited; });
+  const deadline = Date.now() + 120_000;
+  let origin: string | undefined;
+  while (!origin && Date.now() < deadline) {
+    origin = logs.split('\n').map(line => { try { return JSON.parse(line).origin as string | undefined; } catch { return undefined; } }).find(Boolean);
+    if (!origin) { if (child.exitCode !== null) throw new Error(logs); await new Promise(accept => setTimeout(accept, 200)); }
+  }
+  assert.ok(origin, logs);
+  const session = await fetch(`${origin}/api/session`).then(response => response.json()) as { token: string; readOnly?: { reason: string; message: string } };
+  assert.equal(session.readOnly?.reason, 'newer-patch');
+  assert.match(session.readOnly!.message, /Update the app to edit it\./);
+  const write = await fetch(`${origin}/api/projects`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-OpenDoc-Token': session.token, Origin: origin }, body: '{"name":"Nope"}' });
+  assert.equal(write.status, 403);
+  assert.equal(((await write.json()) as { code: string }).code, 'workspace-read-only');
 });

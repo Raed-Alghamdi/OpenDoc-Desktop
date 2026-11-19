@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { relative, resolve } from 'node:path';
@@ -15,7 +15,7 @@ import { main } from '../src/cli/main';
 import { commandRegistry } from '../src/cli/registry';
 import { isWriteCommand, readOnlyCommands, writeCommands, workspaceReadOnly } from '../src/cli/read-only';
 import { recordAgentChanges } from '../src/server/history-capture';
-import { prepareOpenDocService, createOpenDocService, type OpenDocService } from '../src/server/service';
+import { prepareOpenDocService, createOpenDocService, readOnlyAllows, type OpenDocService } from '../src/server/service';
 import { readOnlyState, type ReadOnlyState } from '../src/shared/read-only';
 import { ReadOnlyBanner } from '../src/app/ReadOnlyBanner';
 
@@ -64,7 +64,7 @@ test('a read-only service refuses every write but the few it allows, and changes
       ['POST', '/api/documents/proof/comments', { hash, blockId: 'target', text: 'No.' }], ['PATCH', '/api/documents/proof/comments/abc', { status: 'resolved' }], ['DELETE', '/api/documents/proof/comments/abc'],
       ['POST', '/api/documents/proof/edits', {}], ['POST', '/api/documents/proof/edits/preview', {}], ['POST', '/api/documents/proof/history/20260101T000000000Z-abcdef12/restore', { scope: 'version' }],
       ['POST', '/api/projects', { id: 'p', name: 'P' }], ['PATCH', '/api/projects/test-project', { name: 'Q' }], ['DELETE', '/api/projects/test-project'], ['PUT', '/api/documents/proof/project', { projectId: null }],
-      ['POST', '/api/assets/logo'], ['POST', '/api/packs/install', { stagedId: 'x', trust: true }], ['POST', '/api/packs/inspect'], ['POST', '/api/future/route', {}], ['PUT', '/api/anything/else', {}],
+      ['POST', '/api/assets/logo'], ['POST', '/api/packs/install', { stagedId: 'x', trust: true }], ['POST', '/api/future/route', {}], ['PUT', '/api/anything/else', {}],
     ];
     for (const [method, path, body] of refused) {
       const response = await write(method, path, body);
@@ -224,4 +224,36 @@ test('without the app\'s read-only record, the same writes are accepted and hist
   await recordAgentChanges(root, ['proof']); // the first version of a document
   await writeFile(resolve(root, 'documents/proof/index.tsx'), source().replace('A first draft', 'An agent draft'));
   assert.equal((await recordAgentChanges(root, ['proof'])).length, 1);
+});
+
+test('the read-only allowlist matches exactly the routes that write only exports, packs output and context', () => {
+  const allowed: [string, string][] = [
+    ['GET', '/api/anything'], ['HEAD', '/api/documents'], ['POST', '/api/context'],
+    ['POST', '/api/documents/proof/export'], ['POST', '/api/documents/proof/exports'],
+    ['DELETE', '/api/exports/abc-123'], ['POST', '/api/exports/abc-123/restore'], ['POST', '/api/exports/abc-123/reveal'], ['POST', '/api/exports/abc-123/copy'],
+    ['POST', '/api/packs/export'], ['POST', '/api/packs/inspect'],
+  ];
+  for (const [method, path] of allowed) assert.equal(readOnlyAllows(method, path), true, `${method} ${path}`);
+  const refused: [string, string][] = [
+    ['POST', '/api/packs/install'], ['POST', '/api/packs/export/extra'], ['POST', '/api/packs/inspect/x'], ['PUT', '/api/packs/export'], ['DELETE', '/api/packs/inspect'], ['POST', '/api/packs'],
+    ['POST', '/api/documents/proof/exports/extra'], ['POST', '/api/documents/proof/exports/'], ['PATCH', '/api/documents/proof/exports'], ['DELETE', '/api/documents/proof/exports'], ['POST', '/api/documents/a/b/exports'],
+    ['POST', '/api/exports/abc-123/download'], ['PUT', '/api/exports/abc-123'], ['POST', '/api/documents/proof/comments'], ['POST', '/api/projects'],
+  ];
+  for (const [method, path] of refused) assert.equal(readOnlyAllows(method, path), false, `${method} ${path}`);
+});
+
+test('the app\'s own Export button route (plural) works in read-only mode and writes only exports and output', { timeout: 60_000 }, async () => {
+  const f = await fixture();
+  const service = await createOpenDocService({ root: f.root, production: false, client, readOnly });
+  const server = await listen(service);
+  try {
+    const headers = { 'Content-Type': 'application/json', 'X-OpenDoc-Token': service.token, Origin: server.origin };
+    let state: { status?: string; artifact?: { hash: string } } | undefined;
+    await until(async () => { state = (await fetch(`${server.origin}/api/documents`).then(response => response.json()) as { id: string; status?: string; artifact?: { hash: string } }[]).find(item => item.id === 'proof'); return state?.status === 'ready'; });
+    const before = await snapshot(f.root);
+    const saved = await fetch(`${server.origin}/api/documents/proof/exports`, { method: 'POST', headers, body: JSON.stringify({ id: randomUUID(), hash: state!.artifact!.hash, filename: 'proof.pdf', format: 'pdf' }) });
+    assert.ok(saved.ok, `${saved.status} ${await saved.clone().text()}`);
+    assert.deepEqual(await snapshot(f.root), before);
+    assert.equal((await fetch(`${server.origin}/api/packs/install`, { method: 'POST', headers, body: '{}' })).status, 403);
+  } finally { await server.close(); await service.close(); await f.cleanup(); }
 });

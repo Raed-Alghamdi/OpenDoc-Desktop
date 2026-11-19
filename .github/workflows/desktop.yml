@@ -45,13 +45,16 @@ jobs:
         env:
           INPUT_BUILD: ${{ inputs.build }}
         run: node desktop/runtime/ci-meta.mjs
-      - run: sudo apt-get update && sudo apt-get install -y rpm
+      - run: sudo apt-get update && sudo apt-get install -y rpm xvfb
       - name: Build the runtime
         run: node desktop/runtime/build.mjs --build "${{ steps.meta.outputs.build }}"
       - name: Test the runtime and the metadata scripts
         run: |
           node --test "desktop/tests/packaging/*.test.mjs"
           node --test desktop/tests/smoke/runtime.test.mjs
+      # The shell's unit tests (no display needed). Here /bin/sh is dash, which the launcher and the host's watcher shell must run under.
+      - name: Test the shell
+        run: node desktop/tests/shell/run.mjs --unit
       - name: Build the installers
         run: node desktop/runtime/dist.mjs ${{ steps.meta.outputs.stub }} --linux pacman deb rpm AppImage --publish never
       - name: Check the installers
@@ -61,6 +64,13 @@ jobs:
           OPENDOC_RUNTIME: ${{ github.workspace }}/desktop/dist/linux-unpacked/resources/runtime
           OPENDOC_ELECTRON: ${{ github.workspace }}/desktop/dist/linux-unpacked/opendoc-desktop
         run: node --test desktop/tests/smoke/runtime.test.mjs
+      # Ubuntu 24.04 stops unprivileged user namespaces, which the unpacked app's sandbox needs (no setuid chrome-sandbox there).
+      # This runner is thrown away after the job.
+      - name: Allow the app sandbox on this runner
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # The packaged app (production fuses), driven on a virtual display: library, PDF, comment, export, `opendoc --version`, quit.
+      - name: Smoke test the packaged app
+        run: node desktop/tests/smoke/run.mjs
       - name: Sizes
         run: ls -l desktop/dist | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
@@ -130,9 +140,15 @@ jobs:
         run: |
           node --test "desktop/tests/packaging/*.test.mjs"
           node --test desktop/tests/smoke/runtime.test.mjs
+      # The shell's unit tests, run directly: tests/shell/run.mjs wraps them in ionice, which macOS does not have.
+      - name: Test the shell
+        run: node --test "desktop/tests/shell/unit/*.test.mjs"
       # Ad-hoc signed (identity "-", no notarization), as the config says; the first open on a Mac needs "Open Anyway" (plan 3.5).
       - name: Build zip and dmg
         run: node desktop/runtime/dist.mjs ${{ steps.meta.outputs.stub }} --mac zip dmg --${{ matrix.arch }} --publish never
+      # The packaged app (production fuses) in the runner's own session: library, PDF, comment, export, `opendoc --version`, quit.
+      - name: Smoke test the packaged app
+        run: node desktop/tests/smoke/run.mjs
       - name: Sizes
         run: ls -l desktop/dist | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7

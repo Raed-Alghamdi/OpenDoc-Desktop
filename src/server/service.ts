@@ -31,7 +31,7 @@ import { ThemeFoldersError, themeFoldersFile } from './theme-folders';
 import { handleThemeFoldersRequest } from './theme-folders-http';
 import { TagsError, tagsFile } from './tags';
 import { handleTagsRequest } from './tags-http';
-import { handlePacksRequest, PackHttpError, type PackHooks } from './packs-http';
+import { clearPendingPackUploads, handlePacksRequest, PackHttpError, type PackHooks } from './packs-http';
 import { sourceLanguage } from './language';
 import { sourceFiles, sourceUpdatedAt } from './source-files';
 import { coverImage } from './covers';
@@ -105,14 +105,19 @@ export async function prepareOpenDocService(options: { root: string; production:
     if (!materialCache || materialCache.version !== materialsVersion) materialCache = { version: materialsVersion, result: scanMaterials(root, workspace.list()) };
     return materialCache.result.catch(error => { materialCache = undefined; throw error; });
   }
-  // Pack block (P1): Import pauses the watcher for the catalog folders while files are published, then rescans them once.
+  // Pack block (P1): Import pauses the watcher for the catalog folders while files are published, then replays what it missed.
   let packsPaused = false;
+  const pausedPaths = new Set<string>();
   const packHooks: PackHooks = {
     pauseWatching: () => { packsPaused = true; },
     resumeWatching: async () => {
       packsPaused = false;
-      // Events inside these folders were dropped while paused; invalidate every catalog entry that could depend on them.
+      // The catalogs first: every entry that could depend on these folders is invalidated.
       await Promise.all(['themes', 'templates', 'assets'].flatMap(folder => [templates.noteChange(resolve(root, folder)), themes.noteChange(resolve(root, folder))]));
+      // Then each dropped event goes through the watcher's own callback, so documents that failed for a missing theme
+      // re-render and history sees edits made during the install, exactly as if nothing had been paused.
+      const missed = [...pausedPaths]; pausedPaths.clear();
+      for (const path of missed) watcher?.emit('all', 'change', path);
     },
   };
   const served = options.client ?? (production ? await builtClient(applicationRoot) : undefined);
@@ -487,10 +492,11 @@ export async function prepareOpenDocService(options: { root: string; production:
     started ??= (async () => {
       if (closed) throw new Error('OpenDoc is closing.');
       try {
+        await clearPendingPackUploads(root); // Half-staged uploads of a crashed run would hold upload slots for an hour.
         // One source watcher feeds the catalogs, history and the workspace. Pack installs (P1) pause and resume it from here.
         watcher = watch([...new Set([root, resolve(applicationRoot, 'src'), resolve(applicationRoot, 'package.json'), resolve(applicationRoot, 'pnpm-lock.yaml'), resolve(applicationRoot, 'tsconfig.workspace.json')])], { ignoreInitial: true, ignored: path => ignoredByWatcher(applicationRoot, root, path) });
         watcher.on('all', (_event, path) => {
-          if (packsPaused && /^(themes|templates|assets)(\/|$)/.test(relative(root, path))) return; // A pack install is publishing files; resumeWatching rescans.
+          if (packsPaused && /^(themes|templates|assets)(\/|$)/.test(relative(root, path))) { pausedPaths.add(path); return; } // A pack install is publishing files; resumeWatching replays this.
           if (relative(root, path) === 'projects.json') {
             void workspace.refreshProjects().catch(error => workspace.emit('workspace-error', error)); return;
           }

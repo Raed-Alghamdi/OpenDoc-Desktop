@@ -6,8 +6,9 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { collectPack } from '../src/packs/collect';
-import { writeArchive } from '../src/packs/archive';
+import { limits, writeArchive } from '../src/packs/archive';
 import { digest, type PackManifest } from '../src/packs/manifest';
+import { crc32, deflateRawSync } from 'node:zlib';
 import { handlePacksRequest, stagedLifetime, type PackHooks } from '../src/server/packs-http';
 import { createOpenDocService } from '../src/server/service';
 import { exportPack, installPack } from '../src/packs/packs';
@@ -58,9 +59,10 @@ async function body(req: IncomingMessage, limit = 32_000) {
 }
 
 /** Serve one workspace through the handler, the way the service will, with hooks that record their order. */
-async function serve(t: TestContext, root: string) {
+async function serve(t: TestContext, root: string, gate?: Promise<void>) {
   const events: string[] = [];
-  const hooks: PackHooks = { pauseWatching: () => { events.push('pause'); }, resumeWatching: () => { events.push('resume'); } };
+  // A gate holds the install at the pause, so a second request can arrive while the first is running.
+  const hooks: PackHooks = { pauseWatching: async () => { events.push('pause'); await gate; }, resumeWatching: () => { events.push('resume'); } };
   const server = createServer((req, res) => {
     void handlePacksRequest(root, req, res, new URL(req.url!, 'http://localhost'), json, body, () => { events.push('changed'); }, hooks)
       .then(handled => { if (!handled) json(res, { error: 'Not found.' }, 404); })
@@ -256,13 +258,12 @@ test('pack HTTP leaves other routes alone and answers only the documented method
   assert.equal((await server.send('/api/packs/staged/x/previews/y.pdf', {})).status, 404);
 });
 
-test('a running service installs a pack for Import, shows the new design without a restart, and the CLI still refuses', { timeout: 120_000 }, async t => {
-  const f = await workspaces(t);
-  const zip = resolve(f.container, 'acme.opendoc.zip');
-  await exportPack(f.source, { themes: ['acme'], output: zip });
+/** A real service on a fixture workspace that owns its `assets` folder, recorded as the workspace's owner, with ordered teardown. */
+async function runningService(t: TestContext, prepare?: (root: string) => Promise<void>) {
   const recipient = await fixture();
   await rm(resolve(recipient.root, 'assets')); // The fixture links the repository's assets; an installing workspace owns its own.
   await mkdir(resolve(recipient.root, 'assets'));
+  await prepare?.(recipient.root);
   const service = await createOpenDocService({ root: recipient.root, production: false, client: (_req, res) => { res.end('client'); } });
   const server = createServer((req, res) => { service.handle(req, res).catch(() => {}); });
   await new Promise<void>(accept => server.listen(0, '127.0.0.1', accept));
@@ -278,18 +279,26 @@ test('a running service installs a pack for Import, shows the new design without
   // The record the CLI and `installPack` read to learn that a service owns this workspace.
   await put(recipient.root, '.opendoc/server.json', JSON.stringify({ origin, pid: process.pid, token: service.token }));
   const themes = async () => (await (await fetch(origin + '/api/themes')).json() as { id: string }[]).map(theme => theme.id);
+  const guard = { 'X-OpenDoc-Token': service.token };
+  const upload = (archive: Uint8Array, headers: Record<string, string> = guard) => { const form = new FormData(); form.set('file', new Blob([new Uint8Array(archive)]), 'acme.opendoc.zip'); return fetch(origin + '/api/packs/inspect', { method: 'POST', headers, body: form }); };
+  const install = (value: unknown) => fetch(origin + '/api/packs/install', { method: 'POST', headers: { ...guard, 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+  return { root: recipient.root, origin, service, guard, themes, upload, install };
+}
+
+test('a running service installs a pack for Import, shows the new design without a restart, and the CLI still refuses', { timeout: 120_000 }, async t => {
+  const f = await workspaces(t);
+  const zip = resolve(f.container, 'acme.opendoc.zip');
+  await exportPack(f.source, { themes: ['acme'], output: zip });
+  const { root, origin, themes, upload, install } = await runningService(t);
   assert.ok(!(await themes()).includes('acme'));
-  await assert.rejects(installPack(recipient.root, zip, { trust: true }), /Stop OpenDoc/);
+  await assert.rejects(installPack(root, zip, { trust: true }), /Stop OpenDoc/);
   assert.ok(!(await themes()).includes('acme'));
 
   const archive = await readFile(zip);
-  const form = new FormData(); form.set('file', new Blob([new Uint8Array(archive)]), 'acme.opendoc.zip');
-  const guard = { 'X-OpenDoc-Token': service.token };
   // Writes need the session token, as everywhere else in the service.
-  assert.equal((await fetch(origin + '/api/packs/inspect', { method: 'POST', body: form })).status, 403);
-  const inspected = await good<Inspected>(await fetch(origin + '/api/packs/inspect', { method: 'POST', headers: guard, body: form }), 201);
+  assert.equal((await upload(archive, {})).status, 403);
+  const inspected = await good<Inspected>(await upload(archive), 201);
   assert.deepEqual(inspected.conflicts, []);
-  const install = (value: unknown) => fetch(origin + '/api/packs/install', { method: 'POST', headers: { ...guard, 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
   assert.equal((await install({ stagedId: inspected.stagedId })).status, 400);
   assert.ok(!(await themes()).includes('acme'));
   const installed = await good<{ installed: { id: string }[] }>(await install({ stagedId: inspected.stagedId, trust: true }));
@@ -300,10 +309,148 @@ test('a running service installs a pack for Import, shows the new design without
   // The watcher is listening again: an edit to the new theme is noticed by its catalog.
   const revision = async () => (await (await fetch(origin + '/api/themes')).json() as { id: string; revision?: string }[]).find(theme => theme.id === 'acme')?.revision;
   const before = await revision();
-  await writeFile(resolve(recipient.root, 'themes/acme/design.md'), '# Acme\nChanged after install.\n');
+  await writeFile(resolve(root, 'themes/acme/design.md'), '# Acme\nChanged after install.\n');
   await until(async () => (await revision()) !== before, 60_000);
   // A conflict reaches the client as 409.
-  const again = await good<Inspected>(await fetch(origin + '/api/packs/inspect', { method: 'POST', headers: guard, body: form }), 201);
+  const again = await good<Inspected>(await upload(archive), 201);
   assert.ok(again.conflicts.includes('themes/acme/design.md'));
   assert.equal((await install({ stagedId: again.stagedId, trust: true })).status, 409);
+});
+
+test('documents that failed for a missing theme render after Import without being touched', { timeout: 120_000 }, async t => {
+  const f = await workspaces(t);
+  const zip = resolve(f.container, 'acme.opendoc.zip');
+  await exportPack(f.source, { themes: ['acme'], output: zip });
+  const needs = `import {Document,Pages,Paragraph} from 'opendoc'; import {theme} from '../../themes/acme'; export const meta={title:'Needs Acme',description:'Imports a theme that is not installed yet',kind:'report',theme:'acme'}; export default function Needs(){ return <Document title="Needs Acme" theme={theme}><Pages title="Needs Acme"><Paragraph id="p">Waiting for its theme.</Paragraph></Pages></Document> }`;
+  const { root, origin, upload, install } = await runningService(t, async root => {
+    await put(root, 'documents/needs-acme/index.tsx', needs);
+    // A stale half-staged upload from a crashed run is removed when the service starts, so it never holds a slot.
+    await put(root, '.opendoc/pack-uploads/.pending-crashed/pack.zip', 'partial');
+  });
+  const states = async () => Object.fromEntries((await (await fetch(origin + '/api/documents?view=summary')).json() as { id: string; status: string }[]).map(document => [document.id, document.status]));
+  await until(async () => (await states())['needs-acme'] === 'error', 60_000);
+  assert.deepEqual(await stagedFolders(root), [], 'the crashed upload was swept at start');
+
+  const inspected = await good<Inspected>(await upload(await readFile(zip)), 201);
+  await good(await install({ stagedId: inspected.stagedId, trust: true }));
+  // Nobody touches the document: the replayed watcher events re-render it against the installed theme.
+  await until(async () => (await states())['needs-acme'] === 'ready', 60_000);
+});
+
+/** A ZIP written by hand, so an entry can say what the pack writer never would (a path, a link, a lying size). */
+function rawZip(entries: { name: string; data: Buffer; mode?: number; deflate?: boolean; declared?: number }[]) {
+  const parts: Buffer[] = [], central: Buffer[] = [];
+  let offset = 0;
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name), stored = entry.deflate ? deflateRawSync(entry.data) : entry.data, method = entry.deflate ? 8 : 0;
+    const size = entry.declared ?? entry.data.length, crc = crc32(entry.data);
+    const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(method, 8); local.writeUInt16LE(0x21, 12);
+    local.writeUInt32LE(crc, 14); local.writeUInt32LE(stored.length, 18); local.writeUInt32LE(size, 22); local.writeUInt16LE(name.length, 26);
+    const head = Buffer.alloc(46); head.writeUInt32LE(0x02014b50, 0); head.writeUInt16LE(0x031e, 4); head.writeUInt16LE(20, 6); head.writeUInt16LE(method, 10); head.writeUInt16LE(0x21, 14);
+    head.writeUInt32LE(crc, 16); head.writeUInt32LE(stored.length, 20); head.writeUInt32LE(size, 24); head.writeUInt16LE(name.length, 28);
+    head.writeUInt32LE(((entry.mode ?? 0) << 16) >>> 0, 38); head.writeUInt32LE(offset, 42);
+    parts.push(local, name, stored); central.push(head, name);
+    offset += 30 + name.length + stored.length;
+  }
+  const directory = Buffer.concat(central), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10); end.writeUInt32LE(directory.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, directory, end]);
+}
+
+test('pack HTTP upload limits and multipart rules', { timeout: 60_000 }, async t => {
+  const f = await workspaces(t);
+  const zip = resolve(f.container, 'design.opendoc.zip');
+  await synthetic(f.source, zip);
+  const server = await serve(t, f.recipient);
+  const inspect = (form: FormData | string, type?: string) => fetch(server.origin + '/api/packs/inspect', { method: 'POST', ...(type ? { headers: { 'Content-Type': type } } : {}), body: form });
+  const blob = (bytes: Uint8Array) => new Blob([new Uint8Array(bytes)]);
+  const archive = await readFile(zip);
+  const refused = async (response: Response, status: number, pattern: RegExp) => { assert.equal(response.status, status, await response.clone().text()); assert.match((await response.json() as { error: string }).error, pattern); };
+
+  await refused(await inspect('{"file":"x"}', 'application/json'), 400, /multipart/i);
+  await refused(await inspect(new FormData()), 400, /one OpenDoc pack file/);
+  const other = new FormData(); other.set('document', blob(archive), 'a.zip');
+  await refused(await inspect(other), 400, /one OpenDoc pack file/);
+  const two = new FormData(); two.append('file', blob(archive), 'a.zip'); two.append('file', blob(archive), 'b.zip');
+  await refused(await inspect(two), 400, /one OpenDoc pack file/);
+  const text = new FormData(); text.set('file', 'not a file');
+  await refused(await inspect(text), 400, /one OpenDoc pack file/);
+  const extra = new FormData(); extra.set('file', blob(archive), 'a.zip'); extra.set('note', 'x');
+  await refused(await inspect(extra), 400, /one OpenDoc pack file/);
+  await refused(await inspect('--broken', 'multipart/form-data; boundary=x'), 400, /malformed|interrupted/);
+  // One byte over the archive limit is refused after reading; a body far over it is refused from its declared length.
+  const over = new FormData(); over.set('file', blob(Buffer.alloc(limits.archive + 1)), 'big.zip');
+  await refused(await inspect(over), 413, /64 MiB/);
+  const huge = new FormData(); huge.set('file', blob(Buffer.alloc(limits.archive + 4 * 1024 * 1024)), 'huge.zip');
+  await refused(await inspect(huge), 413, /64 MiB/);
+  assert.deepEqual(await stagedFolders(f.recipient), []);
+  assert.deepEqual(await snapshot(f.recipient), {});
+  // The ordinary upload still works afterwards.
+  await good<Inspected>(await server.upload(archive), 201);
+});
+
+test('pack HTTP limits how many uploads wait, and an expired one frees its place', { timeout: 60_000 }, async t => {
+  const f = await workspaces(t);
+  const zip = resolve(f.container, 'design.opendoc.zip');
+  await synthetic(f.source, zip);
+  const server = await serve(t, f.recipient);
+  const archive = await readFile(zip), ids: string[] = [];
+  for (let index = 0; index < 8; index++) ids.push((await good<Inspected>(await server.upload(archive), 201)).stagedId);
+  const full = await server.upload(archive);
+  assert.equal(full.status, 429, await full.clone().text());
+  assert.deepEqual((await stagedFolders(f.recipient)).sort(), [...ids].sort(), 'a refused upload stages nothing');
+  const longAgo = new Date(Date.now() - stagedLifetime - 60_000);
+  await utimes(resolve(staging(f.recipient), ids[0]), longAgo, longAgo);
+  await good<Inspected>(await server.upload(archive), 201);
+  assert.ok(!(await stagedFolders(f.recipient)).includes(ids[0]));
+});
+
+test('pack HTTP refuses a second install while one runs', { timeout: 60_000 }, async t => {
+  const f = await workspaces(t);
+  const broken = resolve(f.container, 'broken.opendoc.zip');
+  await synthetic(f.source, broken, `import {theme as base} from '../neutral'; throw new Error('BROKEN_DESIGN_SOURCE'); export const theme = {...base,id:'acme'};`);
+  let release!: () => void;
+  const server = await serve(t, f.recipient, new Promise<void>(accept => { release = accept; }));
+  const archive = await readFile(broken);
+  const first = await good<Inspected>(await server.upload(archive), 201), second = await good<Inspected>(await server.upload(archive), 201);
+  const running = server.send('/api/packs/install', { stagedId: first.stagedId, trust: true });
+  await until(() => server.events.includes('pause'));
+  const refused = await server.send('/api/packs/install', { stagedId: second.stagedId, trust: true });
+  assert.equal(refused.status, 409, await refused.clone().text());
+  assert.match((await refused.json() as { error: string }).error, /Another pack is installing/);
+  assert.deepEqual(server.events, ['pause'], 'the refused request neither paused nor resumed anything');
+  release();
+  assert.equal((await running).status, 400); // The first install proceeds and fails on its own code.
+  assert.deepEqual(server.events, ['pause', 'resume']);
+  // The workspace is free again: the next request is judged on its own, not refused as busy.
+  const next = await server.send('/api/packs/install', { stagedId: second.stagedId, trust: true });
+  assert.equal(next.status, 400);
+  assert.match((await next.json() as { error: string }).error, /BROKEN_DESIGN_SOURCE/);
+  assert.deepEqual(await snapshot(f.recipient), {});
+});
+
+test('pack HTTP refuses hostile archives at inspection and stages nothing', { timeout: 60_000 }, async t => {
+  const f = await workspaces(t);
+  const server = await serve(t, f.recipient);
+  const body = Buffer.from('export const x = 1;');
+  const cases: [string, Buffer, RegExp][] = [
+    ['a path that climbs out', rawZip([{ name: '../evil.ts', data: body }]), /Invalid portable pack path/],
+    ['an absolute path', rawZip([{ name: '/etc/evil.ts', data: body }]), /Invalid portable pack path/],
+    ['a hidden folder', rawZip([{ name: '.git/hooks/pre-commit', data: body }]), /Invalid portable pack path/],
+    ['a backslash path', rawZip([{ name: 'themes\\evil\\index.ts', data: body }]), /Invalid portable pack path/],
+    ['a symbolic link entry', rawZip([{ name: 'themes/acme/index.ts', data: Buffer.from('/etc/passwd'), mode: 0o120777 }]), /only ordinary files/],
+    ['case-colliding names', rawZip([{ name: 'themes/Acme/index.ts', data: body }, { name: 'themes/acme/index.ts', data: body }]), /case-colliding/i],
+    ['a size that lies about the contents', rawZip([{ name: 'themes/acme/index.ts', data: Buffer.alloc(1_000_000), deflate: true, declared: 16 }]), /cannot expand|checksum or length/],
+    ['an archive with no manifest', rawZip([{ name: 'themes/acme/index.ts', data: body }]), /no OpenDoc pack manifest/],
+    ['no archive at all', Buffer.from('PK but not really'), /Invalid OpenDoc ZIP/],
+  ];
+  for (const [label, bytes, pattern] of cases) {
+    const response = await server.upload(bytes);
+    assert.equal(response.status, 400, `${label}: ${await response.clone().text()}`);
+    assert.match((await response.json() as { error: string }).error, pattern, label);
+  }
+  assert.deepEqual(await stagedFolders(f.recipient), []);
+  assert.deepEqual(await snapshot(f.recipient), {});
+  assert.equal(existsSync(resolve(f.container, 'evil.ts')), false);
+  assert.equal(existsSync(resolve(f.recipient, 'evil.ts')), false);
 });

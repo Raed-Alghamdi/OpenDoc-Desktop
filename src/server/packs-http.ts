@@ -65,6 +65,13 @@ export async function expireStagedPacks(root: string, now = Date.now()) {
   return kept.sort((a, b) => a.time - b.time);
 }
 
+/** At service start no inspection is running, so any `.pending-*` folder is a crash's leftover. Creates nothing. */
+export async function clearPendingPackUploads(root: string) {
+  const folder = await uploads(await realpath(root)).catch(() => undefined); // An odd .opendoc is reported when a pack is used, not at start.
+  if (!folder) return;
+  for (const entry of await readdir(folder).catch(() => [])) if (entry.startsWith('.pending-')) await rm(resolve(folder, entry), { recursive: true, force: true });
+}
+
 /** The staged folder for an ID, or a 404 once it is gone or past its hour. */
 async function staged(root: string, id: unknown): Promise<string> {
   if (typeof id !== 'string' || !stagedName.test(id)) throw new PackHttpError('Choose the pack file again.', 404);

@@ -1551,7 +1551,7 @@
         "comments",
         "add"
       ],
-      "summary": "Add a comment on a block, or on exact words in it.",
+      "summary": "Add a comment on a block, or on exact words in it, or on several places.",
       "args": [
         {
           "name": "doc",
@@ -1583,6 +1583,27 @@
           "repeatable": false,
           "required": false,
           "description": "The text field, when the words appear in more than one; with --phrase."
+        },
+        {
+          "name": "also",
+          "type": "string",
+          "repeatable": true,
+          "required": false,
+          "description": "Put the comment on another block too. Repeat for each place; a block once."
+        },
+        {
+          "name": "also-phrase",
+          "type": "string",
+          "repeatable": true,
+          "required": false,
+          "description": "Anchor the --also just before it to these exact words. Needs OpenDoc stopped."
+        },
+        {
+          "name": "also-target",
+          "type": "string",
+          "repeatable": true,
+          "required": false,
+          "description": "The text field for that --also-phrase, when the words appear in more than one."
         }
       ],
       "json": true

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCommentDraftStore } from '../src/app/commentDrafts';
+import { componentCommentDraftKey, createCommentDraftStore, multiCommentDraftKey } from '../src/app/commentDrafts';
 
 function storage() {
   const values = new Map<string, string>();
@@ -59,4 +59,15 @@ test('unavailable storage retains drafts in memory and a completed save preserve
   drafts.clearSubmitted('report', 'body', 'A newer draft typed during submission');
   assert.equal(Object.hasOwn(drafts.read('report'), 'body'), false);
   assert.equal(drafts.read('article').body, 'Another document');
+});
+
+test('a draft for several components is kept apart from the single-component draft and clears only when sent', () => {
+  const drafts = createCommentDraftStore(() => undefined);
+  const single = componentCommentDraftKey({ blockId: 'intro', page: 1 });
+  const several = multiCommentDraftKey(single, [{ blockId: 'body', page: 2 }, { blockId: 'closing', page: 3 }]);
+  drafts.set('report', single, 'About the intro only.');
+  drafts.set('report', several, 'About all three.');
+  drafts.clearSubmitted('report', several, 'About all three.');
+  assert.equal(Object.hasOwn(drafts.read('report'), several), false);
+  assert.equal(drafts.read('report')[single], 'About the intro only.');
 });

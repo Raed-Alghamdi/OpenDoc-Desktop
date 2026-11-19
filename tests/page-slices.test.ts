@@ -43,3 +43,16 @@ test('unchanged pages keep their previous slice so memoized pages skip rendering
   assert.notEqual(commented[2].commented, next[2].commented, 'A new comment marker changes only its page.');
   assert.deepEqual(pageSlices(undefined, null, new Set(), []), []);
 });
+
+test('components chosen after the main selection reach only the pages they are on, and keep their identity when unchanged', () => {
+  const main: DocumentSelection = { blockId: 'intro', page: 1 };
+  const more: DocumentSelection[] = [{ blockId: 'body', page: 2 }, { blockId: 'closing', page: 3 }];
+  const slices = pageSlices(artifact, main, new Set(), [], [], more);
+  assert.deepEqual(slices.map(slice => [...slice.multi]), [[], ['body'], ['closing']]);
+  const same = pageSlices(artifact, main, new Set(), [], slices, [...more]);
+  assert.deepEqual(same, slices);
+  same.forEach((slice, index) => assert.equal(slice, slices[index], 'Equal choices keep the page props.'));
+  const fewer = pageSlices(artifact, main, new Set(), [], slices, more.slice(0, 1));
+  assert.equal(fewer[1], slices[1]);
+  assert.notEqual(fewer[2], slices[2], 'The page that lost a component changes.');
+});

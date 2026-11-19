@@ -46,6 +46,14 @@ export function carryRange(from: string, to: string, range: TextRange): TextRang
   return undefined;
 }
 
+/**
+ * A click or press that adds to the selection instead of replacing it. Cmd counts beside Ctrl
+ * because Ctrl-click is the context menu on macOS. A phrase drag yields to these as well.
+ */
+export function addsToSelection(event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) {
+  return event.shiftKey || event.ctrlKey || event.metaKey;
+}
+
 /** True when a selection covers part, not all, of its text component. */
 export function isPhrase(selection: DocumentSelection | null | undefined, target: TextTarget | undefined): boolean {
   return !!selection && !!target && selection.targetId === target.id && Number.isInteger(selection.start) && Number.isInteger(selection.end)

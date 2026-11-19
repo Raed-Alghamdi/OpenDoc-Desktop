@@ -50,6 +50,8 @@ export function InspectionLayer({ children }: { children: ReactNode }) {
 
   function hover(event: PointerEvent<HTMLDivElement>) {
     if (event.pointerType !== 'mouse' || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+    // A held button means a drag, whether a phrase or a box: components do not preview then.
+    if (event.buttons) { hide(); return; }
     const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.component-target') : null;
     if (!element || element.classList.contains('selected')) { hide(); return; }
     if (hovered.current === element) return;

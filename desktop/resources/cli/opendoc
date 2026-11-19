@@ -1,0 +1,27 @@
+#!/bin/sh
+# opendoc: the agent command of the Linux packages (deb, rpm, pacman). The package installs this file as /usr/bin/opendoc.
+#
+# It runs the CLI that ships inside the app with the app's own executable as Node (ELECTRON_RUN_AS_NODE=1), so no system
+# Node or npm is needed, and it works whether the app is open or closed. Arguments, standard input, signals and exit
+# codes pass through unchanged because the shell replaces itself with the CLI (exec).
+
+# Where the app lives, in order: an explicit override (tests), the folder this file sits in (resources/cli inside the
+# app, or a symlink to it), and the packages' install folder.
+found=
+here=$(dirname -- "$(readlink -f -- "$0" 2>/dev/null || printf '%s' "$0")")
+for candidate in "${OPENDOC_DESKTOP_HOME:-}" "$here/../.." /opt/opendoc-desktop; do
+  [ -n "$candidate" ] || continue
+  if [ -x "$candidate/opendoc-desktop" ] && [ -f "$candidate/resources/runtime/node_modules/opendoc/bin/opendoc.mjs" ]; then
+    found=$candidate
+    break
+  fi
+done
+
+if [ -z "$found" ]; then
+  echo "opendoc: the opendoc-desktop app was not found (looked in /opt/opendoc-desktop). Reinstall the opendoc-desktop package." >&2
+  exit 127
+fi
+
+found=$(cd -- "$found" && pwd -P)
+
+ELECTRON_RUN_AS_NODE=1 exec "$found/opendoc-desktop" "$found/resources/runtime/node_modules/opendoc/bin/opendoc.mjs" "$@"

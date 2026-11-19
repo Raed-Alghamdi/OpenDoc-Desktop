@@ -34,7 +34,8 @@ const headerName = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 export const sentinelScript = 'while kill -0 "$1" 2>/dev/null && kill -0 "-$2" 2>/dev/null; do sleep 1; done; kill -0 "$1" 2>/dev/null || kill -KILL "-$2" 2>/dev/null';
 
 export class TransportError extends Error {
-  constructor(message, tail = []) { super(message); this.name = 'TransportError'; this.tail = tail; }
+  /** `code` is set when the host says why: 'read-only-unsupported'. */
+  constructor(message, tail = [], code) { super(message); this.name = 'TransportError'; this.tail = tail; this.code = code; }
 }
 
 let hostText;
@@ -95,8 +96,9 @@ function creditGate(size) {
  * Start the service host for the workspace at `root`.
  * @param options.location { entry, tsx } from serviceLocation(); null when the runtime has no service
  * @param options.signal aborts a start that is still going (the app is quitting); the host is killed
+ * @param options.readOnly { reason, message } to run the service read-only (U4); a service that cannot fails with code 'read-only-unsupported'
  */
-export async function startTransport({ root, location, logFile, startupTimeout = 30_000, signal }) {
+export async function startTransport({ root, location, logFile, startupTimeout = 30_000, signal, readOnly }) {
   if (!location) throw new TransportError('The OpenDoc runtime that comes with the app was not found, so the workspace cannot be opened.');
   if (signal?.aborted) throw new TransportError('Starting the OpenDoc service was cancelled.');
   if (logFile) await mkdir(dirname(logFile), { recursive: true });
@@ -113,7 +115,7 @@ export async function startTransport({ root, location, logFile, startupTimeout =
   };
 
   // The guard goes first, before tsx and the service, so even a host that dies of the app's death while starting is covered.
-  const hostArguments = ['--import', watchdog, '--import', existsSync(location.tsx) ? pathToFileURL(location.tsx).href : 'tsx', '--input-type=module', '-e', await hostSource(), hostFlag, pathToFileURL(location.entry).href];
+  const hostArguments = ['--import', watchdog, '--import', existsSync(location.tsx) ? pathToFileURL(location.tsx).href : 'tsx', '--input-type=module', '-e', await hostSource(), hostFlag, pathToFileURL(location.entry).href, ...(readOnly ? [JSON.stringify(readOnly)] : [])];
   const child = spawn(process.execPath, hostArguments, { cwd: root, env: nodeModeEnvironment(), stdio: ['ignore', 'pipe', 'pipe', 'ipc'], serialization: 'advanced', detached: grouped });
   if (grouped && child.pid) {
     const sentinel = spawn('/bin/sh', ['-c', sentinelScript, 'opendoc-sentinel', String(process.pid), String(child.pid)], { stdio: 'ignore', detached: true });
@@ -167,7 +169,7 @@ export async function startTransport({ root, location, logFile, startupTimeout =
       if (!message || typeof message !== 'object' || typeof message.t !== 'string') return;
       switch (message.t) {
         case 'ready': ready(); return;
-        case 'failed': note('err', String(message.message).slice(0, 4000)); failed(new TransportError('The OpenDoc service could not start.', tail.slice())); return;
+        case 'failed': note('err', String(message.message).slice(0, 4000)); failed(new TransportError('The OpenDoc service could not start.', tail.slice(), message.code === 'read-only-unsupported' ? message.code : undefined)); return;
         case 'change': for (const listener of [...listeners]) { try { listener(); } catch (error) { console.error('A change listener failed:', error.message); } } return;
         default:
           if (Number.isSafeInteger(message.id)) pending.get(message.id)?.message(message);

@@ -12,8 +12,12 @@ export const electronExecutable = realpathSync(createRequire(join(desktopDir, 'p
 // Everything the tests build (tarball, runtime, template workspace, copies) lives here; the repository ignores tmp/.
 export const cache = process.env.OPENDOC_SHELL_TEST_CACHE ?? join(repo, 'tmp', 'shell-tests');
 export const runtimeDir = join(cache, 'runtime');
+// The template workspace as the app makes one (`opendoc init --no-start` from the runtime: a link, no npm, no lock) and the one npm makes.
 export const goldenWorkspace = join(cache, 'golden');
+export const npmGoldenWorkspace = join(cache, 'golden-npm');
 export const workDir = join(cache, 'work');
+// npm's cache for every `npm install` the tests run (the scratch HOME has none), so a run never touches the real ~/.npm.
+export const npmCache = join(cache, 'npm-cache');
 // A linux-unpacked layout (the app's executable, resources/runtime, resources/cli) the agent command is tested against:
 // the Electron of this worktree with the test runtime, or a copy of a real build named by OPENDOC_SHELL_TEST_UNPACKED.
 export const unpackedDir = join(cache, 'unpacked');

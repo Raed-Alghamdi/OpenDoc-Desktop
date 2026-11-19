@@ -155,3 +155,14 @@ export function createPickerWindow(session) {
   window.once('ready-to-show', () => window.show());
   return window;
 }
+
+/**
+ * A small window for one of the app's own pages that is not the picker: the upgrade's progress and result, the backups list.
+ * It belongs to `parent` when there is one, so it stays in front of it.
+ */
+export function createShellWindow(session, { width = 640, height = 560, title = appName, parent } = {}) {
+  const window = new BrowserWindow({ width, height, minWidth: 420, minHeight: 300, show: false, title, backgroundColor: '#ffffff', parent: parent && !parent.isDestroyed() ? parent : undefined, webPreferences: secureWebPreferences({ session }) });
+  window.setMenuBarVisibility(false);
+  window.once('ready-to-show', () => window.show());
+  return window;
+}

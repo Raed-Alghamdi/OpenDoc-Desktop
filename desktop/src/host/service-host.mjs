@@ -12,6 +12,7 @@
 // Messages, host to main:   { t: 'ready' }   { t: 'failed', message }
 //                           { t: 'head', id, status, headers: [[name, value]] }   { t: 'chunk', id, data }   { t: 'end', id, aborted? }
 //                           { t: 'error', id, message }   { t: 'change' }   { t: 'closed' }
+//                           { t: 'failed', message, code }   `code` is 'read-only-unsupported' when the service cannot open read-only
 //                           { t: 'body-credit', id, bytes }   (the service took that much of the upload)
 //
 // Flow control, both ways, by credit: the host sends at most `responseWindow` bytes of a response that the page has not
@@ -165,13 +166,27 @@ export function serveRequests({ service, post, onClose }) {
   };
 }
 
+/**
+ * Create the service for the current directory. With `readOnly` ({ reason, message }) the service must support it: the
+ * service says so with `readOnlySupported: true` on what `prepareOpenDocService` returns. A service that does not is never
+ * started, so a workspace that must stay read-only is never opened writable.
+ */
+export async function createService(module, readOnly) {
+  const options = { root: process.cwd(), production: true };
+  if (!readOnly) return module.createOpenDocService(options);
+  const prepared = typeof module.prepareOpenDocService === 'function' ? await module.prepareOpenDocService({ ...options, readOnly }) : null;
+  if (!prepared || prepared.readOnlySupported !== true) throw Object.assign(new Error('The OpenDoc service in this app cannot open a workspace read-only.'), { code: 'read-only-unsupported' });
+  await prepared.start();
+  return prepared.service;
+}
+
 /** The child's own main: create the service for the current directory, then serve requests until told to close. */
-export async function runHost(entryUrl) {
+export async function runHost(entryUrl, readOnlyText) {
   // The channel closing (the app is gone) is handled by the watchdog the main process loads first.
   const post = (message, sent) => { process.send(message, undefined, {}, sent); };
   try {
-    const { createOpenDocService } = await import(entryUrl);
-    const service = await createOpenDocService({ root: process.cwd(), production: true });
+    const readOnly = readOnlyText ? JSON.parse(readOnlyText) : null;
+    const service = await createService(await import(entryUrl), readOnly);
     let closing;
     const close = () => closing ??= (async () => {
       await service.close();
@@ -184,9 +199,9 @@ export async function runHost(entryUrl) {
     process.on('SIGTERM', () => { void close(); });
     post({ t: 'ready' });
   } catch (error) {
-    post({ t: 'failed', message: String(error?.stack ?? error) });
+    post({ t: 'failed', message: String(error?.stack ?? error), code: error?.code === 'read-only-unsupported' ? error.code : undefined });
     setTimeout(() => process.exit(1), 200);
   }
 }
 
-if (process.argv[1] === hostFlag) void runHost(process.argv[2]);
+if (process.argv[1] === hostFlag) void runHost(process.argv[2], process.argv[3]);

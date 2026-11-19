@@ -19,6 +19,13 @@ if (location.protocol === 'app:' && location.host === 'shell') {
     retry: call('retry'),
     picker: call('picker'),
     crashInfo: call('crash-info'),
+    statusInfo: call('status-info'),
+    resultInfo: call('result-info'),
+    resultAction: call('result-action'),
+    copyPrompt: call('copy-prompt'),
+    backups: call('backups'),
+    revealBackup: call('backup-reveal'),
+    deleteBackup: call('backup-delete'),
   });
 }
 

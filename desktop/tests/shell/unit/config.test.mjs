@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { createConfig, forgetWorkspace, maxRecentWorkspaces, rememberWorkspace, withRecentWorkspace } from '../../../src/main/config.mjs';
+import { createConfig, forgetWorkspace, maxRecentWorkspaces, rememberWorkspace, setUpgradeWithoutAsking, upgradesWithoutAsking, withRecentWorkspace } from '../../../src/main/config.mjs';
 
 const folder = () => mkdtemp(join(tmpdir(), 'opendoc-config-'));
 
@@ -62,4 +62,15 @@ test('a damaged file is moved aside and replaced, never read as settings', async
   const names = await readdir(dir);
   assert.ok(names.some(name => name.startsWith('config.json.damaged-')));
   assert.deepEqual(await config.read(), { checkForUpdates: false });
+});
+
+test('upgradeWithoutAsking is a boolean that is false until the box is ticked, and other keys survive it', async () => {
+  const config = createConfig(join(await folder(), 'config.json'));
+  assert.equal(await upgradesWithoutAsking(config), false);
+  await config.update({ updateFeed: 'https://example.com/feed' });
+  await setUpgradeWithoutAsking(config, true);
+  assert.equal(await upgradesWithoutAsking(config), true);
+  assert.deepEqual(await config.read(), { updateFeed: 'https://example.com/feed', upgradeWithoutAsking: true });
+  await config.update({ upgradeWithoutAsking: 'yes' });
+  assert.equal(await upgradesWithoutAsking(config), false, 'only the boolean true counts');
 });

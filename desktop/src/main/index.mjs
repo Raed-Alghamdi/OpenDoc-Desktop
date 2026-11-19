@@ -7,6 +7,7 @@ import { DesktopShell } from './desktop-shell.mjs';
 import { appName } from './identity.mjs';
 import { appImageTemplatePath } from './command-line-tool.mjs';
 import { runtimeLocation } from './runtime.mjs';
+import { dataDirectory } from './workspace/paths.mjs';
 import { registerSchemes } from './shell-pages.mjs';
 
 app.setName(appName);
@@ -29,7 +30,10 @@ async function run() {
   const here = fileURLToPath(new URL('.', import.meta.url));
   const runtime = runtimeLocation({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, developmentRoot: join(here, '..', '..') });
   const templatePath = appImageTemplatePath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, developmentRoot: join(here, '..', '..') });
-  const shell = new DesktopShell({ runtime, templatePath, fallbackRoot: app.isPackaged ? undefined : join(here, '..', '..', '..') });
+  // An AppImage's resources are inside a mount that goes away with the app, so it works from a copy in the data folder.
+  const appImage = process.platform === 'linux' && Boolean(process.env.APPIMAGE);
+  const dataDir = dataDirectory({ env: process.env, platform: process.platform, home: app.getPath('home') });
+  const shell = new DesktopShell({ runtime, templatePath, dataDir, appImage, fallbackRoot: app.isPackaged ? undefined : join(here, '..', '..', '..') });
 
   app.on('second-instance', () => shell.secondInstance());
   app.on('window-all-closed', () => { if (!shell.keepAlive) app.quit(); });

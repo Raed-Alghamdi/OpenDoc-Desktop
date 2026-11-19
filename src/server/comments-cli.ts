@@ -8,7 +8,7 @@ import { rm } from 'node:fs/promises';
 import { renderOnce, validId } from './render';
 import { captureExportInputs } from './export-inputs';
 import { getBlock, type Comment, type DocumentState, type RenderArtifact } from '../shared/types';
-import { anchorForSelection, phraseSelection, resolveCommentAnchor } from '../shared/anchors';
+import { anchorForSelection, phraseSelection, resolveCommentStatus, wholeBlockSelection } from '../shared/anchors';
 import { recordAgentChanges } from './history-capture';
 
 const usage = `Usage: npx opendoc comments list <doc> [--anchors | --deleted] [--json]
@@ -16,13 +16,18 @@ const usage = `Usage: npx opendoc comments list <doc> [--anchors | --deleted] [-
        npx opendoc comments reopen <doc> <comment-id> [--json]
        npx opendoc comments delete <doc> <comment-id> [--json]
        npx opendoc comments restore <doc> <comment-id> [--json]
-       npx opendoc comments add <doc> <block-id> "text" [--phrase "exact words" [--target <field-id>]] [--json]
+       npx opendoc comments add <doc> <block-id> "text" [--phrase "exact words" [--target <field-id>]]
+                                [--also <block-id> [--also-phrase "exact words" [--also-target <field-id>]]]... [--json]
        npx opendoc comments edit <doc> <comment-id> "text" [--expected-version N] [--json]
 list includes deleted comments with their status; --deleted lists only those deleted in the last
 90 days, newest first, as Recently deleted does in the app. --anchors checks each comment against
-the current render and adds anchorStatus (attached, changed, or missing) and targetAvailable.
+the current render and adds anchorStatus (attached, changed, or missing) and targetAvailable; for a
+comment on several places that is the worst of them, and targets lists each place with its own.
 add --phrase anchors the comment to one occurrence of those words in the block, such as one
 table cell; --target names the text field when the words appear in more than one.
+add --also puts the same comment on another component; repeat it for each, one block once. A
+--also-phrase or --also-target belongs to the --also just before it. --also-phrase needs the
+service stopped (opendoc stop); with it running, --also takes whole components only.
 edit replaces the text of an open or resolved comment and keeps the earlier text in its history;
 --expected-version N refuses the edit when the comment is no longer at that version.`;
 
@@ -69,18 +74,42 @@ async function withCurrentRender<T>(root: string, doc: string, mode: 'auto' | 'd
   finally { await rm(rendered.directory, { recursive: true, force: true }); }
 }
 
+/** The `--also` places in the order typed; `--also-phrase` and `--also-target` belong to the `--also` before them. */
+function alsoPlaces(tokens: ReturnType<typeof parseArgs>['tokens'], action: string | undefined) {
+  const places: { block: string; phrase?: string; field?: string }[] = [];
+  for (const token of tokens ?? []) {
+    if (token.kind !== 'option' || !['also', 'also-phrase', 'also-target'].includes(token.name)) continue;
+    if (action !== 'add') throw codedError(`--${token.name} belongs to comments add.\n${usage}`, 'usage');
+    if (typeof token.value !== 'string') throw codedError(`Give --${token.name} a value.`, 'usage');
+    if (token.name === 'also') { places.push({ block: token.value }); continue; }
+    const place = places.at(-1);
+    if (!place) throw codedError(`Put --${token.name} after the --also it belongs to.`, 'usage');
+    if (token.name === 'also-phrase') {
+      if (place.phrase !== undefined) throw codedError(`Each --also takes one --also-phrase; repeat --also ${place.block} for another place.`, 'usage');
+      place.phrase = token.value;
+    } else {
+      if (place.field !== undefined) throw codedError(`Each --also takes one --also-target.`, 'usage');
+      place.field = token.value;
+    }
+  }
+  if (places.some(place => place.field !== undefined && place.phrase === undefined)) throw codedError('Use --also-target with --also-phrase.', 'usage');
+  return places;
+}
+
 const shown = (comments: Comment[]) => comments.filter(comment => comment.status !== 'deleted');
 
 export async function runCommentsCli(args: string[], root = process.cwd(), options: { mode?: 'auto' | 'direct' } = {}): Promise<void> {
-  const { values, positionals } = parseArgs({ args: args[0] === '--' ? args.slice(1) : args, allowPositionals: true, options: {
+  const { values, positionals, tokens } = parseArgs({ args: args[0] === '--' ? args.slice(1) : args, allowPositionals: true, options: {
     json: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
     phrase: { type: 'string' }, target: { type: 'string' }, 'expected-version': { type: 'string' }, anchors: { type: 'boolean' }, deleted: { type: 'boolean' },
-  } });
+    also: { type: 'string', multiple: true }, 'also-phrase': { type: 'string', multiple: true }, 'also-target': { type: 'string', multiple: true },
+  }, tokens: true });
   if (values.help) { console.log(values.json ? JSON.stringify({ usage }, null, 2) : usage); return; }
   const [action, doc, target, ...words] = positionals;
   if (!doc || !validId(doc)) throw new Error(usage);
   if ((values.phrase !== undefined || values.target !== undefined) && action !== 'add') throw new Error(`--phrase and --target belong to comments add.\n${usage}`);
   if (values.target !== undefined && values.phrase === undefined) throw new Error('Use --target with --phrase.');
+  const also = alsoPlaces(tokens, action);
   if (values['expected-version'] !== undefined && action !== 'edit') throw codedError(`--expected-version belongs to comments edit.\n${usage}`, 'usage');
   if ((values.anchors || values.deleted) && action !== 'list') throw new Error(`--anchors and --deleted belong to comments list.\n${usage}`);
   if (values.anchors && values.deleted) throw new Error('Choose --anchors or --deleted, not both.');
@@ -93,8 +122,9 @@ export async function runCommentsCli(args: string[], root = process.cwd(), optio
       // The same anchor check the app applies to pending comments, against the current render.
       const checked = await withCurrentRender(root, doc, options.mode, async artifact => comments.map(comment => {
         if (comment.status === 'deleted') return comment;
-        const { status } = resolveCommentAnchor(artifact, comment);
-        return { ...comment, targetAvailable: status !== 'missing', anchorStatus: status };
+        const { status, targets } = resolveCommentStatus(artifact, comment);
+        // A comment on several places lists each with its own status; the top-level one is the worst.
+        return { ...comment, ...(comment.targets ? { targets: targets.map(({ selection: _selection, ...place }) => place) } : {}), targetAvailable: status !== 'missing', anchorStatus: status };
       }));
       console.log(JSON.stringify(checked, null, 2));
     } else console.log(JSON.stringify(comments, null, 2));
@@ -128,22 +158,30 @@ export async function runCommentsCli(args: string[], root = process.cwd(), optio
   } else if (action === 'add' && target && words.length) {
     // Headless, or normal OpenDoc while its service is stopped, verifies the target by rendering saved source.
     const text = words.join(' ');
+    const wanted = [{ block: target, phrase: values.phrase, field: values.target }, ...also];
     const comments = await withCurrentRender(root, doc, options.mode, async (artifact, live, unchanged) => {
-      const block = getBlock(artifact, target);
-      if (!block) throw new Error(live ? 'Target is unavailable or still rendering.' : 'The target block does not exist in the current document. Inspect its review output to find the block ID.');
-      const selection = values.phrase === undefined ? undefined : phraseSelection(artifact, target, values.phrase, values.target);
+      for (const place of wanted) if (!getBlock(artifact, place.block)) throw new Error(live ? 'Target is unavailable or still rendering.' : place === wanted[0] ? 'The target block does not exist in the current document. Inspect its review output to find the block ID.' : `The block ${place.block} does not exist in the current document. Inspect its review output to find the block ID.`);
+      // The service takes one phrase, on the first place; a later phrase needs the direct route.
+      if (live && also.some(place => place.phrase !== undefined)) throw codedError('--also-phrase needs OpenDoc stopped (opendoc stop). While it runs, --also takes whole components.', 'usage');
+      const selections = wanted.map(place => place.phrase === undefined ? undefined : phraseSelection(artifact, place.block, place.phrase, place.field));
       if (live) {
         const { server, state } = live;
+        const selection = selections[0];
         return request<Comment[]>(server.origin, `/api/documents/${doc}/comments`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', Origin: server.origin, 'X-OpenDoc-Token': server.token },
-          body: JSON.stringify({ blockId: target, text, hash: artifact.hash, ...(selection ? { selection: { ...selection, revision: state.revision } } : {}) }),
+          body: JSON.stringify(also.length
+            ? { blockId: target, text, hash: artifact.hash, selections: wanted.map((place, index) => ({ ...(selection && !index ? selection : wholeBlockSelection(artifact, place.block)), renderHash: artifact.hash, revision: state.revision })) }
+            : { blockId: target, text, hash: artifact.hash, ...(selection ? { selection: { ...selection, revision: state.revision } } : {}) }),
         });
       }
       // A phrase in a field without a durable identity stays block feedback that quotes it, as in the app.
-      const anchor = selection && anchorForSelection(artifact, selection);
-      return shown(await addComment(root, doc, { blockId: target, text, quote: selection?.quote ?? block.text, anchor, exactQuote: !!selection }, unchanged));
+      const places = wanted.map((place, index) => {
+        const selection = selections[index];
+        return { blockId: place.block, quote: selection?.quote ?? getBlock(artifact, place.block)!.text, anchor: selection && anchorForSelection(artifact, selection), exactQuote: !!selection };
+      });
+      return shown(await addComment(root, doc, also.length ? { text, targets: places } : { text, ...places[0] }, unchanged));
     });
-    console.log(values.json ? JSON.stringify(comments, null, 2) : `Added comment on ${target}${values.phrase === undefined ? '' : ` at “${values.phrase}”`}`);
+    console.log(values.json ? JSON.stringify(comments, null, 2) : `Added comment on ${wanted.map(place => `${place.block}${place.phrase === undefined ? '' : ` at “${place.phrase}”`}`).join(', ')}`);
   } else throw new Error(`Unknown comments command or missing arguments.\n${usage}`);
 }
 

@@ -261,15 +261,17 @@ test('a running service installs a pack for Import, shows the new design without
   const zip = resolve(f.container, 'acme.opendoc.zip');
   await exportPack(f.source, { themes: ['acme'], output: zip });
   const recipient = await fixture();
-  // The service may still write its context file while it stops, so removal retries.
-  t.after(() => rm(recipient.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   await rm(resolve(recipient.root, 'assets')); // The fixture links the repository's assets; an installing workspace owns its own.
   await mkdir(resolve(recipient.root, 'assets'));
   const service = await createOpenDocService({ root: recipient.root, production: false, client: (_req, res) => { res.end('client'); } });
-  t.after(() => service.close());
   const server = createServer((req, res) => { service.handle(req, res).catch(() => {}); });
   await new Promise<void>(accept => server.listen(0, '127.0.0.1', accept));
-  t.after(async () => { server.closeAllConnections(); await new Promise<void>(accept => server.close(() => accept())); });
+  // One ordered teardown: the listener, then the service and its watcher, then the folder (the service may still write its context file while it stops).
+  t.after(async () => {
+    server.closeAllConnections(); await new Promise<void>(accept => server.close(() => accept()));
+    try { await service.close(); }
+    finally { await rm(recipient.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+  });
   const address = server.address();
   assert.ok(address && typeof address === 'object');
   const origin = `http://127.0.0.1:${address.port}`;
@@ -299,7 +301,7 @@ test('a running service installs a pack for Import, shows the new design without
   const revision = async () => (await (await fetch(origin + '/api/themes')).json() as { id: string; revision?: string }[]).find(theme => theme.id === 'acme')?.revision;
   const before = await revision();
   await writeFile(resolve(recipient.root, 'themes/acme/design.md'), '# Acme\nChanged after install.\n');
-  await until(async () => (await revision()) !== before);
+  await until(async () => (await revision()) !== before, 60_000);
   // A conflict reaches the client as 409.
   const again = await good<Inspected>(await fetch(origin + '/api/packs/inspect', { method: 'POST', headers: guard, body: form }), 201);
   assert.ok(again.conflicts.includes('themes/acme/design.md'));

@@ -283,10 +283,14 @@ export async function prepareOpenDocService(options: { root: string; production:
         if (value.documentId !== null && !workspace.states.has(value.documentId)) throw new Error('Unknown document.');
         if (value.blockId !== null && typeof value.blockId !== 'string') throw new Error('Invalid block.');
         const state = workspace.states.get(value.documentId);
-        if (value.blockId && !getBlock(state?.artifact, value.blockId)) {
-          const comments = await readComments(root, value.documentId);
-          if (!comments.some(c => commentTargets(c).some(place => place.blockId === value.blockId))) throw new Error('Unknown block.');
-        }
+        // A block the render no longer has is still known while a comment names it as one of its places.
+        let commentPlaces: Set<string> | undefined;
+        const knownBlock = async (blockId: string) => {
+          if (getBlock(state?.artifact, blockId)) return true;
+          commentPlaces ??= new Set((await readComments(root, value.documentId)).flatMap(c => commentTargets(c).map(place => place.blockId)));
+          return commentPlaces.has(blockId);
+        };
+        if (value.blockId && !await knownBlock(value.blockId)) throw new Error('Unknown block.');
         const contextPages = Math.max(state?.artifact?.pages.length ?? 1, value.draftPreview === true && state ? edits.previewPageCount(state.id) : 1);
         if (!Number.isInteger(value.page) || value.page < 1 || value.page > contextPages) throw new Error('Invalid page.');
         if (value.mediaId != null) {
@@ -312,6 +316,11 @@ export async function prepareOpenDocService(options: { root: string; production:
         // One selection, or a list (C1): `selection` stays the first of `selections`.
         if (value.selection != null && value.selections != null) throw new Error('Send selection or selections, not both.');
         const selections = value.selections != null ? readSelections(value.selections, value.blockId) : [readSelection(value.selection, value.blockId)].filter(item => item !== null);
+        // Every selected place is observed context for agents, so each must be in the document, on a page it has.
+        for (const selection of selections) {
+          if (!await knownBlock(selection.blockId)) throw new Error('Unknown block.');
+          if (selection.page > contextPages) throw new Error('Invalid selection page.');
+        }
         if (value.editing !== undefined && typeof value.editing !== 'boolean') throw new Error('Invalid editor state.');
         if (value.pendingEdits !== undefined && (!Number.isInteger(value.pendingEdits) || value.pendingEdits < 0 || value.pendingEdits > 100)) throw new Error('Invalid pending edit count.');
         if (value.draftPreview !== undefined && typeof value.draftPreview !== 'boolean') throw new Error('Invalid draft preview state.');
@@ -415,7 +424,7 @@ export async function prepareOpenDocService(options: { root: string; production:
             // Several places: a list of selections, the first of which may be a phrase (C1). `blockId` is optional and, if sent, is the first place.
             if (value.selection != null) throw new Error('Send selection or selections, not both.');
             const selections = readSelections(value.selections, value.blockId ?? (Array.isArray(value.selections) ? value.selections[0]?.blockId : null) ?? null);
-            if (value.blockId !== undefined && value.blockId !== selections[0]?.blockId) throw new Error('The first selection must be the comment\'s block.');
+            if (value.blockId != null && value.blockId !== selections[0]?.blockId) throw new Error('The first selection must be the comment\'s block.');
             for (const selection of selections) if (selection.renderHash !== undefined && selection.renderHash !== value.hash
               || selection.revision !== undefined && selection.revision !== state.revision) throw new Conflict('This selection changed. Select the components again before commenting.');
             json(res, (await addComment(root, id, { text: value.text, targets: commentTargetsForSelections(state.artifact, selections) })).filter(comment => comment.status !== 'deleted')); workspace.changed(); return;

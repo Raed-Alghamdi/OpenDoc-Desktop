@@ -161,11 +161,11 @@ export async function runCommentsCli(args: string[], root = process.cwd(), optio
     const wanted = [{ block: target, phrase: values.phrase, field: values.target }, ...also];
     const comments = await withCurrentRender(root, doc, options.mode, async (artifact, live, unchanged) => {
       for (const place of wanted) if (!getBlock(artifact, place.block)) throw new Error(live ? 'Target is unavailable or still rendering.' : place === wanted[0] ? 'The target block does not exist in the current document. Inspect its review output to find the block ID.' : `The block ${place.block} does not exist in the current document. Inspect its review output to find the block ID.`);
+      // The service takes one phrase, on the first place; a later phrase needs the direct route.
+      if (live && also.some(place => place.phrase !== undefined)) throw codedError('--also-phrase needs OpenDoc stopped (opendoc stop). While it runs, --also takes whole components.', 'usage');
       const selections = wanted.map(place => place.phrase === undefined ? undefined : phraseSelection(artifact, place.block, place.phrase, place.field));
       if (live) {
         const { server, state } = live;
-        // The service takes one phrase, on the first place; a later phrase needs the direct route.
-        if (also.some(place => place.phrase !== undefined)) throw codedError('--also-phrase needs OpenDoc stopped (opendoc stop). While it runs, --also takes whole components.', 'usage');
         const selection = selections[0];
         return request<Comment[]>(server.origin, `/api/documents/${doc}/comments`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', Origin: server.origin, 'X-OpenDoc-Token': server.token },

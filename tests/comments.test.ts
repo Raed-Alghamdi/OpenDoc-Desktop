@@ -412,6 +412,7 @@ test('the service takes selections for a comment and for the context, and the CL
     await refused({ selections: [] }, 400, /at least one/);
     await refused({ selections: 'target' }, 400, /Invalid selections/);
     assert.equal((await readComments(f.root, 'proof')).length, total, 'A refused comment writes nothing.');
+    assert.equal((await comment({ text: 'Null block.', blockId: null, selections: [place('target'), place('second')] })).status, 200, 'A null blockId means none was sent.');
 
     // The context route: selection stays the first of selections.
     const list = [place('second'), place('third'), place('target')];
@@ -420,7 +421,15 @@ test('the service takes selections for a comment and for the context, and the CL
     let written = await current();
     assert.deepEqual(written.selections, list); assert.deepEqual(written.selection, list[0]);
     assert.equal((await post('/api/context', { documentId: 'proof', blockId: 'third', page: 1, selections: list, selection: list[0] })).status, 400);
-    assert.equal((await post('/api/context', { documentId: 'proof', blockId: 'gone', page: 1, selections: list })).status, 400, 'The active block must be in the list.');
+    const notListed = await post('/api/context', { documentId: 'proof', blockId: 'title', page: 1, selections: list });
+    assert.equal(notListed.status, 400, 'The active block must be in the list.');
+    assert.match((await notListed.json()).error, /active block/);
+    // Every selected place must be in the document, on a page it has; an agent reads current.json as the user's selection.
+    const unknown = await post('/api/context', { documentId: 'proof', blockId: 'third', page: 1, selections: [place('third'), place('nonexistent-block', { page: 99 })] });
+    assert.equal(unknown.status, 400); assert.match((await unknown.json()).error, /Unknown block/);
+    const offPage = await post('/api/context', { documentId: 'proof', blockId: 'third', page: 1, selections: [place('third'), place('second', { page: 99 })] });
+    assert.equal(offPage.status, 400); assert.match((await offPage.json()).error, /Invalid selection page/);
+    assert.deepEqual((await current()).selections, list, 'A refused context leaves current.json as it was.');
     assert.equal((await post('/api/context', { documentId: 'proof', blockId: 'second', page: 1, selections: [list[0], phrase] })).status, 400);
     assert.equal((await post('/api/context', { documentId: 'proof', blockId: 'target', page: 1, selection: place('target') })).status, 200);
     written = await current();
@@ -438,6 +447,7 @@ test('the service takes selections for a comment and for the context, and the CL
     assert.deepEqual(viaService.targets!.map(item => item.blockId), ['target', 'second', 'third']);
     assert.deepEqual((await savedComments(f.root)).at(-1)!.targets, viaService.targets);
     await assert.rejects(runCommentsCli(['add', 'proof', 'target', 'No.', '--also', 'second', '--also-phrase', 'second place'], f.root), /needs OpenDoc stopped/);
+    await assert.rejects(runCommentsCli(['add', 'proof', 'target', 'No.', '--also', 'second', '--also-phrase', 'a typo'], f.root), /needs OpenDoc stopped/, 'The refusal comes before any phrase is looked up.');
     await runCommentsCli(['add', 'proof', 'target', 'Phrase through the service.', '--phrase', 'stable paragraph', '--json'], f.root);
     assert.equal((JSON.parse(out().at(-1)!) as Comment[]).at(-1)!.anchor?.quote, 'stable paragraph', 'The single-place CLI request is unchanged.');
 

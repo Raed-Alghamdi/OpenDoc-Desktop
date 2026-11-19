@@ -15,10 +15,13 @@ import { strippedVariables, virtualDisplayMarker } from './support/environment.m
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const limitSeconds = process.env.OPENDOC_SHELL_TEST_LIMIT ?? '1500';
-const gentle = ['nice', '-n', '19', 'ionice', '-c', '3'];
+// Lowest CPU and disk priority. macOS has no ionice, so it is left out where it is missing.
+const hasIonice = spawnSync('sh', ['-c', 'command -v ionice'], { stdio: 'ignore' }).status === 0;
+const gentle = ['nice', '-n', '19', ...(hasIonice ? ['ionice', '-c', '3'] : [])];
 
 if (args[0] === '--unit') {
-  const result = spawnSync(gentle[0], [...gentle.slice(1), process.execPath, '--test', ...args.slice(1), join(here, 'unit')], { stdio: 'inherit' });
+  // A glob, not the folder: Node 24 (the version CI pins) reads a folder argument as a module path.
+  const result = spawnSync(gentle[0], [...gentle.slice(1), process.execPath, '--test', ...args.slice(1), join(here, 'unit', '*.test.mjs')], { stdio: 'inherit' });
   process.exit(result.status ?? 1);
 }
 

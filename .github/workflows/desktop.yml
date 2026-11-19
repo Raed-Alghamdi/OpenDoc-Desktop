@@ -140,9 +140,9 @@ jobs:
         run: |
           node --test "desktop/tests/packaging/*.test.mjs"
           node --test desktop/tests/smoke/runtime.test.mjs
-      # The shell's unit tests, run directly: tests/shell/run.mjs wraps them in ionice, which macOS does not have.
+      # The shell's unit tests (no display needed), with the same command as on Linux.
       - name: Test the shell
-        run: node --test "desktop/tests/shell/unit/*.test.mjs"
+        run: node desktop/tests/shell/run.mjs --unit
       # Ad-hoc signed (identity "-", no notarization), as the config says; the first open on a Mac needs "Open Anyway" (plan 3.5).
       - name: Build zip and dmg
         run: node desktop/runtime/dist.mjs ${{ steps.meta.outputs.stub }} --mac zip dmg --${{ matrix.arch }} --publish never

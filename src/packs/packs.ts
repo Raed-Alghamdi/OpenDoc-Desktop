@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { withWorkspaceLock } from '../cli/lock';
 import { checkWorkspace } from '../cli/check';
 import { applicationRoot } from '../runtime/paths';
-import { runningSession } from '../cli/start';
+import { desktopRecordAdvice, workspaceOwner } from '../cli/owner';
 import { isStableVersion, packageMetadata } from '../cli/workspace';
 import { readAssetHead, readAssetRevision, revisionFiles, assetFile } from '../assets/files';
 import { limits, readArchive, writeArchive } from './archive';
@@ -158,7 +158,11 @@ export async function installPack(root: string, file: string, options: { trust?:
   const control = await exists(resolve(root, '.opendoc'));
   if (control && (!control.isDirectory() || control.isSymbolicLink())) throw new Error('OpenDoc needs an ordinary .opendoc directory for installation.');
   return withWorkspaceLock(root, async () => {
-    if ((await packageMetadata()).opendoc?.edition !== 'headless' && await runningSession(root)) throw new Error('Stop OpenDoc with Ctrl+C before installing a pack, then restart with npx opendoc start. This keeps partially installed source out of the running catalog.');
+    if ((await packageMetadata()).opendoc?.edition !== 'headless') {
+      const owner = await workspaceOwner(root);
+      if (owner.mode === 'desktop') throw new Error(`This workspace is open in opendoc-desktop. Use Import in the app, or close it before installing a pack. ${desktopRecordAdvice}`);
+      if (owner.mode === 'service') throw new Error('Stop OpenDoc with Ctrl+C before installing a pack, then restart with npx opendoc start. This keeps partially installed source out of the running catalog.');
+    }
     let plan = await planInstall(root, pack);
     const assertReady = () => {
       if (!plan.compatible) throw new Error(`This pack requires OpenDoc ${plan.requiredVersion} or a newer patch in the same major.minor line; installed: ${plan.currentVersion}.`);

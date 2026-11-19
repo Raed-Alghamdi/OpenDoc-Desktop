@@ -1,0 +1,13 @@
+.read-only-banner {
+  padding: 10px 30px;
+  font-size: 13px;
+  background: var(--notice-surface);
+  color: var(--notice-ink);
+}
+/* A read-only workspace offers no way to start a change: no text edit, no comment, no save bar, no comment actions. */
+:root[data-read-only] :is(
+  button[aria-label="Edit selected text"],
+  button[aria-label^="Comment on "],
+  .save-bar,
+  .comment-row-actions
+) { display: none; }

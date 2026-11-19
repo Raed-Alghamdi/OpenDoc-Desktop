@@ -44,6 +44,10 @@ import { textLang } from "../shared/language";
 import { splitHash } from "./libraryFilters";
 import { DetailsDialog, StatusBadge, TagsProvider, type TagState, type TagTarget } from "./Tags";
 import { connectDesktop, desktopBridge, hostStateMessage } from "./desktopBridge";
+import { fetchReadOnly } from "./readOnly";
+import { ReadOnlyBanner } from "./ReadOnlyBanner";
+import type { ReadOnlyState } from "../shared/read-only";
+import "./read-only.css";
 import "./style.css";
 
 const AssetsBrowser = lazyView(() => import("./AssetsBrowser").then(module => module.AssetsBrowser));
@@ -82,6 +86,7 @@ function App() {
   const [error, setError] = useState("");
   const [connected, setConnected] = useState(true);
   const [hostNotice, setHostNotice] = useState("");
+  const [readOnly, setReadOnly] = useState<ReadOnlyState | null>(null);
   const [creating, setCreating] = useState(false);
   const [createPreset, setCreatePreset] = useState<CreatePreset>({});
   const [projectDialog, setProjectDialog] = useState<{ project: Project | null } | null>(null);
@@ -144,6 +149,13 @@ function App() {
     })().finally(() => { refreshing.current = null; });
     return refreshing.current;
   }, []);
+  // A read-only workspace says so in its session; ask again whenever the service is reachable again.
+  useEffect(() => {
+    if (!connected) return;
+    const controller = new AbortController();
+    void fetchReadOnly(controller.signal).then(setReadOnly, () => {});
+    return () => controller.abort();
+  }, [connected]);
   // Fetch the on-demand views while the server is reachable, so an outage later cannot strand them.
   useEffect(() => {
     if (!loaded || !connected) return;
@@ -309,6 +321,7 @@ function App() {
         <IconButton label={`Back to ${backLabel}`} render={<a href={`#${backHash}`} />} nativeButton={false}><Icon name="left" /></IconButton>
         <div className="breadcrumb"><a href={project ? `#project/${project.id}` : "#library"} title={project?.name ?? "Documents"} dir="auto" lang={project && textLang(project.name)}>{project?.name ?? "Documents"}</a><span>/</span><span>Document</span></div>
       </header>}
+      <ReadOnlyBanner state={readOnly} />
       {!connected && <div className="connection-banner" role="status">{hostNotice || "Connection lost. Reconnecting to OpenDoc. Editing and export will resume when the server returns."}</div>}
       {detailError && activeSummary && <div className="error-banner" role="alert"><span>{detailError}</span><Button onClick={() => setDetailAttempt(value => value + 1)}>Try again</Button></div>}
       {error && <div className="error-banner" role="alert"><span>{error}</span><Button className="text-button" onClick={() => void refresh()}>Try again</Button></div>}

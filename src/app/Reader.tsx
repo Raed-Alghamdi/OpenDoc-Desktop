@@ -12,19 +12,21 @@ import { closePanel, isShowing, loadPanelPreference, panelFromPreference, savePa
 import { saveBarStatus, saveBarVisible } from "./saveBar";
 import { unionBox, useAnchoredPanel } from "./anchoredPanel";
 import { applyCommentsPrompt } from "./agentPrompts";
-import { api, failureMessage } from "./api";
+import { api, ApiError, failureMessage } from "./api";
 import { ExportMenu } from "./ExportMenu";
-import { getBlock, documentFormat, documentName, type Comment, type DocumentState } from "../shared/types";
+import { getBlock, documentFormat, documentName, type Comment, type CommentTarget, type DocumentState } from "../shared/types";
 import { PageNumberInput } from "./PageNumberInput";
-import { commentDraftKey, componentCommentDraftKey, commentDrafts, type CommentDrafts } from "./commentDrafts";
+import { commentDraftKey, componentCommentDraftKey, multiCommentDraftKey, commentDrafts, type CommentDrafts } from "./commentDrafts";
+import { commentBlockIds, commentPlaces, selectionsByPlace } from "./commentPlaces";
 import type { DocumentSelection, TextAnchor } from "../shared/selection";
-import { anchorForSelection, getTextTarget, resolveCommentAnchor, selectionReason } from "../shared/anchors";
+import { anchorForSelection, commentTargets, getTextTarget, resolveCommentAnchor, selectionReason } from "../shared/anchors";
 import { textLang, type Language } from "../shared/language";
 import { canCorrectComponent, correctionUnavailableReason, selectedTextTarget } from "./componentCorrection";
 import { useNotificationClearance } from "./notificationClearance";
-import { carryRange, isPhrase, phraseFromText, savedPhrase, type TextRange } from './phraseSelection';
+import { addsToSelection, carryRange, isPhrase, phraseFromText, savedPhrase, type TextRange } from './phraseSelection';
 import { missingGlyphs, pageList } from "./missingGlyphs";
 import { pageSlices, type PageSlice } from "./pageSlices";
+import { useMarquee, type MarqueeHit } from "./useMarquee";
 import { sessionForDocument, sourceIdentity } from './editSession';
 import { readOpenEditor, recoverEditor, type EditorBaseline, type OpenEditorRecord } from './editorRecovery';
 import "./selection.css";
@@ -44,6 +46,8 @@ import {
 const HistoryPanel = lazyView(() => import("./HistoryPanel").then(module => module.HistoryPanel));
 const historyLoading = <section className="history-panel" aria-busy="true"><div className="history-content"><div className="history-skeleton" aria-hidden="true"><span /><span /><span /></div></div></section>;
 
+/** The most places one comment can cover (the service's limit). */
+const maxPlaces = 200;
 type CorrectionDraft = { selection: DocumentSelection; text: string; linked: number; baseline?: EditorBaseline };
 const openEditors = new Map<string, OpenEditorRecord>();
 /** Narrow screens show the side panel, editor, and comment composer as bottom sheets, one at a time. */
@@ -95,6 +99,9 @@ export function Reader({
   const { pdf, artifact, error: pdfError } = readerPreview;
   const [selection, setSelection] = useState<DocumentSelection | null>(null);
   const selected = selection?.blockId ?? null;
+  /** Components chosen after the first with Shift/Ctrl-click, the keyboard or a box; `selection` stays the first (contract C1). */
+  const [additional, setAdditional] = useState<DocumentSelection[]>([]);
+  const selectedCount = selection ? 1 + additional.length : 0;
   const selectionAnchor = useRef<TextAnchor | undefined>(undefined);
   /** Whether the selection is part of its text, judged against the text it was chosen from. */
   const selectionPhrase = useRef(false);
@@ -127,13 +134,14 @@ export function Reader({
   const [comments, setComments] = useState<Comment[]>([]);
   const [drafts, setDrafts] = useState<CommentDrafts>(() => commentDrafts.read(id));
   const selectedPhrase = isPhrase(selection, getTextTarget(artifact, selection?.targetId));
-  // Phrase drafts stay with their phrase; component drafts follow edited wording.
-  const draftKey = selectedPhrase ? commentDraftKey(selection) : componentCommentDraftKey(selection);
-  const legacyDraftKey = commentDraftKey(selection);
+  // Phrase drafts stay with their phrase; component drafts follow edited wording; several components share one draft.
+  const firstDraftKey = selectedPhrase ? commentDraftKey(selection) : componentCommentDraftKey(selection);
+  const draftKey = multiCommentDraftKey(firstDraftKey, additional) || firstDraftKey;
+  const legacyDraftKey = additional.length ? '' : commentDraftKey(selection);
   const draft = draftKey && Object.hasOwn(drafts, draftKey) ? drafts[draftKey] : drafts[legacyDraftKey] ?? "";
   function setDraft(value: string) {
     if (draftKey) {
-      commentDrafts.set(id, legacyDraftKey, '');
+      if (legacyDraftKey) commentDrafts.set(id, legacyDraftKey, '');
       setDrafts(commentDrafts.set(id, draftKey, value));
     }
   }
@@ -251,7 +259,13 @@ export function Reader({
         : target ? { ...selection, start: 0, end: target.text.length, quote: target.text,
         page: target.lines[0]?.page ?? selection.page, renderHash: artifact?.hash, revision: state.revision }
         : resolveCommentAnchor(artifact, { blockId: selection.blockId, quote: selection.quote ?? '', anchor: selectionAnchor.current }).selection;
-      if (resolved) holdSelection(resolved);
+      if (resolved) {
+        // The other chosen components follow the new render, and any that left the document drop out.
+        const kept = additional.flatMap(item => getBlock(artifact, item.blockId)
+          ? [{ ...item, page: Math.max(1, pages.findIndex(entry => entry.fragments.some(fragment => fragment.id === item.blockId)) + 1), renderHash: artifact?.hash, revision: state.revision }] : []);
+        holdSelection(resolved);
+        setAdditional(kept);
+      }
     }
     const anchor = readingPosition.current;
     if (anchor) {
@@ -316,7 +330,8 @@ export function Reader({
           documentId: id,
           blockId: selected,
           page: safePage,
-          selection,
+          // The list (C1); `selection` stays its first entry on the server, and the two are never sent together.
+          selections: selection ? [selection, ...additional] : [],
           editing: !!editor || editing.count > 0,
           pendingEdits: editing.count,
           draftPreview: !!editing.preview,
@@ -324,7 +339,7 @@ export function Reader({
       }).catch(() => {});
     }, 150);
     return () => clearTimeout(timer);
-  }, [id, selection, safePage, artifact?.hash, !!editor, editing.count, !!editing.preview]);
+  }, [id, selection, additional, safePage, artifact?.hash, !!editor, editing.count, !!editing.preview]);
   const goPage = useCallback(
     (number: number) => {
       const next = Math.max(1, Math.min(number, pages.length || 1));
@@ -391,7 +406,35 @@ export function Reader({
     holdSelection(null);
     window.getSelection()?.removeAllRanges();
   }
+  /** The whole selection as a list; the first entry is the main selection. */
+  function holdSelections(list: DocumentSelection[]) {
+    holdSelection(list[0] ?? null);
+    // The service takes at most this many places in one comment.
+    setAdditional(list.slice(1, maxPlaces));
+  }
+  function toggleBlock(block: string, pageNumber: number) {
+    if (editor || composing || mutationPending.current || editPending || editError) return;
+    const all = selection ? [selection, ...additional] : [];
+    const at = all.findIndex(item => item.blockId === block);
+    holdSelections(at >= 0 ? all.filter((_, index) => index !== at)
+      : [...all, { blockId: block, page: pageNumber, revision: state.revision, renderHash: artifact?.hash }]);
+  }
+  /** The selection a box drag started from; the box adds to it and Escape restores it. */
+  const marqueeBase = useRef<DocumentSelection[]>([]);
+  const sheetsElement = useRef<HTMLDivElement>(null);
+  const marqueeElement = useRef<HTMLDivElement>(null);
+  const marqueePointerDown = useMarquee({
+    sheets: sheetsElement, box: marqueeElement, artifact,
+    enabled: !editor && !composing && !editPending && !editError && !mutationPending.current,
+    onStart: () => { marqueeBase.current = selection ? [selection, ...additional] : []; },
+    onChange: (hits: MarqueeHit[] | null) => {
+      const base = marqueeBase.current;
+      holdSelections(hits ? [...base, ...hits.filter(hit => !base.some(item => item.blockId === hit.id))
+        .map(hit => ({ blockId: hit.id, page: hit.page, revision: state.revision, renderHash: artifact?.hash }))] : base);
+    },
+  });
   function holdSelection(next: DocumentSelection | null) {
+    setAdditional([]);
     setSelection(next);
     selectionAnchor.current = next ? anchorForSelection(artifact, next) : undefined;
     selectionPhrase.current = isPhrase(next, getTextTarget(artifact, next?.targetId));
@@ -449,8 +492,8 @@ export function Reader({
     setEditor(null); forgetOpenEditor();
     selectBlock(block, pageNumber);
     componentTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const comment = comments.find(item => item.blockId === block && item.status === 'open');
-    const anchor = comment && resolveCommentAnchor(artifact, comment);
+    const comment = comments.find(item => item.status === 'open' && commentBlockIds(item).includes(block));
+    const anchor = comment && resolveCommentAnchor(artifact, commentTargets(comment).find(target => target.blockId === block)!);
     if (anchor?.selection) holdSelection({ ...anchor.selection, revision: state.revision });
     changePanel(showPanel(panel, 'comments', { kind: 'block', blockId: block }));
   }
@@ -595,8 +638,9 @@ export function Reader({
     chooseSelection({ blockId: block, page: Math.max(1, pages.findIndex(item => item.fragments.some(fragment => fragment.id === block)) + 1) });
     scrollToBlock(block);
   }
-  function goToComment(comment: Comment) {
-    const { selection: next } = resolveCommentAnchor(artifact, comment);
+  /** Jump to one place of a comment, or to its first place in page order. */
+  function goToComment(comment: Comment, place?: CommentTarget) {
+    const next = place ? resolveCommentAnchor(artifact, place).selection : commentPlaces(artifact, comment).find(item => item.selection)?.selection;
     if (!next || editPending || editError) return;
     setEditor(null); forgetOpenEditor();
     const target = getTextTarget(artifact, next.targetId);
@@ -637,14 +681,16 @@ export function Reader({
     commentAbort.current?.abort();
     setSubmitting(true);
     try {
+      const places = canonicalCommentSelections();
       setComments(
         await api(`/api/documents/${id}/comments`, {
           method: "POST",
+          // One place sends `selection` as before; several send `selections` (contract C1), the first being the main one.
           body: JSON.stringify({
             blockId: selected,
             text: draft,
             hash: state.artifact?.hash,
-            selection: canonicalCommentSelection(),
+            ...(places.length > 1 ? { selections: places } : { selection: places[0] ?? null }),
           }),
         }),
       );
@@ -653,7 +699,8 @@ export function Reader({
       clearSelection();
       componentTrigger.current?.focus();
     } catch (e) {
-      notify.error(failureMessage(e, 'Your comment is kept here; add it again once it reconnects.'));
+      notify.error(e instanceof ApiError && e.status === 409 ? 'This selection changed while you were commenting. Select the components again; your comment is kept here.'
+        : failureMessage(e, 'Your comment is kept here; add it again once it reconnects.'));
     } finally {
       mutationPending.current = false;
       setSubmitting(false);
@@ -685,27 +732,36 @@ export function Reader({
     finally { mutationPending.current = false; setChanging(null); }
   }
   const unresolvedComments = useMemo(() => comments.filter((comment) => comment.status === "open"), [comments]);
-  const commented = useMemo(() => new Set(unresolvedComments.map((comment) => comment.blockId)), [unresolvedComments]);
+  // Every place of a comment on several components carries its marker.
+  const commented = useMemo(() => new Set(unresolvedComments.flatMap(commentBlockIds)), [unresolvedComments]);
   // Comments anchor to saved text, which a previewed draft may have reworded.
   const commentPhrase = savedPhrase(getTextTarget(artifact, selection?.targetId), getTextTarget(state.artifact, selection?.targetId), selection);
   function canonicalCommentSelection() {
     if (!selection) return null;
     const target = getTextTarget(state.artifact, selection.targetId);
-    const page = (state.artifact?.pages.findIndex(item => item.fragments.some(fragment => fragment.id === selection.blockId)) ?? 0) + 1;
-    return { blockId: selection.blockId, page: Math.max(1, page), revision: state.revision, renderHash: state.artifact?.hash,
-      ...(commentPhrase ?? (target ? { targetId: target.id, start: 0, end: target.text.length, quote: target.text } : {})) };
+    return { ...canonicalBlockSelection(selection.blockId), ...(commentPhrase ?? (target ? { targetId: target.id, start: 0, end: target.text.length, quote: target.text } : {})) };
+  }
+  function canonicalBlockSelection(blockId: string): DocumentSelection {
+    const page = (state.artifact?.pages.findIndex(item => item.fragments.some(fragment => fragment.id === blockId)) ?? 0) + 1;
+    return { blockId, page: Math.max(1, page), revision: state.revision, renderHash: state.artifact?.hash };
+  }
+  /** The main selection, which may be a phrase, then the other components whole, in page order. */
+  function canonicalCommentSelections() {
+    const first = canonicalCommentSelection();
+    return first ? [first, ...selectionsByPlace(state.artifact, additional.map(item => canonicalBlockSelection(item.blockId)))] : [];
   }
   // Highlight open phrase comments where their text currently appears.
-  const commentPhrases = useMemo(() => unresolvedComments.flatMap(comment => {
-    if (!comment.anchor) return [];
-    const resolved = resolveCommentAnchor(artifact, comment);
+  const commentPhrases = useMemo(() => unresolvedComments.flatMap(comment => commentTargets(comment).flatMap(target => {
+    if (!target.anchor) return [];
+    const resolved = resolveCommentAnchor(artifact, target);
     return resolved.status === 'attached' && resolved.selection?.targetId ? [resolved.selection] : [];
-  }), [unresolvedComments, artifact]);
+  })), [unresolvedComments, artifact]);
   // Each page receives only its own share of the selection and comments, and stable handlers.
   const previousSlices = useRef<PageSlice[]>([]);
-  const slices = useMemo(() => previousSlices.current = pageSlices(artifact, selection, commented, commentPhrases, previousSlices.current),
-    [artifact, selection, commented, commentPhrases]);
+  const slices = useMemo(() => previousSlices.current = pageSlices(artifact, selection, commented, commentPhrases, previousSlices.current, additional),
+    [artifact, selection, commented, commentPhrases, additional]);
   const selectFromPage = useLatest((block: string, number: number) => selectComponent({ blockId: block, page: number }));
+  const toggleFromPage = useLatest(toggleBlock);
   const commentsFromPage = useLatest(viewComments);
   const chooseFromPage = useLatest(selectComponent);
   const editTextFromPage = useLatest(editFromPage);
@@ -724,7 +780,10 @@ export function Reader({
   const showSaveBar = saveBarVisible(saveState);
   const showNotice = (selectionActive || showSaveBar) && (!!editing.error || editStale || !connected || editing.persistenceFailed);
   const savedNow = editing.saved && !editing.count && !editPending;
-  const selectedHistory: PanelTarget | undefined = selection ? { kind: 'block', blockId: selection.blockId } : undefined;
+  // History belongs to one component, so it waits while several are chosen.
+  const selectedHistory: PanelTarget | undefined = selection && selectedCount === 1 ? { kind: 'block', blockId: selection.blockId } : undefined;
+  const composerPlaces = useMemo(() => selectedCount > 1 ? selectionsByPlace(artifact, [selection!, ...additional]) : [], [artifact, selection, additional, selectedCount]);
+  const placeNames = composerPlaces.map(item => (getBlock(artifact, item.blockId)?.kind ?? 'component').replace(/^./, letter => letter.toUpperCase()));
   const commentTarget = panel.targets.comments;
   const commentFilter = commentTarget.kind === 'block' ? commentTarget.blockId : null;
   useNotificationClearance([showSelectionBar, showSaveBar, showNotice, panel.open, sheetLayout, !!editor || composing]);
@@ -760,7 +819,7 @@ export function Reader({
         <Button static className="skip-link" onClick={skipToComments}>Skip to comments</Button>
       </nav>
       <p id="reader-component-keys" className="sr-only">
-        Use the arrow keys to move between components in reading order, Home and End for the first and last, and Enter to select. {navigator.platform.includes('Mac') ? 'Option' : 'Alt'} with Up Arrow moves to the enclosing component, and with Down Arrow to its contents.
+        Use the arrow keys to move between components in reading order, Home and End for the first and last, and Enter to select. Shift with Enter or Space adds a component to the selection or removes it. {navigator.platform.includes('Mac') ? 'Option' : 'Alt'} with Up Arrow moves to the enclosing component, and with Down Arrow to its contents.
       </p>
       <header className="reader-toolbar" aria-label={`${formatLabel} toolbar`}>
         <div className="reader-identity">{identity}</div>
@@ -868,9 +927,11 @@ export function Reader({
           ref={scroll}
           className="reader-scroll"
           tabIndex={-1}
-          onPointerDownCapture={() => {
-            if (!editor && !mutationPending.current) clearSelection();
+          onPointerDownCapture={event => {
+            // Shift, Ctrl and Cmd add to the selection, so they must not clear it first.
+            if (!editor && !mutationPending.current && !addsToSelection(event)) clearSelection();
           }}
+          onPointerDown={marqueePointerDown}
           onScroll={onScroll}
         >
           {pdfError && !pdf ? (
@@ -880,9 +941,11 @@ export function Reader({
             </div>
           ) : pdf ? (
             <div
+              ref={sheetsElement}
               className="sheets"
               style={{ minWidth: widestPage + pageGutter * 2 }}
             >
+              <div ref={marqueeElement} className="marquee-box" hidden aria-hidden="true" />
               {pages.map((p, i) => (
                 <section data-sheet={i + 1} key={i} className="sheet">
                   <div className="sheet-label">
@@ -900,6 +963,10 @@ export function Reader({
                     selection={slices[i]?.selection ?? null}
                     commented={slices[i]?.commented}
                     commentPhrases={slices[i]?.commentPhrases}
+                    multi={slices[i]?.multi}
+                    multiActive={additional.length > 0}
+                    selecting={selectedCount > 0}
+                    onToggle={toggleFromPage}
                     onSelect={selectFromPage}
                     onComment={commentsFromPage}
                     onTextClick={chooseFromPage}
@@ -924,10 +991,12 @@ export function Reader({
           onTabChange={tab => changePanel(selectTab(panel, tab))} onClose={closeReaderPanel}
           comments={<CommentDock pageLabel={pageLabel} heading={commentFilter ? `${(getBlock(artifact, commentFilter)?.kind ?? 'component').replace(/^./, letter => letter.toUpperCase())} comments` : 'All comments'}
             filtered={!!commentFilter} openCount={unresolvedComments.length} agentPrompt={applyCommentsPrompt({ id, name: documentName(state), format: documentFormat(state) })}
-            items={comments.filter(comment => comment.status !== 'deleted' && (!commentFilter || comment.blockId === commentFilter)).map(comment => {
+            items={comments.filter(comment => comment.status !== 'deleted' && (!commentFilter || commentBlockIds(comment).includes(commentFilter))).map(comment => {
               const anchor = resolveCommentAnchor(artifact, comment);
-              return { comment, page: anchor.selection?.page, kind: getBlock(artifact, comment.blockId)?.kind ?? 'Component', canJump: !!pdf && !!anchor.selection,
-                quote: comment.anchor?.quote, textChanged: anchor.status === 'changed' };
+              const places = commentTargets(comment).length > 1 ? commentPlaces(artifact, comment).map(place => ({ target: place.target, page: place.selection?.page,
+                kind: place.kind, canJump: !!pdf && !!place.selection, textChanged: place.status === 'changed' })) : undefined;
+              return { comment, page: anchor.selection?.page, kind: getBlock(artifact, comment.blockId)?.kind ?? 'Component', canJump: places ? places.some(place => place.canJump) : !!pdf && !!anchor.selection,
+                places, quote: comment.anchor?.quote, textChanged: anchor.status === 'changed' };
             })}
             error={commentError} connected={connected} changing={changing} editing={commentEditor}
             onEdit={comment => setCommentEditor({ id: comment.id, text: comment.text, version: comment.version })}
@@ -947,10 +1016,11 @@ export function Reader({
           if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeComposer(); }
           if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); if (!submitting) event.currentTarget.requestSubmit(); }
         }}>
-          <div className="text-edit-heading"><div><Icon name="comment" size={15} /><h2 id="correction-title">Add comment</h2><span className="text-edit-kind">{selectedBlock?.kind ?? 'Component'}</span></div><IconButton label="Close comment composer" disabled={submitting} onClick={closeComposer}><Icon name="close" size={15} /></IconButton></div>
+          <div className="text-edit-heading"><div><Icon name="comment" size={15} /><h2 id="correction-title">{selectedCount > 1 ? `Comment on ${selectedCount} components` : 'Add comment'}</h2>{selectedCount < 2 && <span className="text-edit-kind">{selectedBlock?.kind ?? 'Component'}</span>}</div><IconButton label="Close comment composer" disabled={submitting} onClick={closeComposer}><Icon name="close" size={15} /></IconButton></div>
+          {selectedCount > 1 && <p className="comment-places-summary" id="comment-places">{placeNames.slice(0, 4).join(', ')}{placeNames.length > 4 && ` and ${placeNames.length - 4} more`}</p>}
           {commentPhrase ? <p className="comment-phrase" id="comment-phrase">on “<bdi dir="auto" lang={textLang(commentPhrase.quote)}>{commentPhrase.quote}</bdi>”</p>
             : selectedPhrase && <p className="correction-note comment-phrase-note" id="comment-phrase">This phrase includes unsaved wording, so the comment applies to the whole component.</p>}
-          <textarea ref={commentField} dir="auto" lang={textLang(draft)} aria-label="Comment" aria-describedby={selectedPhrase ? 'comment-phrase' : undefined} placeholder="Describe the change for your agent…" value={draft} maxLength={8000} readOnly={submitting} onChange={event => setDraft(event.target.value)} />
+          <textarea ref={commentField} dir="auto" lang={textLang(draft)} aria-label="Comment" aria-describedby={[selectedCount > 1 && 'comment-places', selectedPhrase && 'comment-phrase'].filter(Boolean).join(' ') || undefined} placeholder="Describe the change for your agent…" value={draft} maxLength={8000} readOnly={submitting} onChange={event => setDraft(event.target.value)} />
           <div className="text-edit-footer"><span>Your agent applies comments</span><Button disabled={submitting} onClick={closeComposer}>Close</Button><Button className="add-comment" type="submit" disabled={!draft.trim() || !ready || submitting || !selectedBlock}>{submitting ? 'Adding…' : 'Add comment'}</Button></div>
         </form> : editor && <form key="edit" onSubmit={event => { event.preventDefault(); closeEditor(); }} onKeyDown={event => {
           if (event.nativeEvent.isComposing || composingText.current) return;
@@ -967,6 +1037,7 @@ export function Reader({
         </form>}
       </section>}
       <p className="sr-only" role="status">{showSaveBar ? saveBarStatus(saveState) : ''}</p>
+      <p className="sr-only" role="status">{selectedCount > 1 ? `${selectedCount} components selected` : selectedCount === 1 ? (selectedPhrase ? 'Phrase selected' : '1 component selected') : ''}</p>
       {(showSelectionBar || showSaveBar || showNotice) && <div className="reader-bars" ref={bars}>
         {showNotice && <div className="edit-session-notice" role="status">
           <p>{editing.error || (editStale ? 'The document changed. Refresh your draft to keep edits that still match.' : !connected ? 'Offline. Your draft is kept here until you reconnect.' : 'Browser storage is full. Save your draft before reloading or closing this tab.')}</p>
@@ -975,9 +1046,10 @@ export function Reader({
         </div>}
         <div className="reader-bars-row">
           {showSelectionBar && <div className="selection-bar" role="group" aria-label="Selection actions">
-            <HintButton ref={editAction} aria-label="Edit selected text" hint={editUnavailable} focusableWhenDisabled disabled={!canEditText(editTargetId)} onClick={() => { if (selection) openTextComponent({ ...selection, targetId: editTargetId }); }}><Icon name="edit" size={16} />Edit</HintButton>
-            <HintButton ref={commentAction} focusableWhenDisabled aria-label={selectedPhrase ? 'Comment on selected phrase' : 'Comment on selection'} disabled={!selectedBlock || editPending || submitting || !!editError} onClick={openComments}><Icon name="comment" size={16} />Comment</HintButton>
-            <HintButton focusableWhenDisabled aria-label="History for selection" aria-pressed={!!selectedHistory && isShowing(panel, 'history', selectedHistory)} aria-controls="reader-panel" disabled={!selectedBlock || editPending || submitting} onClick={() => selectedHistory && changePanel(togglePanel(panel, 'history', selectedHistory))}><Icon name="history" size={16} />History</HintButton>
+            {selectedCount > 1 && <span className="selection-count">{selectedCount} selected</span>}
+            <HintButton ref={editAction} aria-label="Edit selected text" hint={selectedCount > 1 ? 'Select one component to edit its text.' : editUnavailable} focusableWhenDisabled disabled={selectedCount > 1 || !canEditText(editTargetId)} onClick={() => { if (selection) openTextComponent({ ...selection, targetId: editTargetId }); }}><Icon name="edit" size={16} />Edit</HintButton>
+            <HintButton ref={commentAction} focusableWhenDisabled aria-label={selectedCount > 1 ? `Comment on ${selectedCount} components` : selectedPhrase ? 'Comment on selected phrase' : 'Comment on selection'} disabled={!selectedBlock || editPending || submitting || !!editError} onClick={openComments}><Icon name="comment" size={16} />Comment</HintButton>
+            <HintButton focusableWhenDisabled aria-label="History for selection" hint={selectedCount > 1 ? 'Select one component to see its history.' : undefined} aria-pressed={!!selectedHistory && isShowing(panel, 'history', selectedHistory)} aria-controls="reader-panel" disabled={!selectedBlock || selectedCount > 1 || editPending || submitting} onClick={() => selectedHistory && changePanel(togglePanel(panel, 'history', selectedHistory))}><Icon name="history" size={16} />History</HintButton>
           </div>}
           {showSaveBar && <div className="save-bar" role="group" aria-label="Unsaved changes" onFocus={() => { saveBarFocus.current = true; }} onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) saveBarFocus.current = false; }}>
             <div className={savedNow ? 'edit-session-status saved' : 'edit-session-status'}><Icon name={savedNow ? 'check' : 'edit'} size={15} /><span>{saveBarStatus(saveState)}</span>{(editing.previewing || readerPreview.loading) && editing.count > 0 && !editPending && <span className="draft-preview-status">Updating preview…</span>}</div>

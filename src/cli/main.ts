@@ -114,8 +114,11 @@ export async function main(rawArgs = process.argv.slice(2)) {
       ? await explicitWorkspace(parsed.workspace ?? startFolder!)
       : await discoverWorkspace();
     if (root) {
-      const active = await installedApplication(root);
-      if (active !== await realpath(applicationRoot)) {
+      // A broken installation still answers --version; every other command needs it.
+      let active: string | undefined;
+      try { active = await installedApplication(root); }
+      catch (error) { if (command !== '--version' && command !== '-v') throw error; }
+      if (active && active !== await realpath(applicationRoot)) {
         const result = await runProcess(process.execPath, [resolve(active, 'bin/opendoc.mjs'), ...rawArgs], process.cwd());
         if (result.code) process.exitCode = result.code;
         return;
@@ -131,6 +134,10 @@ export async function main(rawArgs = process.argv.slice(2)) {
     }
     if (!root) throw failing(`No OpenDoc workspace found. Run npx --yes ${identity.name} init <folder>, or use --workspace <folder> for an existing workspace.`, 'no-workspace');
     const flags = [...(json ? ['--json'] : []), ...args];
+    // A workspace the app opened read-only refuses every command that writes (plan 3.4); reading, rendering and exporting go on.
+    // Only a workspace the app has open (desktop.json) or manages (marker) can be read-only; the others never load the check.
+    const [desktop, marker] = await Promise.all(['desktop.json', 'workspace.json'].map(file => readFile(resolve(root, '.opendoc', file), 'utf8').catch(() => '')));
+    if (desktop || marker.includes('"managed"')) await (await import('./read-only')).refuseReadOnlyWrite(root, command, args);
     const dispatch = async () => {
       switch (command) {
         case 'start': await (await import('./start')).runStart(flags, root); break;

@@ -45,7 +45,8 @@ jobs:
         env:
           INPUT_BUILD: ${{ inputs.build }}
         run: node desktop/runtime/ci-meta.mjs
-      - run: sudo apt-get update && sudo apt-get install -y rpm xvfb
+      # rpm for the rpm package, libarchive-tools for bsdtar (fpm builds the pacman package with it), xvfb for the smoke test.
+      - run: sudo apt-get update && sudo apt-get install -y rpm libarchive-tools xvfb
       - name: Build the runtime
         run: node desktop/runtime/build.mjs --build "${{ steps.meta.outputs.build }}"
       - name: Test the runtime and the metadata scripts

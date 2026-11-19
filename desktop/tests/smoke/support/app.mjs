@@ -65,8 +65,11 @@ export const appProcesses = (root) => processList().filter((item) => item.comman
 /** The service host of the app with this main pid: a child that carries the host flag. */
 export const serviceHostOf = (mainPid) => processList().find((item) => item.ppid === mainPid && item.command.includes('opendoc-service-host')) ?? null;
 
-/** The watcher shell the host leaves outside the app: `sh -c 'while kill -s 0 "$1" ...' sh <app pid> <host pid>`. */
-export const sentinelsOf = (mainPid) => processList().filter((item) => /kill -s 0 "\$1"/.test(item.command) && new RegExp(`\\s${mainPid}\\s`).test(item.command));
+/**
+ * The watcher shell the host leaves outside the app: `/bin/sh -c '<script>' opendoc-sentinel <app pid> <host pid>`.
+ * Found by its name and the app's pid, not by the script's text, which may change.
+ */
+export const sentinelsOf = (mainPid) => processList().filter((item) => new RegExp(`\\sopendoc-sentinel ${mainPid}\\s`).test(item.command));
 
 export async function waitUntil(check, { timeout = 30_000, interval = 100, what = 'the condition' } = {}) {
   const deadline = Date.now() + timeout;

@@ -1,7 +1,7 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, utimes, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
@@ -16,7 +16,8 @@ import { fixture, projectRoot, until } from './helpers';
 
 async function put(root: string, path: string, source: string | Buffer) { await mkdir(dirname(resolve(root, path)), { recursive: true }); await writeFile(resolve(root, path), source); }
 async function workspaces(t: TestContext) {
-  const container = await mkdtemp(resolve(tmpdir(), 'opendoc-packs-http-'));
+  // The real path: on macOS the temporary folder is under /var, a link to /private/var, and the service reports real paths.
+  const container = await realpath(await mkdtemp(resolve(tmpdir(), 'opendoc-packs-http-')));
   t.after(() => rm(container, { recursive: true, force: true }));
   const source = resolve(container, 'sender'), recipient = resolve(container, 'recipient');
   await mkdir(source); await mkdir(recipient);

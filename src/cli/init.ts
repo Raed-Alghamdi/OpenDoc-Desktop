@@ -1,9 +1,9 @@
-import { cp, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, cp, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
-import { applicationRoot } from '../runtime/paths';
+import { applicationRoot, managedRuntime } from '../runtime/paths';
 import { dependencyPin, installedApplication, packageIdentity, packageMetadata, packageNames, workspaceFormat, type Edition, type PackageIdentity } from './workspace';
 import { runProcess } from './process';
 import { historyDisabledVariable } from '../server/history-paths';
@@ -44,11 +44,26 @@ export type InitDependencies = {
   validate?: (stage: string) => Promise<void>;
 };
 
+/** Files copied out of a read-only runtime keep its modes; the workspace's copies must stay editable. */
+async function makeWritable(path: string) {
+  const info = await lstat(path);
+  if (info.isSymbolicLink()) return;
+  await chmod(path, info.mode | (info.isDirectory() ? 0o700 : 0o200));
+  if (info.isDirectory()) for (const entry of await readdir(path)) await makeWritable(resolve(path, entry));
+}
+
 async function copyContents(source: string, destination: string) {
   for (const entry of await readdir(source)) {
     await cp(resolve(source, entry), resolve(destination, entry), { recursive: true, force: false, errorOnExist: true, verbatimSymlinks: true });
+    await makeWritable(resolve(destination, entry));
   }
 }
+
+/** What the agent files say about updates and starting, where the desktop app provides the runtime. */
+const managedText = (text: string) => text
+  .replace(' Start the app with `npx opendoc start`; check authoring', ' Open this folder in opendoc-desktop; check authoring')
+  .replace('Runtime updates use `npx opendoc update` after stopping OpenDoc with Ctrl+C.', 'The OpenDoc desktop app provides the runtime: update the app, not this workspace.')
+  .replace('Runtime updates use `npx opendoc update` and preserve', 'The OpenDoc desktop app provides the runtime: update the app, not this workspace. Updates preserve');
 
 /** Prepare privately, then copy without ever overwriting a destination file. */
 export async function initializeWorkspace(destination: string, options: { sourceRoot?: string; tarball?: string } = {}, dependencies: InitDependencies = {}) {
@@ -67,8 +82,11 @@ export async function initializeWorkspace(destination: string, options: { source
     await writeFile(resolve(stage, 'package.json'), JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
     await writeFile(resolve(stage, 'tsconfig.json'), JSON.stringify({ extends: 'opendoc/tsconfig.workspace.json', include: ['documents', 'templates', 'themes'] }, null, 2) + '\n', { flag: 'wx' });
     await mkdir(resolve(stage, '.opendoc'), { recursive: true });
-    await writeFile(resolve(stage, '.opendoc/workspace.json'), JSON.stringify({ formatVersion: workspaceFormat, createdWith: version, edition }, null, 2) + '\n', { flag: 'wx' });
-    await writeFile(resolve(stage, 'AGENTS.md'), (edition === 'headless' ? headlessInstructions : instructions) + skillIndex, { flag: 'wx' });
+    // The desktop app's own runtime replaces npm: node_modules becomes a link to it, and the marker says so (per device).
+    const runtime = !dependencies.install && sourceRoot === applicationRoot ? managedRuntime() : null;
+    await writeFile(resolve(stage, '.opendoc/workspace.json'), JSON.stringify({ formatVersion: workspaceFormat, createdWith: version, edition, ...(runtime ? { managed: true } : {}) }, null, 2) + '\n', { flag: 'wx' });
+    const agentFile = (edition === 'headless' ? headlessInstructions : instructions) + skillIndex;
+    await writeFile(resolve(stage, 'AGENTS.md'), runtime ? managedText(agentFile) : agentFile, { flag: 'wx' });
     await writeFile(resolve(stage, 'CLAUDE.md'), '@AGENTS.md\n', { flag: 'wx' });
     await writeFile(resolve(stage, '.gitignore'), 'node_modules/\n.opendoc/*\n!.opendoc/workspace.json\noutput/\n.DS_Store\n', { flag: 'wx' });
     for (const skill of skills) {
@@ -83,6 +101,7 @@ export async function initializeWorkspace(destination: string, options: { source
     await symlink('../.agents/skills', resolve(stage, '.claude/skills'), 'dir');
     console.error(`Installing OpenDoc${edition === 'headless' ? ' Headless' : ''} ${version}…`);
     if (dependencies.install) await dependencies.install(stage, version, identity);
+    else if (runtime) await symlink(runtime.nodeModules, resolve(stage, 'node_modules'), 'dir');
     else {
       const tarball = options.tarball ?? process.env.OPENDOC_PACKAGE_TARBALL;
       const args = ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...(tarball ? ['--save-exact', `opendoc@file:${resolve(tarball)}`] : [])];
@@ -110,7 +129,7 @@ export async function initializeWorkspace(destination: string, options: { source
     await rm(stage, { recursive: true, force: true });
     return { workspace: root, version, edition };
   } catch (error) {
-    throw new Error(`${(error as Error).message}\nThe destination was not overwritten. Prepared files remain at ${stage}.\nTo recover, inspect that folder, run npm install there, then npx opendoc check${edition === 'normal' ? ' and npx opendoc start' : ''}. Or retry initialization in a new empty folder.`, { cause: error });
+    throw new Error(`${(error as Error).message}\nThe destination was not overwritten. Prepared files remain at ${stage}.\nTo recover, inspect that folder, run ${managedRuntime() ? 'opendoc' : 'npm install there, then npx opendoc'} check${edition === 'normal' && !managedRuntime() ? ' and npx opendoc start' : ''}. Or retry initialization in a new empty folder.`, { cause: error });
   }
 }
 

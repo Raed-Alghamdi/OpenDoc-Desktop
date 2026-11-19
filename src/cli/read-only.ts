@@ -1,5 +1,6 @@
 import { codedError } from './errors';
 import { workspaceOwner } from './owner';
+import { comparePin, isManagedHere, packageMetadata, readWorkspaceMarker, workspaceIdentity } from './workspace';
 import { readOnlyCode, type ReadOnlyState } from '../shared/read-only';
 
 /**
@@ -41,9 +42,26 @@ export function isWriteCommand(command: string, args: string[]): boolean {
   return kind !== 'read';
 }
 
-/** The read-only state the desktop app recorded for the workspace it has open, or null. */
+/**
+ * In a workspace the desktop app manages, a pin newer than this runtime is read-only (plan 3.4): the same minor with a newer
+ * patch, or a newer minor. The app's own opening says the same in its own words; this covers the CLI run on its own.
+ */
+async function pinReadOnly(root: string): Promise<ReadOnlyState | null> {
+  let pin: string, running: string, status: ReturnType<typeof comparePin>;
+  try {
+    if (!await isManagedHere(root)) return null;
+    pin = workspaceIdentity(await packageMetadata(root), await readWorkspaceMarker(root)).version;
+    running = (await packageMetadata()).version;
+    status = comparePin(pin, running);
+  } catch { return null; } // A workspace that cannot be read gets its real error from the command itself.
+  if (status === 'newer-patch') return { reason: 'newer-patch', message: `This workspace is on OpenDoc ${pin}, newer than the ${running} in this app. Update the app to edit it.` };
+  if (status === 'newer-minor') return { reason: 'newer-minor', message: `This workspace was upgraded by OpenDoc ${pin.split('.').slice(0, 2).join('.')}. Update the app to edit it.` };
+  return null;
+}
+
+/** The read-only state of a workspace: what the desktop app recorded for the workspace it has open, else the version table. */
 export async function workspaceReadOnly(root: string): Promise<ReadOnlyState | null> {
-  return (await workspaceOwner(root, { pidOnly: true })).readOnly ?? null;
+  return (await workspaceOwner(root, { pidOnly: true })).readOnly ?? await pinReadOnly(root);
 }
 
 /** Throws the refusal for a write command in a read-only workspace. */

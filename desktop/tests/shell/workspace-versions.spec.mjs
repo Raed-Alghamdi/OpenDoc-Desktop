@@ -404,7 +404,7 @@ test.describe.serial('the CLI next to the app: check works, a write is refused w
     expect(await waitForNoElectron(5000)).toEqual([]);
   });
 
-  test('a workspace the app holds read-only because the user declined the upgrade: a write is refused (today with the CLI\'s upgrade message, see the request to stream U); once the app is closed the CLI\'s own table answers', async () => {
+  test('a workspace the app holds read-only because the user declined the upgrade: check works and a write is refused with the app\'s message; once the app is closed the CLI\'s own table answers', async () => {
     const workspace = await newWorkspace('cli-declined');
     await setPin(workspace, '0.5.0');
     const lock = await withLock(workspace);
@@ -414,11 +414,15 @@ test.describe.serial('the CLI next to the app: check works, a write is refused w
       await chooseInPicker(app, picker, workspace);
       await opened(app, workspace);
       await expectReadOnly(app, workspace, 'declined-upgrade', declinedMessage);
-      // The CLI's managedApplication refuses an older minor before the read-only gate is reached, so `check` fails and a write
-      // gets the upgrade message instead of the app's. U must let the desktop.json readOnly state through (reports/e3-part2.md).
+      // The CLI lets an older minor through while the app holds the workspace read-only (desktop.json carries readOnly),
+      // so the read-only gate answers with the app's message rather than the upgrade one.
+      const check = await cli(workspace, ['check'], home);
+      expect(check.code, check.text).toBe(0);
       const write = await writeAttempt(workspace, home);
       expect(write.code).not.toBe(0);
-      expect(write.text).toContain('Open this workspace in opendoc-desktop to upgrade it.');
+      expect(write.text).toContain('workspace-read-only');
+      expect(write.text).toContain(declinedMessage);
+      expect(write.text).not.toContain('Open this workspace in opendoc-desktop to upgrade it.');
     } finally { await app.close(); }
     expect(await exists(join(workspace, '.opendoc', 'desktop.json'))).toBe(false);
     const after = await writeAttempt(workspace, home);

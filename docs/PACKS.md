@@ -42,6 +42,8 @@ Inspection verifies the archive and all file hashes without loading authored cod
 
 **Themes and templates contain executable TypeScript.** Installing with `--trust` permits OpenDoc to load and render that code during verification. Only install code from a source you trust; hashes detect changes but do not authenticate the author. The render worker is not a hostile-code sandbox.
 
+Installing runs the pack's theme code inside the process that does the install, not in a separate sandbox: loading a theme imports its module there, as every theme in a workspace already is. For the CLI that is the `opendoc` command itself; when a running service or the desktop app installs a pack (Import), it is the service's own process, which in the desktop app is the service host process started from the app's executable, with the workspace's files and the user's permissions. Inspection and a dry run never load a pack's code, but Import does as soon as the trust box is ticked, so tick it only for a source you trust.
+
 Stop normal OpenDoc with Ctrl-C before installation. This prevents the running catalog from discovering partially installed source. Headless has no service to stop.
 
 ```sh

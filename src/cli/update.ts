@@ -3,7 +3,7 @@ import { copyFile, link, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile 
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { withWorkspaceLock } from './lock.js';
 import { desktopRecordAdvice, InvalidOwnerRecord, OwnerShuttingDown, workspaceOwner } from './owner.js';
-import { dependencyPin, isStableVersion, packageIdentity, packageMetadata, readWorkspaceMarker, workspaceIdentity, type PackageIdentity } from './workspace.js';
+import { dependencyPin, isManagedHere, isStableVersion, packageIdentity, packageMetadata, readWorkspaceMarker, workspaceIdentity, type PackageIdentity } from './workspace.js';
 
 interface Version { major: number; minor: number; patch: number }
 interface UpdateOptions { check?: boolean; version?: string }
@@ -227,6 +227,8 @@ async function activate(root: string, stage: string, dependencies: UpdateDepende
 export async function updateWorkspace(root: string, options: UpdateOptions = {}, dependencies: UpdateDependencies = {}): Promise<UpdateResult> {
   root = resolve(root);
   const marker = await readWorkspaceMarker(root);
+  // The app's runtime is the app's to update. A `managed` flag that came with git to a device without the app does not count.
+  if (await isManagedHere(root)) throw new Error('This workspace is managed by the OpenDoc desktop app. Update the app instead.');
   if (options.version !== undefined && !versionParts(options.version)) throw new Error('--version requires an exact stable version such as 0.3.1; ranges, tags, and prereleases are not supported.');
   const manifestPath = join(root, 'package.json'), lockPath = join(root, 'package-lock.json');
   await assertRegularFile(manifestPath);

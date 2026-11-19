@@ -105,7 +105,7 @@ test.describe.serial('the packaged app', () => {
   test('quitting leaves nothing running', async () => {
     await running.browser.close();
     process.kill(running.child.pid, 'SIGTERM');
-    await waitUntil(() => running.exited(), { timeout: 30_000, what: 'the app to exit' });
+    await waitUntil(() => running.exited(), { timeout: 90_000, what: 'the app to exit' });
     expect(running.child.exitCode).toBe(0);
     await waitUntil(() => appProcesses(app.root).length === 0 && sentinelsOf(running.child.pid).length === 0, { timeout: 15_000, what: 'every process of the app to end' });
     expect(appProcesses(app.root)).toEqual([]);

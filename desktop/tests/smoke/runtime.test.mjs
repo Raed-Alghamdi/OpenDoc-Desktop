@@ -9,12 +9,13 @@
 // that build starts as an app instead.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, cpSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { makeWorkspace } from './support/workspace.mjs';
 
 const desktop = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const runtime = path.resolve(process.env.OPENDOC_RUNTIME ?? path.join(desktop, 'build', 'runtime', `${process.platform}-${process.arch}`));
@@ -42,38 +43,12 @@ function listing(directory, base = directory, found = []) {
   return found;
 }
 
-function makeWorkspace(root) {
-  // What `opendoc init` makes, with the runtime's node_modules linked in instead of an npm install.
-  mkdirSync(path.join(root, '.opendoc'), { recursive: true });
-  cpSync(path.join(runtime, 'node_modules', 'opendoc', 'starter'), root, { recursive: true });
-  for (const entry of ['assets', 'documents', 'templates', 'themes']) {
-    chmodSync(path.join(root, entry), 0o755);
-  }
-  chmodRecursive(root);
-  writeFileSync(path.join(root, 'package.json'), `${JSON.stringify({
-    name: 'opendoc-workspace', private: true, type: 'module', dependencies: { opendoc: `npm:@ryanyahya/opendoc@${version}` },
-  }, null, 2)}\n`);
-  writeFileSync(path.join(root, 'tsconfig.json'), `${JSON.stringify({ extends: 'opendoc/tsconfig.workspace.json', include: ['documents', 'templates', 'themes'] }, null, 2)}\n`);
-  writeFileSync(path.join(root, '.opendoc', 'workspace.json'), `${JSON.stringify({ formatVersion: 1, createdWith: version, edition: 'normal', managed: true }, null, 2)}\n`);
-  symlinkSync(path.join(runtime, 'node_modules'), path.join(root, 'node_modules'), 'dir');
-}
-
-function chmodRecursive(directory) {
-  for (const name of readdirSync(directory)) {
-    const file = path.join(directory, name);
-    const stat = lstatSync(file);
-    if (stat.isSymbolicLink()) continue;
-    chmodSync(file, stat.mode | (stat.isDirectory() ? 0o300 : 0o200));
-    if (stat.isDirectory()) chmodRecursive(file);
-  }
-}
-
 describe(`runtime ${path.relative(desktop, runtime)} under ${path.basename(String(electron))} as Node`, () => {
   let before_;
   before(() => {
     scratch = mkdtempSync(path.join(os.tmpdir(), 'opendoc-runtime-smoke-'));
     workspace = path.join(scratch, 'workspace');
-    makeWorkspace(workspace);
+    makeWorkspace(runtime, workspace, version);
     before_ = listing(runtime);
   });
   after(() => rmSync(scratch, { recursive: true, force: true }));

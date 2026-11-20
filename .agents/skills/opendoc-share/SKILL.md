@@ -5,6 +5,8 @@ description: Share OpenDoc themes or templates as portable ZIP packs, or inspect
 
 Work in the user's OpenDoc workspace. Use `npx opendoc packs` in either edition; read [Design packs](../../../docs/PACKS.md) for format limits, supported dependencies, and conflicts. Do not edit the installed package or zip the whole workspace.
 
+Normal OpenDoc, in the browser or the desktop app, also has **Export pack** and **Import pack** buttons in the Themes and Templates galleries (see “In the app” in the same document). They make and read the same file. You can't press them, so tell the user about them when they would rather work on screen, and when the app has the workspace open (below). Headless has only the commands.
+
 ## Share a design
 
 Resolve the requested themes and templates from the user's request, `themes list`, and `templates list`. For “this theme” in normal OpenDoc, use [opendoc-current-document](../opendoc-current-document/SKILL.md). Headless has no active browser selection. One pack can contain several designs; include a matching theme with a template only when that is the intended collection.
@@ -31,6 +33,8 @@ npx opendoc packs install /path/to/acme-design.opendoc.zip --dry-run --json
 ```
 
 Read the file list, compatibility result, conflicts, and previews. A hash proves integrity, not authorship or safety. Themes and templates execute TypeScript when loaded; `--trust` authorizes rendering the pack during installation. Use it when the user has authorized installing executable designs from this source. If that trust is unclear, explain the concrete code-execution boundary and ask before proceeding. Do not ask again when it is already established.
+
+If normal OpenDoc or the desktop app has the workspace open, `packs install` refuses and tells you so. Don't stop the app or work around it: inspect and dry-run as above, then ask the user to choose **Import pack** in the Themes or Templates gallery and pick the file. That dialog runs the same checks, asks for the same trust, refuses conflicts the same way, and shows the new designs at once.
 
 Install into an existing initialized workspace. If the recipient has none, initialize the requested edition in a new or empty folder following the [installation guide](../../../README.md#installation). Check OpenDoc compatibility; install an application update only when the user asks. Stop a running normal OpenDoc service with Ctrl-C before installation, then restart it when appropriate. Headless needs no service.
 

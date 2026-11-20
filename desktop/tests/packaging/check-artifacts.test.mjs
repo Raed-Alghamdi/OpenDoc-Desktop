@@ -103,7 +103,9 @@ function withDist(options, body) {
   }
 }
 
-const skip = !ar || !bsdtar ? 'ar and bsdtar are needed' : false;
+// Linux packages are built and checked on Linux only (desktop.yml's linux job). macOS's own ar and bsdtar write these archives
+// differently, so the hand-made deb would not read back there; the test would be checking the Mac's tools, not the script.
+const skip = process.platform !== 'linux' ? 'Linux packages are checked on Linux' : !ar || !bsdtar ? 'ar and bsdtar are needed' : false;
 
 test('a dist with no .rpm passes without --require-rpm and every installer that is there is checked', { skip }, () => {
   withDist({}, (scratch) => {

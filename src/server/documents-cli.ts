@@ -7,14 +7,20 @@ import { readProjects } from './projects';
 import { withCommentLock } from './comments';
 import { recordAgentChanges } from './history-capture';
 import { renderOnce, validId } from './render';
+import { listDocuments, showDocument, type DocumentDetails, type DocumentListing } from './document-listing';
 
-const usage = `Usage: npx opendoc documents rename <id> "New title"
+const usage = `Usage: npx opendoc documents list
+       npx opendoc documents show <id>
+       npx opendoc documents rename <id> "New title"
        npx opendoc documents duplicate <id> [--id <new-id>] [--title "Title"] [--project <project-id>]
        npx opendoc documents delete <id>
        npx opendoc documents trash [list]
        npx opendoc documents restore <restore-id|id>
        Add --json for structured results.
 
+list and show read the saved files and never render: the title is the name given in OpenDoc, else the title the source
+states (null when it is computed), plus project, type, tags, status, language, and when the source last changed.
+show adds the source files the document is built from and its media. With --json, list prints an array and show an object.
 rename changes the name shown in OpenDoc; the ID, source, and PDF title stay the same.
 duplicate copies the saved source, data, media, comments, and tags into a new document with its own
 history and no status, in the original's project unless --project chooses another.
@@ -22,6 +28,23 @@ delete moves the document, with its history, comments, tags, and status, to Tras
 restore accepts the restore ID from delete or trash, or the document ID when one copy is in Trash.`;
 
 const time = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+const day = (iso?: string) => iso ? iso.slice(0, 16).replace('T', ' ') : '-';
+const listed = (entry: DocumentListing) => [entry.id, entry.title, entry.project ?? '-', entry.format, [entry.type, ...entry.tags].filter(Boolean).join(', ') || '-', entry.documentStatus ?? '-', day(entry.updatedAt)].join('  ');
+/** One line per document, with the columns named once above them. */
+const listedText = (entries: DocumentListing[]) => entries.length ? ['id  title  project  format  type and tags  status  updated', ...entries.map(listed)].join('\n') : 'No documents.';
+const shownText = (entry: DocumentDetails) => [
+  `${entry.id}: ${entry.title}`,
+  `Entry: ${entry.path}`,
+  `Format: ${entry.format}${entry.language ? `, ${entry.language}` : ''}`,
+  `Project: ${entry.project ? `${entry.project} (${entry.projectId})` : 'none'}`,
+  `Type: ${entry.type ?? 'none'}`,
+  `Tags: ${entry.tags.join(', ') || 'none'}`,
+  `Status: ${entry.documentStatus ?? 'none'}`,
+  `Updated: ${day(entry.updatedAt)}`,
+  ...(entry.meta.description ? [`Description: ${entry.meta.description}`] : []),
+  'Files:', ...entry.files.map(file => `  ${file.path}  ${file.size} bytes`),
+  ...(entry.media.length ? ['Media:', ...entry.media.map(item => `  ${item.id}  ${item.title ?? item.error ?? ''}`.trimEnd())] : []),
+].join('\n');
 const describe = (entry: TrashEntry) => `${entry.restoreId}  ${entry.id.padEnd(24)}  ${time.format(new Date(entry.deletedAt)).padEnd(22)}  ${entry.name ?? ''}`.trimEnd();
 
 /** The name a copy is based on when the original has no saved name: its authored title. */
@@ -53,6 +76,17 @@ export async function runDocumentsCli(args: string[], root = process.cwd()): Pro
   const [action, id, ...words] = positionals;
   const options = values.id !== undefined || values.title !== undefined || values.project !== undefined;
   if (options && action !== 'duplicate') throw new Error(`--id, --title, and --project apply to duplicate only.\n${usage}`);
+  if (action === 'list') {
+    if (id) throw new Error(`Unknown documents command or missing arguments.\n${usage}`);
+    const documents = await listDocuments(root);
+    print(documents, listedText(documents));
+    return;
+  }
+  if (action === 'show' && id && !words.length) {
+    const details = await showDocument(root, id);
+    print(details, shownText(details));
+    return;
+  }
   if (action === 'trash' && (!id || id === 'list') && !words.length) {
     const trash = await listTrash(root);
     print({ trash }, trash.length ? ['Deleted documents, most recent first. Restore with npx opendoc documents restore <restore-id>:', ...trash.map(describe)].join('\n') : 'Trash is empty.');

@@ -10,6 +10,7 @@ import { catalogPreview } from './catalogPreview';
 import { PdfPage, usePdf } from './Pdf';
 import { GuideDialog } from './GuideDialog';
 import { PreviewPlaceholder } from './PreviewPlaceholder';
+import { PackCardCheck, PackHeadingButtons, PackImportHost, PackSelectionBar } from './PackDialogs';
 import { AssetThemeDefaults } from './AssetThemeDefaults';
 import type { CreatePreset } from './CreateDocumentDialog';
 import { Button, Dialog, Input } from './ui';
@@ -145,6 +146,7 @@ function ThemePalette({ theme, compact = false }: { theme: ThemeSummary; compact
 type GalleryOrganization = { manifest: ThemeFoldersManifest; tags: Record<string, string[]>; folders: boolean; tagging: boolean; showFolder: boolean; tag: string; disabled: boolean; onAction: (action: ThemeFolderAction) => void };
 function ThemeGallery({ themes, generation, onRefresh, organize }: { themes: ThemeSummary[]; generation: number; onRefresh: () => void; organize?: GalleryOrganization }) {
   return <div className="theme-gallery">{themes.map(theme => <article className="theme-gallery-card" key={theme.id} onDragStart={organize?.folders && !organize.disabled ? event => startThemeDrag(event, theme.id) : undefined}>
+    <PackCardCheck kind="theme" id={theme.id} name={theme.name} />
     <div className="theme-gallery-preview"><ThemeSpecimen theme={theme} generation={generation} onRefresh={onRefresh} /><ThemePalette theme={theme} compact /><a className="theme-preview-link" href={`#themes/${theme.id}`} aria-label={`Explore ${theme.name}`} />{organize && <ThemeMenu theme={theme} disabled={organize.disabled} folders={organize.folders} tags={organize.tagging} onAction={organize.onAction} />}</div>
     <h2><a href={`#themes/${theme.id}`}><bdi lang={textLang(theme.name, theme.language)}>{theme.name}</bdi><Icon name="arrow" size={17} /></a></h2>
     {theme.description && <p className="theme-gallery-description" dir="auto" lang={textLang(theme.description, theme.language)}>{theme.description}</p>}
@@ -252,7 +254,11 @@ export function ThemesBrowser({ themes, selection, generation, loaded, documents
     </> : <>
       {organization?.error && <p className="field-error" role="alert">{organization.error}</p>}
       <div className="library-heading"><h1 id={themesHeadingId} tabIndex={-1}>Themes</h1>
-        <div className="theme-heading-actions"><Button onClick={() => setPromptOpen(true)}><Icon name="plus" size={17} />Create theme</Button></div></div>
+        <div className="theme-heading-actions">
+          <PackHeadingButtons kind="theme" count={themes.length} connected={connected} />
+          <Button onClick={() => setPromptOpen(true)}><Icon name="plus" size={17} />Create theme</Button>
+        </div></div>
+      <PackSelectionBar kind="theme" available={themes.map(item => item.id)} loaded={loaded} connected={connected} />
       <FilterBar search={{ label: 'Search themes', value: query, onChange: value => update({ q: value }, { replace: true }) }}
         primary={organizing && <FolderFilter manifest={manifest} themes={themes} value={folderFilter} disabled={!loaded || !connected} onChange={value => update({ folder: value })} onAction={onFolderAction} onDropTheme={dropTheme} />}
         facets={facets} onFacetChange={(key, value) => update({ [key]: value })} onClearFacets={() => update({ tag: null, language: null })}
@@ -264,6 +270,7 @@ export function ThemesBrowser({ themes, selection, generation, loaded, documents
       {loaded && folderEmpty && <div className="empty-state theme-folder-empty"><h2><bdi lang={textLang(currentFolder!.name)}>{currentFolder!.name}</bdi> is empty</h2><p>Drag a theme card onto the <bdi lang={textLang(currentFolder!.name)}>{currentFolder!.name}</bdi> button, or choose Move to folder… from a theme’s options menu.</p><a href={showAllHash()} className="project-templates-link">Show all themes<Icon name="arrow" size={16} /></a></div>}
       {loaded && themes.length > 0 && !missingFolder && !folderEmpty && narrowed && !visible.length && <div className="empty-state"><h2>No matching themes{currentFolder && <> in <bdi lang={textLang(currentFolder.name)}>{currentFolder.name}</bdi></>}</h2><p>{currentFolder ? 'Try another search or filter, or choose another folder.' : 'Try another search or filter.'}</p><Button onClick={clearFilters}>Clear filters</Button></div>}
     </>}
+    <PackImportHost connected={connected} />
     <ThemePromptDialog open={promptOpen} onOpenChange={setPromptOpen} theme={selection ? theme : undefined} />
     {organizing && <ThemeFolderDialog action={folderAction?.kind === 'tags' ? null : folderAction} manifest={manifest} themes={themes} connected={connected} onClose={() => setFolderAction(null)} onChange={next => onOrganizationChange?.(next)} />}
   </section>;

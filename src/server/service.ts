@@ -39,7 +39,7 @@ import { coverImage } from './covers';
 import { readAssetHead as selectedAssetHead, readAssetRevision as selectedAssetRevision } from '../assets/files';
 import type { SelectedAsset } from '../shared/assets';
 import { applicationRoot } from '../runtime/paths';
-import { ignoredByWatcher } from './watch';
+import { ignoredByWatcher, readyWatcher } from './watch';
 import { HistoryError, HistoryRecorder, HistoryStore } from './history';
 import { blockHistory, compareVersion, restoreVersion, RestoreRefusal } from './history-restore';
 import type { RestoreScope } from '../shared/history';
@@ -136,6 +136,8 @@ export async function prepareOpenDocService(options: { root: string; production:
       packsPaused = false;
       // The catalogs first: every entry that could depend on these folders is invalidated.
       await Promise.all(['themes', 'templates', 'assets'].flatMap(folder => [templates.noteChange(resolve(root, folder)), themes.noteChange(resolve(root, folder))]));
+      // A new watcher on the finished folders, so edits to the installed files are seen on every platform.
+      await refreshWatcher();
       // Then each dropped event goes through the watcher's own callback, so documents that failed for a missing theme
       // re-render and history sees edits made during the install, exactly as if nothing had been paused.
       const missed = [...pausedPaths]; pausedPaths.clear();
@@ -513,6 +515,44 @@ export async function prepareOpenDocService(options: { root: string; production:
   workspace.on('change', () => { materialsVersion++; });
   let watcher: FSWatcher | undefined;
   let started: Promise<void> | undefined;
+  /** Every source change: the catalogs, history, and the workspace's documents. */
+  function onSource(_event: string, path: string) {
+    if (packsPaused && /^(themes|templates|assets)(\/|$)/.test(relative(root, path))) { pausedPaths.add(path); return; } // A pack install is publishing files; resumeWatching replays this.
+    if (relative(root, path) === 'projects.json') {
+      void workspace.refreshProjects().catch(error => workspace.emit('workspace-error', error)); return;
+    }
+    // Folders and tags only regroup and filter; they never change a document, theme, or specimen.
+    if ([themeFoldersFile, tagsFile].includes(relative(root, path))) { workspace.changed(); return; }
+    // Catalogs follow their own imports and asset bindings, including local data files.
+    void Promise.all([templates.noteChange(path), themes.noteChange(path)])
+      .then(() => workspace.changed()).catch(error => workspace.emit('workspace-error', error));
+    if (/^themes\/.*\.md$/.test(relative(root, path))) return;
+    if (path.endsWith('comments.json')) { workspace.changed(); return; }
+    // Debounced, so one save or one burst of agent writes becomes one version.
+    if (!readOnly) history.noteChange(path);
+    // Documents may import modules or read local assets in any format (CSV, text,
+    // diagrams, and fonts included). Dependency handling decides what is affected.
+    workspace.noteChange(path);
+  }
+  /** Watches the workspace and the app's own source. Each call is a separate watcher; the caller closes the one it replaces. */
+  function openWatcher() {
+    const next = watch([...new Set([root, resolve(applicationRoot, 'src'), resolve(applicationRoot, 'package.json'), resolve(applicationRoot, 'pnpm-lock.yaml'), resolve(applicationRoot, 'tsconfig.workspace.json')])], { ignoreInitial: true, ignored: path => ignoredByWatcher(applicationRoot, root, path) });
+    next.on('all', onSource);
+    return next;
+  }
+  /**
+   * Starts a fresh watcher over the same folders, waits until it has attached to what is there now, then closes the old one.
+   * Import calls this after it has published files: watchers that attached to a folder while files were still being linked
+   * into it do not reliably see later edits to them on every platform (macOS), but a watcher started on the finished folder does.
+   */
+  async function refreshWatcher() {
+    if (!watcher || closed) return;
+    const next = await readyWatcher(openWatcher);
+    if (closed) { await next.close(); return; }
+    const old = watcher;
+    watcher = next;
+    await old.close();
+  }
   /** Starts the source watcher, the first refresh and history capture. A failure releases everything already started. */
   function start() {
     started ??= (async () => {
@@ -520,25 +560,7 @@ export async function prepareOpenDocService(options: { root: string; production:
       try {
         await clearPendingPackUploads(root); // Half-staged uploads of a crashed run would hold upload slots for an hour.
         // One source watcher feeds the catalogs, history and the workspace. Pack installs (P1) pause and resume it from here.
-        watcher = watch([...new Set([root, resolve(applicationRoot, 'src'), resolve(applicationRoot, 'package.json'), resolve(applicationRoot, 'pnpm-lock.yaml'), resolve(applicationRoot, 'tsconfig.workspace.json')])], { ignoreInitial: true, ignored: path => ignoredByWatcher(applicationRoot, root, path) });
-        watcher.on('all', (_event, path) => {
-          if (packsPaused && /^(themes|templates|assets)(\/|$)/.test(relative(root, path))) { pausedPaths.add(path); return; } // A pack install is publishing files; resumeWatching replays this.
-          if (relative(root, path) === 'projects.json') {
-            void workspace.refreshProjects().catch(error => workspace.emit('workspace-error', error)); return;
-          }
-          // Folders and tags only regroup and filter; they never change a document, theme, or specimen.
-          if ([themeFoldersFile, tagsFile].includes(relative(root, path))) { workspace.changed(); return; }
-          // Catalogs follow their own imports and asset bindings, including local data files.
-          void Promise.all([templates.noteChange(path), themes.noteChange(path)])
-            .then(() => workspace.changed()).catch(error => workspace.emit('workspace-error', error));
-          if (/^themes\/.*\.md$/.test(relative(root, path))) return;
-          if (path.endsWith('comments.json')) { workspace.changed(); return; }
-          // Debounced, so one save or one burst of agent writes becomes one version.
-          if (!readOnly) history.noteChange(path);
-          // Documents may import modules or read local assets in any format (CSV, text,
-          // diagrams, and fonts included). Dependency handling decides what is affected.
-          workspace.noteChange(path);
-        });
+        watcher = openWatcher();
         workspace.on('workspace-error', error => console.error('Workspace refresh failed:', error));
         await workspace.refresh();
         // Record any change made while OpenDoc was closed, and apply the retention period.

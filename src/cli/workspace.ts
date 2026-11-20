@@ -118,6 +118,11 @@ export async function isManagedHere(root: string) {
  * table applies instead of the exact npm pin, and the CLI never says "npm install": a workspace from an older minor
  * is the app's to upgrade. A newer pin returns the runtime and the read-only guard (read-only.ts) keeps writes out.
  */
+async function appHoldsReadOnly(root: string): Promise<boolean> {
+  try { return Boolean((await (await import('./owner')).workspaceOwner(root, { pidOnly: true })).readOnly); }
+  catch { return false; } // A record that cannot be read is no reason to skip the refusal.
+}
+
 async function managedApplication(root: string, runtime: NonNullable<ReturnType<typeof managedRuntime>>, marker: WorkspaceMarker) {
   await ensureRuntimeLink(root, runtime.nodeModules);
   const app = resolve(root, 'node_modules/opendoc');
@@ -128,7 +133,7 @@ async function managedApplication(root: string, runtime: NonNullable<ReturnType<
   let identity;
   try { identity = packageIdentity(installed); } catch { throw new Error('The OpenDoc runtime of the desktop app is missing or damaged here. Reinstall opendoc-desktop, then open this workspace in it.'); }
   if (identity.name !== expected.name || identity.edition !== expected.edition) throw new Error('The workspace edition does not match the OpenDoc edition of the desktop app. Edition switching is not an update.');
-  if (comparePin(expected.version, identity.version) === 'older-minor') {
+  if (comparePin(expected.version, identity.version) === 'older-minor' && !await appHoldsReadOnly(root)) {
     throw new Error(`This workspace was made with OpenDoc ${expected.version} and this app has ${identity.version}. Open this workspace in opendoc-desktop to upgrade it.`);
   }
   return await realpath(app);

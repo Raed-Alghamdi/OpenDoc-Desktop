@@ -254,3 +254,57 @@ test('opendoc start never serves a writable UI on a workspace whose pin is newer
   assert.equal(write.status, 403);
   assert.equal(((await write.json()) as { code: string }).code, 'workspace-read-only');
 });
+
+/**
+ * An ordinary process that the CLI's name check accepts as the app. On Linux the check reads /proc/<pid>/comm, so the
+ * stand-in is Node renaming itself (process.title sets comm), and the test waits until the name shows there. A renamed
+ * copy of `sleep` does not do on Linux: on Ubuntu 26.04 sleep is the Rust coreutils, and a copy under another name exits
+ * at once. On macOS the check asks ps, and the stand-in is a copy of `sleep` named opendoc-desktop.
+ */
+async function standInForApp(t: TestContext) {
+  const linux = process.platform === 'linux';
+  let child: ReturnType<typeof spawn>;
+  if (linux) child = spawn(process.execPath, ['-e', "process.title = 'opendoc-desktop'; setInterval(() => {}, 60_000);"], { stdio: 'ignore' });
+  else {
+    const program = resolve(await scratch(t), 'opendoc-desktop');
+    await cp((await run('which', ['sleep'])).stdout.trim(), program);
+    child = spawn(program, ['600'], { stdio: 'ignore' });
+  }
+  t.after(() => { child.kill('SIGKILL'); });
+  const deadline = Date.now() + 15_000;
+  const named = async () => !linux || (await readFile(`/proc/${child.pid}/comm`, 'utf8').catch(() => '')).trim() === 'opendoc-desktop';
+  do {
+    await new Promise(accept => setTimeout(accept, 100));
+    assert.equal(child.exitCode, null, 'the stand-in for the app is still running');
+  } while (!await named() && Date.now() < deadline);
+  assert.ok(await named(), 'the stand-in for the app is named opendoc-desktop');
+  return child.pid!;
+}
+
+for (const reason of ['declined-upgrade', 'restored-backup'] as const) {
+  test(`an older-minor pin the app holds read-only (${reason}) reads and checks, and writes get the app's own message; without the app it is the upgrade message`, { timeout: 300_000, skip: minor === 0 }, async t => {
+    const workspace = await created(t);
+    const manifest = JSON.parse(await readFile(resolve(workspace, 'package.json'), 'utf8'));
+    manifest.dependencies.opendoc = pinFor(`${major}.${minor - 1}.0`);
+    await writeFile(resolve(workspace, 'package.json'), JSON.stringify(manifest));
+    const message = `Your choice is kept (${reason}): this workspace stays read-only until you upgrade it in the app.`;
+    const record = resolve(workspace, '.opendoc/desktop.json');
+    await writeFile(record, JSON.stringify({ pid: await standInForApp(t), startedAt: '2026-01-01T00:00:00.000Z', version: pkg.version, build: 1, readOnly: { reason, message } }));
+    const json = (text: string) => JSON.parse(text.trim().split('\n').at(-1)!);
+    for (const args of [['projects', 'list'], ['documents', 'trash'], ['check']]) {
+      const result = await opendoc(workspace, ...args);
+      assert.equal(result.code, 0, `${args.join(' ')}: ${result.stdout}${result.stderr}`);
+    }
+    const write = await opendoc(workspace, 'documents', 'rename', 'welcome', 'Renamed', '--json');
+    assert.equal(write.code, 1);
+    assert.deepEqual(json(write.stdout), { ok: false, error: message, code: 'workspace-read-only' });
+    // The app has gone: only the app can upgrade, and the message says so.
+    await rm(record);
+    const gone = await opendoc(workspace, 'projects', 'list', '--json');
+    assert.equal(gone.code, 1);
+    assert.match(json(gone.stdout).error, /Open this workspace in opendoc-desktop to upgrade it\./);
+    // A record whose app has stopped does not count either.
+    await writeFile(record, JSON.stringify({ pid: 2 ** 22 - 3, startedAt: '2026-01-01T00:00:00.000Z', version: pkg.version, build: 1, readOnly: { reason, message } }));
+    assert.match(json((await opendoc(workspace, 'projects', 'list', '--json')).stdout).error, /to upgrade it\./);
+  });
+}

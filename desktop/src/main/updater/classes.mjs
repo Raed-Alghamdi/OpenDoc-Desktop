@@ -112,6 +112,9 @@ export function createUpdaterClass(type, { getBuild, getFeedBase = () => null, s
     return class extends Checked {
       async preflight() { return { ok: true }; }
 
+      /** Empty the folder the download sits in (the installer and update-info.json): after an install, or when nothing newer is left to install. */
+      async clearDownloaded() { await (await this.getOrCreateDownloadHelper()).clear(); }
+
       /** The file as downloaded and its checksum from the metadata (what electron-updater compared it with). */
       downloaded() {
         const helper = this.downloadedUpdateHelper;

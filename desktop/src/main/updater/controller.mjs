@@ -288,7 +288,7 @@ export class UpdateController {
       updater.autoDownload = false;
       const result = await updater.checkForUpdates();
       if (dropped()) return { status: 'up-to-date' };
-      if (!result?.isUpdateAvailable) return { status: 'up-to-date' };
+      if (!result?.isUpdateAvailable) { await this.#clearDownloaded('nothing newer is left'); return { status: 'up-to-date' }; }
       this.cancellation = result.cancellationToken ?? null;
       const info = result.updateInfo;
       if (!preflight.ok) return { status: 'available', info };
@@ -391,6 +391,7 @@ export class UpdateController {
     this.log(`install: ${result.outcome}${result.message ? ` (${firstLine(result.message)})` : ''}`);
     if (result.outcome === 'installed') {
       this.ready = null;
+      await this.#clearDownloaded('it is installed');
       this.#changed();
       if (this.updaterType !== 'mac') this.relaunch(); // the macOS helper opens the new bundle itself
       this.quit();
@@ -407,6 +408,17 @@ export class UpdateController {
       await this.#say('error', 'The update could not be installed', `${result.message ?? 'The installer failed.'}${manual ? `\n\nYou can install the downloaded file yourself:\n${manual}` : ''}`);
     }
     return result;
+  }
+
+  /**
+   * Delete the installer and update-info.json of a package update (deb, rpm, pacman) from the updater's pending folder: the
+   * installed file is no use any more, and the next check that finds nothing newer clears what a crash left. Never throws.
+   */
+  async #clearDownloaded(why) {
+    if (typeof this.updater?.clearDownloaded !== 'function') return;
+    if (this.ready) return; // a download the user postponed is still the one to install
+    try { await this.updater.clearDownloaded(); this.log(`the downloaded update was removed: ${why}`); }
+    catch (error) { this.log(`the downloaded update could not be removed: ${firstLine(error)}`); }
   }
 
   /** The AppImage's swap, run while the app quits (called from the shell's shutdown, after the service has stopped). Never throws. */

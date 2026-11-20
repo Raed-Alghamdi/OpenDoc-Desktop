@@ -42,6 +42,8 @@ test.describe('a package install updates through one pkexec call', () => {
       await clickItem(run.app, ['Help', 'Restart to Update']);
       expect(await exited(run.app, 60_000)).toBe(true);
       expect(await run.relaunched()).toBe(true);
+      // The installer and update-info.json are deleted once the install succeeded (a 144 MB package is not left in the cache).
+      expect(await readdir(join(run.updaterCache, 'pending')).catch(() => [])).toEqual([]);
 
       const [call] = await tools.calls('pkexec');
       expect(await tools.calls('pkexec')).toHaveLength(1);

@@ -277,6 +277,62 @@ test('a package: "Later" keeps the download, a menu item stays, and it installs 
   assert.equal(shown.length, 1, 'only the one offer');
 });
 
+test('after a successful install the downloaded installer is deleted, before the app relaunches', async () => {
+  const { controller, updater, calls, log } = await setup({ type: 'deb', script: { check: downloadedUpdate('0.6.1', 2) }, answers: 0 });
+  let clearedAtRelaunch = null;
+  controller.relaunch = () => { calls.relaunch++; clearedAtRelaunch = updater.cleared ?? 0; };
+  await controller.start();
+  await settle();
+  await controller.idle();
+  assert.equal(updater.installs, 1);
+  assert.equal(updater.cleared, 1);
+  assert.equal(clearedAtRelaunch, 1, 'cleared first, then the relaunch');
+  assert.ok(log.some(line => /the downloaded update was removed: it is installed/.test(line)));
+});
+
+test('a cancelled or failed install keeps the download', async () => {
+  for (const install of [{ outcome: 'cancelled' }, { outcome: 'failed', message: 'dpkg said no' }, { outcome: 'blocked', message: 'no' }]) {
+    const { controller, updater } = await setup({ type: 'deb', script: { check: downloadedUpdate('0.6.1', 2), install }, answers: 0 });
+    await controller.start();
+    await settle();
+    await controller.idle();
+    assert.equal(updater.installs, 1, install.outcome);
+    assert.equal(updater.cleared, undefined, install.outcome);
+  }
+});
+
+test('a check that finds nothing newer clears what an earlier run left (a crash between install and cleanup)', async () => {
+  const { controller, updater } = await setup({ type: 'deb', script: { check: { isUpdateAvailable: false } } });
+  await controller.start();
+  await settle();
+  assert.equal(updater.checks, 1);
+  assert.equal(updater.cleared, 1);
+  await controller.checkNow();
+  assert.equal(updater.cleared, 2);
+});
+
+test('a download the user postponed is not cleared by a check, whatever it finds', async () => {
+  const { controller, updater } = await setup({ type: 'deb', script: { check: downloadedUpdate('0.6.1', 2) }, answers: 1 }); // Later
+  await controller.start();
+  await settle();
+  await controller.idle();
+  assert.equal(controller.menuState.restartReady, true);
+  updater.script.check = { isUpdateAvailable: false };
+  await controller.checkNow();
+  assert.equal(updater.cleared, undefined, 'still the update to install');
+  assert.equal(controller.menuState.restartReady, true);
+});
+
+test('a cleanup that fails is logged and never stops the relaunch', async () => {
+  const { controller, calls, log } = await setup({ type: 'deb', script: { check: downloadedUpdate('0.6.1', 2), clearError: 'EACCES' }, answers: 0 });
+  await controller.start();
+  await settle();
+  await controller.idle();
+  assert.equal(calls.relaunch, 1);
+  assert.equal(calls.quit, 1);
+  assert.ok(log.some(line => /the downloaded update could not be removed: EACCES/.test(line)));
+});
+
 test('a cancelled password prompt says "Update cancelled", keeps the download and offers again later', async () => {
   let attempt = 0;
   const { controller, updater, shown, calls } = await setup({ type: 'deb', script: { check: downloadedUpdate(), install: () => ({ outcome: ++attempt === 1 ? 'cancelled' : 'installed' }) }, answers: [0, 0, 0] });

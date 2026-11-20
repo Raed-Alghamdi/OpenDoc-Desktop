@@ -70,3 +70,9 @@ details.steps summary { cursor: pointer; color: var(--muted); }
 .step { padding: 8px 0; border-top: 1px solid var(--line); margin-top: 8px; }
 .step .command { color: var(--muted); }
 .step.failed strong { color: var(--danger); }
+
+/* The AI apps window is sized to the screen it opens on: the list and the results scroll, the buttons below them stay in view. */
+body.ai-apps { display: block; padding: 12px; overflow: hidden; }
+body.ai-apps main.wide { margin: 0 auto; box-sizing: border-box; height: 100%; display: flex; flex-direction: column; padding: 24px 28px 16px; }
+body.ai-apps .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
+body.ai-apps .bar { flex: none; margin: 0; padding-top: 12px; border-top: 1px solid var(--line); }

@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 import { constants, existsSync } from 'node:fs';
 import { access } from 'node:fs/promises';
-import { basename, delimiter } from 'node:path';
+import { basename, delimiter, isAbsolute } from 'node:path';
 
 export const outputLimit = 16 * 1024;
 
@@ -100,10 +100,11 @@ export async function readLoginEnvironment({ shell, env = process.env, names, ti
   return { ok: true, shell, variables: parseEnvironment(result.stdout, names), error: null };
 }
 
-/** `a:b` followed by `b:c` is `a:b:c`: the first list wins and nothing repeats. */
+/** `a:b` followed by `b:c` is `a:b:c`: the first list wins and nothing repeats. Only absolute entries are kept: an empty or relative one
+ *  (`.`, `bin`, `~/bin` that nothing expanded) would mean the folder a program happens to run in, where it could shadow a vendor command. */
 export function mergePaths(...lists) {
   const seen = new Set();
   const out = [];
-  for (const list of lists) for (const part of (list ?? '').split(delimiter)) if (part && !seen.has(part)) { seen.add(part); out.push(part); }
+  for (const list of lists) for (const part of (list ?? '').split(delimiter)) if (part && isAbsolute(part) && !seen.has(part)) { seen.add(part); out.push(part); }
   return out.join(delimiter);
 }

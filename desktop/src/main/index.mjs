@@ -3,6 +3,7 @@
 import { app } from 'electron';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ignoreTestSwitches, readTestBuild } from './build-mode.mjs';
 import { DesktopShell } from './desktop-shell.mjs';
 import { appName } from './identity.mjs';
 import { appImageTemplatePath } from './command-line-tool.mjs';
@@ -22,6 +23,11 @@ registerSchemes();
 process.on('uncaughtException', error => console.error('Uncaught error in the main process:', error));
 process.on('unhandledRejection', error => console.error('Unhandled rejection in the main process:', error));
 
+// An installed app ignores the test switches (runtime, updater folder, package tarball, ...) unless it was built as a test build.
+const testBuild = readTestBuild();
+const ignoredSwitches = ignoreTestSwitches(process.env, { packaged: app.isPackaged, testBuild });
+if (ignoredSwitches.length) console.warn(`[build] ignored the test switches ${ignoredSwitches.join(', ')}: this is an installed app, not a test build`);
+
 // One instance at a time: a second launch focuses the first and exits.
 const first = app.requestSingleInstanceLock();
 if (!first) app.quit();
@@ -31,13 +37,14 @@ if (!first) app.quit();
 const packs = createPackInbox();
 if (first) {
   for (const path of packPathsFromArguments(process.argv.slice(1), process.cwd())) packs.push(path);
-  app.on('open-file', (event, path) => { event.preventDefault(); packs.push(path); });
+  // Same rule as the launch arguments: only a .zip is taken, so no other file a program names to the app is read.
+  app.on('open-file', (event, path) => { event.preventDefault(); for (const zip of packPathsFromArguments([path], process.cwd())) packs.push(zip); });
 }
 
 async function run() {
   await app.whenReady();
   const here = fileURLToPath(new URL('.', import.meta.url));
-  const runtime = runtimeLocation({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, developmentRoot: join(here, '..', '..') });
+  const runtime = runtimeLocation({ packaged: app.isPackaged, testBuild, resourcesPath: process.resourcesPath, developmentRoot: join(here, '..', '..') });
   const templatePath = appImageTemplatePath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, developmentRoot: join(here, '..', '..') });
   // An AppImage's resources are inside a mount that goes away with the app, so it works from a copy in the data folder.
   const appImage = process.platform === 'linux' && Boolean(process.env.APPIMAGE);

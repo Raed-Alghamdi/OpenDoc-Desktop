@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parseBuild } from './build-compare.mjs';
-import { feedProviderOptions, parseFeedAddress, releasePageUrl, releaseRepository, repositoryFromUpdateConfig } from './feed.mjs';
+import { feedLabel, feedProviderOptions, isBuiltInFeed, parseFeedAddress, releasePageUrl, releaseRepository, repositoryFromUpdateConfig } from './feed.mjs';
 import { detectInstallType, needsRestartClick } from './install-type.mjs';
 import { manualCommand } from './privileged-install.mjs';
 import { describeRun, launchOutcome } from './release-notes.mjs';
@@ -27,7 +27,8 @@ export class UpdateController {
    * @param options.resourcesDir process.resourcesPath, or the test switch's folder; null for a development run
    * @param options.getVersion () => the app's version
    * @param options.getBuild () => the running build number, or null when there is none (a development run)
-   * @param options.createUpdater (type, { feed, logger }) => an electron-updater instance (classes.mjs); null for none
+   * @param options.allowLoopbackFeed true for an unpackaged run or a test build: a plain-http loopback `updateFeed` is accepted (never in an installed app)
+   * @param options.createUpdater (type, { feed, logger, feedLabel }) => an electron-updater instance (classes.mjs); null for none
    * @param options.show (options) => Promise<{ response }>, Electron's showMessageBox
    * @param options.openExternal (url) => void, opens the system browser
    * @param options.relaunch, quit: the app's relaunch and quit
@@ -36,8 +37,8 @@ export class UpdateController {
    * @param options.helperLogs async () => lines the macOS swap helper left from the last run (and removes them)
    * Everything else is for tests: platform, env, readText(path), createSchedule.
    */
-  constructor({ config, packaged, resourcesDir, getVersion, getBuild, createUpdater, show, openExternal, relaunch = () => {}, quit = () => {}, onChange = () => {}, onAppImageMoved = async () => {}, helperLogs = async () => [], log = () => {}, platform = process.platform, env = process.env, readText = path => readFileSync(path, 'utf8'), scheduleFactory = createSchedule }) {
-    Object.assign(this, { config, packaged, resourcesDir, getVersion, getBuild, createUpdater, show, openExternal, relaunch, quit, onChange, onAppImageMoved, helperLogs, log, platform, env, readText });
+  constructor({ config, packaged, allowLoopbackFeed = false, resourcesDir, getVersion, getBuild, createUpdater, show, openExternal, relaunch = () => {}, quit = () => {}, onChange = () => {}, onAppImageMoved = async () => {}, helperLogs = async () => [], log = () => {}, platform = process.platform, env = process.env, readText = path => readFileSync(path, 'utf8'), scheduleFactory = createSchedule }) {
+    Object.assign(this, { config, packaged, allowLoopbackFeed, resourcesDir, getVersion, getBuild, createUpdater, show, openExternal, relaunch, quit, onChange, onAppImageMoved, helperLogs, log, platform, env, readText });
     this.schedule = scheduleFactory({ run: () => this.check({ manual: false }), log });
     this.kind = { type: 'inactive', active: false, reason: 'not started' };
     this.base = this.kind; // the install type with the user's switch left out: what a manual check works with
@@ -48,6 +49,7 @@ export class UpdateController {
     this.updater = null;
     this.updaterType = null;
     this.feedError = null;
+    this.feedLabel = null; // names the feed to the user when it is not the built-in address
     this.repository = releaseRepository();
     this.blocked = null;
     this.ready = null;
@@ -147,11 +149,15 @@ export class UpdateController {
   async #repository() {
     const config = await this.config.read();
     let feed = null;
-    const parsed = typeof config.updateFeed === 'string' ? parseFeedAddress(config.updateFeed) : null;
+    const parsed = typeof config.updateFeed === 'string' ? parseFeedAddress(config.updateFeed, { allowLoopback: this.allowLoopbackFeed }) : null;
     if (parsed?.ok) feed = parsed.url;
-    let packaged = null;
-    if (this.resourcesDir) { try { packaged = repositoryFromUpdateConfig(this.readText(join(this.resourcesDir, 'app-update.yml'))); } catch { /* none: the fork's releases */ } }
-    return releaseRepository({ feed, packaged });
+    return releaseRepository({ feed, packaged: this.#packagedRepository() });
+  }
+
+  /** The GitHub repository the packaged app updates from (resources/app-update.yml), or null. */
+  #packagedRepository() {
+    if (!this.resourcesDir) return null;
+    try { return repositoryFromUpdateConfig(this.readText(join(this.resourcesDir, 'app-update.yml'))); } catch { return null; /* none: the fork's releases */ }
   }
 
   /** Work out the install type again and bring the updater, the timer and the menu in line with it. */
@@ -181,9 +187,10 @@ export class UpdateController {
 
   async #ensureUpdater(config) {
     this.feedError = null;
+    this.feedLabel = null;
     let feed = null;
     if (config.updateFeed !== undefined && config.updateFeed !== null) {
-      const parsed = parseFeedAddress(config.updateFeed);
+      const parsed = parseFeedAddress(config.updateFeed, { allowLoopback: this.allowLoopbackFeed });
       if (!parsed.ok) {
         this.feedError = parsed.message;
         this.log(`refused the update address: ${parsed.message}`);
@@ -193,11 +200,14 @@ export class UpdateController {
       }
       feed = feedProviderOptions(parsed.url, this.repository);
       this.log(`the update address is ${parsed.url.origin}${parsed.url.pathname} (from config.json)`);
+      // The prompts name the feed when it is not the address the app was built with: it came from config.json, not from the release.
+      if (!isBuiltInFeed(feed, this.#packagedRepository() ?? releaseRepository())) this.feedLabel = feedLabel(feed);
     }
-    if (this.updater && this.updaterType === this.base.type && JSON.stringify(this.feed) === JSON.stringify(feed)) return;
+    if (this.updater && this.updaterType === this.base.type && JSON.stringify(this.feed) === JSON.stringify(feed) && this.createdLabel === this.feedLabel) return;
+    this.createdLabel = this.feedLabel;
     this.feed = feed;
     const logger = { info: message => this.log(String(message)), warn: message => this.log(`warning: ${message}`), error: message => this.log(`error: ${message}`), debug: () => {} };
-    const updater = this.createUpdater(this.base.type, { feed, logger });
+    const updater = this.createUpdater(this.base.type, { feed, logger, feedLabel: this.feedLabel });
     this.updater = updater;
     this.updaterType = this.base.type;
     if (!updater) return;
@@ -278,7 +288,7 @@ export class UpdateController {
       updater.autoDownload = false;
       const result = await updater.checkForUpdates();
       if (dropped()) return { status: 'up-to-date' };
-      if (!result?.isUpdateAvailable) return { status: 'up-to-date' };
+      if (!result?.isUpdateAvailable) { await this.#clearDownloaded('nothing newer is left'); return { status: 'up-to-date' }; }
       this.cancellation = result.cancellationToken ?? null;
       const info = result.updateInfo;
       if (!preflight.ok) return { status: 'available', info };
@@ -305,7 +315,7 @@ export class UpdateController {
     switch (result.status) {
       case 'downloaded':
         if (installsOnQuit) {
-          if (manual) await this.#say('info', 'An update is ready', `${describeInfo(result.info)} has been downloaded. It is installed when you quit opendoc-desktop, and the next start runs it.`);
+          if (manual) await this.#say('info', 'An update is ready', `${describeInfo(result.info)} has been downloaded. It is installed when you quit opendoc-desktop, and the next start runs it.${this.#feedNote()}`);
         } else await this.#offerRestart(result.info);
         break;
       case 'available': {
@@ -343,6 +353,11 @@ export class UpdateController {
     if (answer.response === 0) this.openExternal(releasePageUrl(this.repository, info.version, parseBuild(info.build) ?? 1));
   }
 
+  /** What the install prompts add when the update comes from an address that is not the built-in one: where it comes from. */
+  #feedNote() {
+    return this.feedLabel ? `\n\nThis update comes from ${this.feedLabel}, the update address set in config.json. Install it only if you set that address.` : '';
+  }
+
   async #offerRestart(info) {
     if (this.offering) return;
     this.offering = true;
@@ -352,7 +367,7 @@ export class UpdateController {
         type: 'info',
         title,
         message: `A new version is ready: ${describeInfo(info)}`,
-        detail: `It has been downloaded and checked. opendoc-desktop restarts to install it.${mac ? '' : ' Your system asks for your password, because the app is installed for all users.'}`,
+        detail: `It has been downloaded and checked. opendoc-desktop restarts to install it.${mac ? '' : ' Your system asks for your password, because the app is installed for all users.'}${this.#feedNote()}`,
         buttons: ['Restart to Update', 'Later'],
         defaultId: 0,
         cancelId: 1,
@@ -376,6 +391,7 @@ export class UpdateController {
     this.log(`install: ${result.outcome}${result.message ? ` (${firstLine(result.message)})` : ''}`);
     if (result.outcome === 'installed') {
       this.ready = null;
+      await this.#clearDownloaded('it is installed');
       this.#changed();
       if (this.updaterType !== 'mac') this.relaunch(); // the macOS helper opens the new bundle itself
       this.quit();
@@ -392,6 +408,17 @@ export class UpdateController {
       await this.#say('error', 'The update could not be installed', `${result.message ?? 'The installer failed.'}${manual ? `\n\nYou can install the downloaded file yourself:\n${manual}` : ''}`);
     }
     return result;
+  }
+
+  /**
+   * Delete the installer and update-info.json of a package update (deb, rpm, pacman) from the updater's pending folder: the
+   * installed file is no use any more, and the next check that finds nothing newer clears what a crash left. Never throws.
+   */
+  async #clearDownloaded(why) {
+    if (typeof this.updater?.clearDownloaded !== 'function') return;
+    if (this.ready) return; // a download the user postponed is still the one to install
+    try { await this.updater.clearDownloaded(); this.log(`the downloaded update was removed: ${why}`); }
+    catch (error) { this.log(`the downloaded update could not be removed: ${firstLine(error)}`); }
   }
 
   /** The AppImage's swap, run while the app quits (called from the shell's shutdown, after the service has stopped). Never throws. */

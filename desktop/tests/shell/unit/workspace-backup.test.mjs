@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, lstat, mkdir, readFile, readdir, readlink, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, readdir, readlink, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BackupError, abandonRestore, cleanPartials, createBackup, deleteBackup, listBackups, recoverRestore, restoreBackup, stamp } from '../../../src/main/workspace/backup.mjs';
@@ -115,6 +115,58 @@ test('restore that fails half-way puts the workspace back as it was', { skip: pr
   assert.equal(await readFile(join(root, 'documents', 'welcome', 'index.tsx'), 'utf8'), 'export default "now";\n');
   assert.equal(JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).dependencies.opendoc, 'npm:@ryanyahya/opendoc@0.5.0');
   assert.deepEqual((await readdir(join(dataDir, 'backups'))).sort(), [backup.name]);
+});
+
+// ---- a link in the workspace never carries a restore outside it
+
+const outsideFolder = async base => { const outside = join(base, 'outside'); await mkdir(outside, { recursive: true }); await writeFile(join(outside, 'precious.txt'), 'not the workspace'); return outside; };
+const snapshot = async folder => Object.fromEntries(await Promise.all((await readdir(folder)).sort().map(async name => [name, await readFile(join(folder, name), 'utf8')])));
+
+test('a link that took the place of a folder is replaced by the folder, and nothing is written where the link led', async () => {
+  const { base, root, dataDir } = await fixture();
+  const backup = await createBackup({ root, dataDir, from: '0.5.0', to: '0.6.1', now: when });
+  const outside = await outsideFolder(base);
+  const held = await snapshot(outside);
+  // After the backup the documents folder became a link to a folder elsewhere.
+  await rm(join(root, 'documents'), { recursive: true });
+  await symlink(outside, join(root, 'documents'), 'dir');
+  await restoreBackup({ root, dataDir, name: backup.name, now: new Date(2026, 10, 18, 15, 0, 0) });
+  assert.ok((await lstat(join(root, 'documents'))).isDirectory(), 'a real folder again, not a link');
+  assert.equal(await readFile(join(root, 'documents', 'welcome', 'index.tsx'), 'utf8'), 'export default "welcome";\n');
+  assert.deepEqual(await snapshot(outside), held, 'the folder the link led to is as it was');
+});
+
+test('a folder that becomes a link to outside while the restore runs: the restore stops and nothing is written outside', async () => {
+  const { base, root, dataDir } = await fixture();
+  const backup = await createBackup({ root, dataDir, from: '0.5.0', to: '0.6.1', now: when });
+  const outside = await outsideFolder(base);
+  await writeFile(join(root, 'documents', 'welcome', 'index.tsx'), 'export default "now";\n'); // the restore will replace this
+  const held = await snapshot(outside);
+  let swapped = false;
+  const step = async ({ stage, path }) => {
+    if (stage === 'replace' && path === 'documents/welcome/index.tsx' && !swapped) {
+      swapped = true;
+      await rename(join(root, 'documents', 'welcome'), join(base, 'welcome-moved'));
+      await symlink(outside, join(root, 'documents', 'welcome'), 'dir');
+    }
+  };
+  const failure = await restoreBackup({ root, dataDir, name: backup.name, now: new Date(2026, 10, 18, 15, 0, 0), step }).then(() => null, error => error);
+  assert.ok(failure instanceof BackupError, String(failure));
+  assert.match(failure.message, /outside the workspace/, failure.message);
+  assert.deepEqual(await snapshot(outside), held, 'nothing was written, replaced or removed outside the workspace');
+  await assert.rejects(lstat(join(outside, 'index.tsx')), { code: 'ENOENT' });
+});
+
+test('a restore with every parent folder inside the workspace (links included) is not refused', async () => {
+  const { root, dataDir } = await fixture();
+  await mkdir(join(root, 'real'), { recursive: true });
+  await writeFile(join(root, 'real', 'a.txt'), 'old');
+  await symlink('real', join(root, 'alias'), 'dir'); // a link that stays inside
+  const backup = await createBackup({ root, dataDir, from: '0.5.0', to: '0.6.1', now: when });
+  await writeFile(join(root, 'real', 'a.txt'), 'new');
+  await restoreBackup({ root, dataDir, name: backup.name, now: new Date(2026, 10, 18, 15, 0, 0) });
+  assert.equal(await readFile(join(root, 'real', 'a.txt'), 'utf8'), 'old');
+  assert.equal(await readlink(join(root, 'alias')), 'real');
 });
 
 // ---- the registry runner

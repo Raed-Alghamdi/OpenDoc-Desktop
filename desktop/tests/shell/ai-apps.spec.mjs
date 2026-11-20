@@ -262,3 +262,73 @@ test('at launch, what is connected is brought up to date; a failure for a connec
     await expect(page.locator('section.result[data-code="disconnected"]')).toHaveCount(1, { timeout: 60_000 });
   } finally { await app.close(); }
 });
+
+test.describe.serial('the screen fits the display it opens on: the list scrolls inside the window and the buttons stay in view', () => {
+  let app;
+
+  test.beforeAll(async () => {
+    const world = await integrationsWorld();
+    const workspace = await newWorkspace('ai-apps-fit');
+    const profile = await newProfile('ai-apps-fit-profile', { defaultWorkspace: workspace });
+    app = await launchApp({ profile, env: world.appEnvironment });
+    await stubNative(app, {});
+    await waitFor(() => app.windows().find(item => isWorkspaceUrl(item.url())), { timeout: 120_000, what: 'the workspace page' });
+    await waitForOpen(workspace);
+  });
+
+  test.afterAll(async () => { await app?.close().catch(() => {}); });
+
+  /** Pretend every display has this work area (the screen minus panels), then open the screen from the Help menu. */
+  async function openOn(workArea) {
+    await app.evaluate(({ screen }, area) => {
+      const real = globalThis.__realDisplay ??= screen.getPrimaryDisplay();
+      const fake = { ...real, workArea: { x: 0, y: 0, ...area }, workAreaSize: area, bounds: { x: 0, y: 0, width: area.width, height: area.height + 30 } };
+      screen.getPrimaryDisplay = () => fake;
+      screen.getDisplayMatching = () => fake;
+    }, workArea);
+    await helpItem(app, 'Connect AI Apps…');
+    const page = await waitForScreen(app);
+    await settled(page);
+    return page;
+  }
+  const windowSize = () => app.evaluate(({ BrowserWindow }) => { const window = BrowserWindow.getAllWindows().find(item => item.webContents.getURL().startsWith('app://shell/ai-apps.html')); const [width, height] = window.getSize(); return { width, height }; });
+  const closeScreen = async () => { await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(item => item.webContents.getURL().startsWith('app://shell/ai-apps.html'))?.close()); await waitFor(() => !aiWindow(app), { what: 'the window to close' }); };
+  const layout = page => page.evaluate(() => {
+    const scroll = document.querySelector('.scroll');
+    const box = selector => { const rect = document.querySelector(selector).getBoundingClientRect(); return { top: Math.round(rect.top), bottom: Math.round(rect.bottom) }; };
+    return { inner: innerHeight, page: document.documentElement.scrollHeight, scrolls: scroll.scrollHeight > scroll.clientHeight + 1, connect: box('#connect'), close: box('#close'), recheck: box('#recheck') };
+  });
+
+  test('a 1280x800 screen with a panel (work area 1280x770): the window fits it and every button is in view', async () => {
+    const page = await openOn({ width: 1280, height: 770 });
+    const size = await windowSize();
+    expect(size.height).toBeLessThanOrEqual(770 - 24);
+    expect(size.width).toBeLessThanOrEqual(1280 - 24);
+    const shown = await layout(page);
+    for (const button of [shown.connect, shown.close, shown.recheck]) { expect(button.top).toBeGreaterThanOrEqual(0); expect(button.bottom).toBeLessThanOrEqual(shown.inner); }
+    expect(shown.page).toBeLessThanOrEqual(shown.inner + 1); // the window itself never scrolls
+    await shoot(page, 'fit-1280x800');
+    await closeScreen();
+  });
+
+  test('a small work area: the list scrolls inside the window, the buttons stay in view, and the window is never below its minimum', async () => {
+    const page = await openOn({ width: 1024, height: 560 });
+    const size = await windowSize();
+    expect(size.height).toBeLessThanOrEqual(560 - 24);
+    expect(size.height).toBeGreaterThanOrEqual(380);
+    const shown = await layout(page);
+    expect(shown.scrolls).toBe(true);
+    for (const button of [shown.connect, shown.close, shown.recheck]) { expect(button.top).toBeGreaterThanOrEqual(0); expect(button.bottom).toBeLessThanOrEqual(shown.inner); }
+    await page.locator('#apps').scrollIntoViewIfNeeded();
+    await page.locator('.scroll').evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await expect(page.locator('li.app').last()).toBeInViewport();
+    await shoot(page, 'fit-small');
+    await closeScreen();
+  });
+
+  test('a roomy display keeps the usual size', async () => {
+    await openOn({ width: 2560, height: 1400 });
+    expect(await windowSize()).toEqual({ width: 800, height: 760 });
+    await closeScreen();
+  });
+});

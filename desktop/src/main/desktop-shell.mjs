@@ -1,5 +1,5 @@
 // The shell: which workspace is open, its service, its window and the picker. One workspace at a time.
-import { app, clipboard, dialog, ipcMain, session, shell } from 'electron';
+import { app, clipboard, dialog, ipcMain, screen, session, shell } from 'electron';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile, realpath, rmdir, stat } from 'node:fs/promises';
@@ -19,6 +19,7 @@ import { cliPath, readBuildInfo, runCli } from './runtime.mjs';
 import { inspectService } from './service-session.mjs';
 import { applySessionPolicy, openExternal } from './session-policy.mjs';
 import { shellPageUrl } from './shell-pages.mjs';
+import { fitToWorkArea } from './window-fit.mjs';
 import { superviseTransport } from './supervisor.mjs';
 import { serviceLocation, startTransport, TransportError } from './transport.mjs';
 import { createUpdates } from './updater/electron.mjs';
@@ -616,7 +617,10 @@ export class DesktopShell {
   /** The window of "Connect your AI apps". `first`: the first-run offer (its button says Skip). */
   async #showAiApps({ first = false } = {}) {
     if (this.aiAppsWindow && !this.aiAppsWindow.isDestroyed()) { this.aiAppsWindow.focus(); return; }
-    const window = createShellWindow(this.#shellSession(), { width: 800, height: 760, title: 'Connect your AI apps', parent: this.#parent() });
+    // As tall as the list wants, but never taller than the screen it opens on: the list scrolls inside the window and the buttons stay in view.
+    const parent = this.#parent();
+    const display = parent && !parent.isDestroyed() ? screen.getDisplayMatching(parent.getBounds()) : screen.getPrimaryDisplay();
+    const window = createShellWindow(this.#shellSession(), { ...fitToWorkArea({ width: 800, height: 760 }, display.workArea), title: 'Connect your AI apps', parent });
     this.aiAppsWindow = window;
     this.#trackShellWindow(window);
     window.on('closed', () => { if (this.aiAppsWindow === window) this.aiAppsWindow = null; });

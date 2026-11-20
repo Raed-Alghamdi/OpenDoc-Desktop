@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { chmod, mkdir, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { test } from 'node:test';
 import { createIntegrations } from '../../../src/main/integrations/index.mjs';
 import { findMiseInstall, isMiseShim } from '../../../src/main/integrations/detect.mjs';
-import { environmentCommand } from '../../../src/main/integrations/run.mjs';
+import { environmentCommand, mergePaths } from '../../../src/main/integrations/run.mjs';
 import { fakeCommand, miseInstall, miseShims, scratch } from './integrations-support.mjs';
 
 const byId = (detection, id) => detection.apps.find(app => app.id === id);
@@ -171,4 +171,27 @@ test('a real login shell reads what the user profile sets', async () => {
 test('the environment command is the absolute /usr/bin/env when it exists, and plain env otherwise', () => {
   assert.equal(environmentCommand(path => path === '/usr/bin/env'), '/usr/bin/env');
   assert.equal(environmentCommand(() => false), 'env');
+});
+
+test('only absolute PATH entries are searched: a relative or empty entry cannot shadow a command', async () => {
+  const world = await scratch();
+  const decoy = join(world.root, 'decoy');
+  await fakeCommand(world, 'claude', decoy);
+  const relativeDecoy = relative(process.cwd(), decoy);
+  assert.ok(!relativeDecoy.startsWith('/'), 'the folder is named relative to where the tests run');
+  // The decoy comes first on the path as a relative entry, and again as `.`-like and empty entries; only the real folder counts.
+  for (const path of [`${relativeDecoy}`, `${relativeDecoy}:${world.bin}`, `::${relativeDecoy}`, `./${relativeDecoy}:~/bin`]) {
+    const detection = await createIntegrations(world.options({ env: world.env({ PATH: path }) })).detect();
+    assert.equal(byId(detection, 'claude').present, false, path);
+    assert.equal(byId(detection, 'claude').executable, null, path);
+  }
+  await fakeCommand(world, 'claude');
+  const detection = await createIntegrations(world.options({ env: world.env({ PATH: `${relativeDecoy}:${world.bin}` }) })).detect();
+  assert.equal(byId(detection, 'claude').executable, join(world.bin, 'claude'), 'the real command in an absolute entry is found');
+  assert.deepEqual(await world.calls(), [], 'nothing was run');
+});
+
+test('a relative entry from the login shell or the extra folders is dropped as well', () => {
+  assert.equal(mergePaths('/a:rel:/b', '.:/b:/c', ':/d', 'bin'), '/a:/b:/c:/d');
+  assert.equal(mergePaths(undefined, '', '~/bin:/x'), '/x');
 });

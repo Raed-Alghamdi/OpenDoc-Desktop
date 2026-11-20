@@ -17,7 +17,7 @@ const settle = () => new Promise(accept => setImmediate(accept));
  * @param options.script what the scripted updater does (see FakeUpdater)
  * @param options.answers dialog answers: a number (button index), a function from the dialog options, or a list taken in order
  */
-async function setup({ type = 'deb', config = {}, script = {}, build = 1, version = '0.6.1', answers = 0, packaged = true } = {}) {
+async function setup({ type = 'deb', config = {}, script = {}, build = 1, version = '0.6.1', answers = 0, packaged = true, allowLoopbackFeed = true } = {}) {
   const folder = await scratch('controller');
   const resources = join(folder, 'resources');
   await mkdir(resources);
@@ -35,6 +35,7 @@ async function setup({ type = 'deb', config = {}, script = {}, build = 1, versio
   const controller = new UpdateController({
     config: configFile,
     packaged,
+    allowLoopbackFeed,
     resourcesDir: resources,
     getVersion: () => version,
     getBuild: () => build,
@@ -108,6 +109,62 @@ test('an accepted address reaches the updater as a provider (a generic folder he
   const builtIn = await setup();
   await builtIn.controller.start();
   assert.equal(builtIn.calls.created[0].feed, null);
+});
+
+test('an installed app that is not a test build refuses a plain-http loopback address: no updater, nothing requested, the reason shown', async () => {
+  const { controller, calls, log, shown } = await setup({ allowLoopbackFeed: false, config: { updateFeed: 'http://127.0.0.1:8099/generic' } });
+  await controller.start();
+  assert.equal(calls.created.length, 0);
+  assert.ok(log.some(line => /refused the update address.*not accepted by this build/.test(line)));
+  await controller.checkNow();
+  assert.equal(shown.at(-1).message, 'Could not check for updates');
+  assert.match(shown.at(-1).detail, /not accepted by this build/);
+});
+
+test('an https address is allowed in an installed app, and the restart prompt names where the update comes from', async () => {
+  const custom = await setup({ allowLoopbackFeed: false, config: { updateFeed: 'https://updates.example.org:8443/opendoc/' }, script: { check: downloadedUpdate('0.6.1', 2) }, answers: 1 });
+  await custom.controller.start();
+  await settle();
+  await custom.controller.idle();
+  assert.deepEqual(custom.calls.created[0].feed, { provider: 'generic', url: 'https://updates.example.org:8443/opendoc/' });
+  assert.equal(custom.calls.created[0].feedLabel, 'https://updates.example.org:8443');
+  const prompt = custom.shown.find(options => /ready/.test(options.message));
+  assert.match(prompt.detail, /comes from https:\/\/updates\.example\.org:8443, the update address set in config\.json/);
+  const github = await setup({ config: { updateFeed: 'https://github.com/Someone/Fork' }, script: { check: downloadedUpdate('0.6.1', 2) }, answers: 1 });
+  await github.controller.start();
+  await settle();
+  await github.controller.idle();
+  assert.equal(github.calls.created[0].feedLabel, 'https://github.com/Someone/Fork');
+  assert.match(github.shown.find(options => /ready/.test(options.message)).detail, /comes from https:\/\/github\.com\/Someone\/Fork/);
+});
+
+test('the AppImage notice that an update is ready also names a feed that is not the built-in address', async () => {
+  const custom = await setup({ type: 'appimage', allowLoopbackFeed: false, config: { updateFeed: 'https://updates.example.org/opendoc/' }, script: { check: downloadedUpdate('0.6.1', 2) } });
+  await custom.controller.start();
+  await settle();
+  await custom.controller.idle();
+  await custom.controller.checkNow();
+  assert.match(custom.shown.find(options => options.message === 'An update is ready').detail, /comes from https:\/\/updates\.example\.org, the update address set in config\.json/);
+  const plain = await setup({ type: 'appimage', script: { check: downloadedUpdate('0.6.1', 2) } });
+  await plain.controller.start();
+  await settle();
+  await plain.controller.idle();
+  await plain.controller.checkNow();
+  assert.doesNotMatch(plain.shown.find(options => options.message === 'An update is ready').detail, /comes from/);
+});
+
+test('the built-in address (none set, or the packaged repository named in config.json) shows no feed in the prompt', async () => {
+  const none = await setup({ script: { check: downloadedUpdate('0.6.1', 2) }, answers: 1 });
+  await none.controller.start();
+  await settle();
+  await none.controller.idle();
+  assert.equal(none.calls.created[0].feedLabel, null);
+  assert.doesNotMatch(none.shown.find(options => /ready/.test(options.message)).detail, /comes from/);
+  const same = await setup({ config: { updateFeed: 'https://github.com/Raed-Alghamdi/OpenDoc-Desktop' }, script: { check: downloadedUpdate('0.6.1', 2) }, answers: 1 });
+  await same.controller.start();
+  await settle();
+  await same.controller.idle();
+  assert.equal(same.calls.created[0].feedLabel, null);
 });
 
 // ---------- AppImage ----------
@@ -218,6 +275,62 @@ test('a package: "Later" keeps the download, a menu item stays, and it installs 
   assert.equal(updater.installs, 1);
   assert.deepEqual([calls.relaunch, calls.quit], [1, 1]);
   assert.equal(shown.length, 1, 'only the one offer');
+});
+
+test('after a successful install the downloaded installer is deleted, before the app relaunches', async () => {
+  const { controller, updater, calls, log } = await setup({ type: 'deb', script: { check: downloadedUpdate('0.6.1', 2) }, answers: 0 });
+  let clearedAtRelaunch = null;
+  controller.relaunch = () => { calls.relaunch++; clearedAtRelaunch = updater.cleared ?? 0; };
+  await controller.start();
+  await settle();
+  await controller.idle();
+  assert.equal(updater.installs, 1);
+  assert.equal(updater.cleared, 1);
+  assert.equal(clearedAtRelaunch, 1, 'cleared first, then the relaunch');
+  assert.ok(log.some(line => /the downloaded update was removed: it is installed/.test(line)));
+});
+
+test('a cancelled or failed install keeps the download', async () => {
+  for (const install of [{ outcome: 'cancelled' }, { outcome: 'failed', message: 'dpkg said no' }, { outcome: 'blocked', message: 'no' }]) {
+    const { controller, updater } = await setup({ type: 'deb', script: { check: downloadedUpdate('0.6.1', 2), install }, answers: 0 });
+    await controller.start();
+    await settle();
+    await controller.idle();
+    assert.equal(updater.installs, 1, install.outcome);
+    assert.equal(updater.cleared, undefined, install.outcome);
+  }
+});
+
+test('a check that finds nothing newer clears what an earlier run left (a crash between install and cleanup)', async () => {
+  const { controller, updater } = await setup({ type: 'deb', script: { check: { isUpdateAvailable: false } } });
+  await controller.start();
+  await settle();
+  assert.equal(updater.checks, 1);
+  assert.equal(updater.cleared, 1);
+  await controller.checkNow();
+  assert.equal(updater.cleared, 2);
+});
+
+test('a download the user postponed is not cleared by a check, whatever it finds', async () => {
+  const { controller, updater } = await setup({ type: 'deb', script: { check: downloadedUpdate('0.6.1', 2) }, answers: 1 }); // Later
+  await controller.start();
+  await settle();
+  await controller.idle();
+  assert.equal(controller.menuState.restartReady, true);
+  updater.script.check = { isUpdateAvailable: false };
+  await controller.checkNow();
+  assert.equal(updater.cleared, undefined, 'still the update to install');
+  assert.equal(controller.menuState.restartReady, true);
+});
+
+test('a cleanup that fails is logged and never stops the relaunch', async () => {
+  const { controller, calls, log } = await setup({ type: 'deb', script: { check: downloadedUpdate('0.6.1', 2), clearError: 'EACCES' }, answers: 0 });
+  await controller.start();
+  await settle();
+  await controller.idle();
+  assert.equal(calls.relaunch, 1);
+  assert.equal(calls.quit, 1);
+  assert.ok(log.some(line => /the downloaded update could not be removed: EACCES/.test(line)));
 });
 
 test('a cancelled password prompt says "Update cancelled", keeps the download and offers again later', async () => {

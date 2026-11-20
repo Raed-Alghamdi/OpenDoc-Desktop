@@ -65,6 +65,14 @@ nice -n 19 ionice -c 3 node desktop/runtime/dist.mjs --linux pacman deb rpm AppI
 
 Everything after the script name goes to electron-builder, and `--publish never` is added if you leave `--publish` out. The config is `desktop/electron-builder.yml`, one file for every installer.
 
+**Test builds.** A packaged app ignores the environment switches that tests use (`OPENDOC_DESKTOP_RUNTIME`, `OPENDOC_DESKTOP_UPDATE_RESOURCES`, `OPENDOC_DESKTOP_HEALTH_MS`, `OPENDOC_DESKTOP_INTEGRATIONS_OPTIONS`, `OPENDOC_PACKAGE_TARBALL`) and refuses a plain-http `updateFeed`, so that a variable set for the next launch cannot choose the code or the update source of an installed app. A build that tests need to drive through those switches (for example a real AppImage updating from a feed on 127.0.0.1) is made as a test build, by writing `opendocTestBuild: true` into the `package.json` inside the app archive. electron-builder does that with its `extraMetadata` option, which `dist.mjs` forwards:
+
+```sh
+nice -n 19 ionice -c 3 node desktop/runtime/dist.mjs --linux AppImage --publish never -c.extraMetadata.opendocTestBuild=true
+```
+
+A release build is made without it (the release workflow does not pass it). Never publish or install a test build as your own app. See [Test builds](../docs/DESKTOP.md#run-it-from-a-checkout) in the desktop guide.
+
 Linux, in `desktop/dist/`:
 
 | Target | File name |
@@ -179,6 +187,6 @@ Nothing here talks to GitHub: every test uses a feed on 127.0.0.1. The commands 
 - `node tests/shell/run.mjs --unit` runs the updater's unit tests (`tests/shell/unit/updater-*.test.mjs`).
 - `node tests/shell/run.mjs updater-network updater-packages updater-guard` runs the Electron specs in `tests/shell/updater/` on the virtual display. They start a development Electron through `tests/shell/updater/support/entry.mjs` (which stubs the native dialogs), set `OPENDOC_DESKTOP_UPDATE_RESOURCES` to a stand-in `resources/` folder (with `package-type`, `update-disabled` and so on) and point `updateFeed` in `config.json` at the feed. A fake `pkexec`, `dpkg` and `apt-get` record what the deb install runs.
 - `scripts/update-feed-server.py <root> [port]` is the feed: `/generic/<file>` for an `updateFeed` of `http://127.0.0.1:<port>/generic/`, GitHub-shaped URLs for `http://127.0.0.1:<port>/github-like`, Range requests, and a JSON request log in `<root>/requests.log`. Start it by hand to try an update against a real build.
-- `node tests/shell/updater/appimage-run.mjs --first <build 1 output> --second <build 2 output> --work <empty scratch folder>` runs the real AppImage update, build 1 to build 2 (a corrupted build 2 that must be refused, and a staging failure at quit that must leave the old AppImage working), on a virtual display with a scratch `HOME`. It needs two AppImages from electron-builder (a scratch config outside the repository is enough; the script adds the `build:` and `commit:` lines the release build adds to the metadata). It is run by hand, not by the test script.
+- `node tests/shell/updater/appimage-run.mjs --first <build 1 output> --second <build 2 output> --work <empty scratch folder>` runs the real AppImage update, build 1 to build 2 (a corrupted build 2 that must be refused, and a staging failure at quit that must leave the old AppImage working), on a virtual display with a scratch `HOME`. It needs two AppImages built as test builds (see "Test builds" above: an installed-style build refuses the loopback feed) from electron-builder (a scratch config outside the repository is enough; the script adds the `build:` and `commit:` lines the release build adds to the metadata). It is run by hand, not by the test script.
 
 Not covered: the macOS swap (only its decisions are unit-tested), a real `pkexec` prompt, and a real GitHub release.

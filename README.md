@@ -106,6 +106,17 @@ In normal OpenDoc, **Create** prepares the request for you: describe the work, c
 
 Agents author TSX using OpenDoc's components, check the source, inspect the rendered pages, revise, and export. For remote work, the agent delivers real attachments or accessible downloads through its existing tools.
 
+### Command line
+
+Everything the app does is also a command, so an agent or a script can do it without the window: `npx opendoc <command>` (the [desktop app](docs/DESKTOP.md#the-opendoc-command) installs an `opendoc` command that does the same). Add `--json` for a structured result, `--workspace <folder>` to pick a workspace, and `opendoc help --json` for the full catalogue.
+
+- **Create and organise:** `init`, `create`, `projects`, `documents` (`list`, `show`, `rename`, `duplicate`, `delete`, `trash`, `restore`), `tags`, `themes` and `templates` (including theme folders), `assets`, `media` (`list`, `import`, `edit`, `record`, `check`)
+- **Review and deliver:** `check`, `review`, `export` (and `export history list|delete|restore|reveal`), `packs export|inspect|install`
+- **Feedback and history:** `comments` (`add`, with `--also` for several places, `edit`, `list`, `resolve`, `reopen`, `delete`, `restore`), `history list|show|block|restore`
+- **The running app and updates:** `status`, `stop`, `context` (what the app has selected) and `start` (normal OpenDoc only), `update`
+
+Failures print `{"ok": false, "error": "...", "code": "..."}` with a stable `code`, and exit with status 2 for a usage error, 1 otherwise. [All commands and codes →](docs/HEADLESS.md#command-line-reference)
+
 ## Agent skills
 
 Both editions include the same **agent skills**, listed below, that guide an agent through the work, from understanding your brief to delivering reviewed files. They cover writing, revising, design, logos, fonts and images, context, feedback, quality checks, recovering earlier versions, organizing your work, and sharing reusable designs. Ask in ordinary language; the [agent guide](AGENTS.md) explains which workflow to use, and each link below opens its full instructions.

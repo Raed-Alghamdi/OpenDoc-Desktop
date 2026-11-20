@@ -38,8 +38,14 @@ If `<workspace>/node_modules/opendoc` is missing, tell the user the workspace is
 
 ## 4. When the app has the workspace open
 
-The desktop app may have the workspace open. Authoring, `check`, `review`, `export` and `comments` commands work regardless. `start`, `update` and `packs install` refuse while the app owns the workspace: that is expected. Tell the user to use the app for those (open the workspace, update the app, Import), and do not try to stop the app or work around the refusal.
+The desktop app may have the workspace open. Authoring, `check`, `review`, `export` and `comments` commands still work, unless the workspace is read-only (below). `start`, `update` and `packs install` refuse while the app owns the workspace: that is expected. Tell the user to use the app for those (open the workspace, update the app, Import), and do not try to stop the app or work around the refusal.
 
 Before `start`, `update` or `packs install`, you can check instead of learning from a refusal: `opendoc --workspace <path> status --json` reports `{ running, mode }`, and `mode: "desktop"` means the app has the workspace open. If that command is not available in this version, just run the command you need and read any refusal the same way.
 
 `history restore` also refuses while the app holds unsaved text edits for the workspace. Tell the user to save in the app first, then run it again.
+
+## 5. When the workspace is read-only
+
+A workspace can be read-only: it was made with a newer OpenDoc than the one installed, the user chose to keep it read-only rather than upgrade it, or it was just restored from a backup. Commands that would change it then fail with the code `workspace-read-only` and a message saying why. Reading, `check`, `review` and `export` still work. Tell the user that message as it is, do not edit the workspace's files directly instead, and do not try to work around it.
+
+A refusal saying the workspace was made with an older OpenDoc and to open it in opendoc-desktop to upgrade it means only the app can upgrade it. Tell the user so, and stop.

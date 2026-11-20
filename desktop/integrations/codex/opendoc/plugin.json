@@ -1,0 +1,17 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "opendoc",
+  "version": "1.0.0",
+  "description": "Find the OpenDoc workspace from any folder and create, review and export documents and presentations with the opendoc command.",
+  "author": {
+    "name": "OpenDoc Desktop"
+  },
+  "homepage": "https://github.com/RyanYahya/OpenDoc#readme",
+  "license": "MIT",
+  "keywords": [
+    "opendoc",
+    "documents",
+    "presentations",
+    "pdf"
+  ]
+}

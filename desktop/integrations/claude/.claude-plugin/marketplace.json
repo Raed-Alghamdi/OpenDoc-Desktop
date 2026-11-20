@@ -1,0 +1,14 @@
+{
+  "name": "opendoc",
+  "description": "OpenDoc for Claude Code: finds your OpenDoc workspace and drives it with the opendoc command.",
+  "owner": {
+    "name": "OpenDoc Desktop"
+  },
+  "plugins": [
+    {
+      "name": "opendoc",
+      "source": "./opendoc",
+      "description": "Find the OpenDoc workspace from any folder and create, review and export documents and presentations with the opendoc command."
+    }
+  ]
+}

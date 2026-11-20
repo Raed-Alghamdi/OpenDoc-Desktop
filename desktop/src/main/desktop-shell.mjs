@@ -646,7 +646,7 @@ export class DesktopShell {
     } catch (error) { console.error('Could not update the AI apps:', error.message); }
   }
 
-  // ---------- design packs opened from outside (E9) ----------
+  // ---------- design packs opened from outside ----------
 
   /** A pack path from a launch argument, a second launch, open-file or File > Import: read it here, then give it to the page. */
   async #packOpened(path) {

@@ -1,4 +1,4 @@
-// Everything between taking the workspace lock and starting the service host (plan 3.4, E3): is this a workspace the app can
+// Everything between taking the workspace lock and starting the service host: is this a workspace the app can
 // take, adopting a synced one, the `node_modules` and `.claude/skills` links, the version table, the upgrade. It asks the
 // user through `ui` (the shell supplies Electron dialogs and pages; the tests supply fakes) and changes nothing before every
 // question is answered and every refusal is decided: a refusal or a "no" leaves the folder as it was. A workspace that will

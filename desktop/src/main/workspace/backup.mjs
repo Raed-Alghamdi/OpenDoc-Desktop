@@ -1,4 +1,4 @@
-// Backups outside the workspace's synced folder (plan 3.4): before an upgrade, and the "before restore" copy that
+// Backups outside the workspace's synced folder: before an upgrade, and the "before restore" copy that
 // Restore makes of the files it changes. A backup is a folder `<data>/backups/<workspace>-<date>/` holding `backup.json`
 // (the manifest) and `workspace/` (the copy). It is built under a temporary name and renamed when complete, so a backup
 // that is there is whole. Nothing here ever deletes one except `deleteBackup`, which the user asks for.

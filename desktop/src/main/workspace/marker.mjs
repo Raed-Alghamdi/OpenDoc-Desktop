@@ -1,6 +1,6 @@
-// `.opendoc/workspace.json`, the marker that makes a folder a workspace on this device (plan 3.4). The app adds
-// `managed: true` (per device: the file is not synced in the maintainer's setup, though upstream's .gitignore keeps it
-// in git, so a git user carries the flag to another device; U1 acts on it only when the runtime is really the app's).
+// `.opendoc/workspace.json`, the marker that makes a folder a workspace on this device. The app adds
+// `managed: true` (per device: the file is not synced in some setups, though upstream's .gitignore keeps it
+// in git, so a git user carries the flag to another device; the CLI acts on it only when the runtime is really the app's).
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 

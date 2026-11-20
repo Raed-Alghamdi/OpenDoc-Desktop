@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Adds `build:` and `commit:` to electron-builder's update metadata (contracts, "Update rules"): electron-builder knows no build
+// Adds `build:` and `commit:` to electron-builder's update metadata: electron-builder knows no build
 // number, and the updater treats a newer build of the same version as an update only when the metadata carries one. The stock
 // updater ignores the extra keys. Every build runs this on every latest*.yml, before anything is uploaded.
 //

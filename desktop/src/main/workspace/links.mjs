@@ -1,4 +1,4 @@
-// The two links a workspace keeps to things outside its synced files (spike S1): `node_modules`, a symlink to the app's
+// The two links a workspace keeps to things outside its synced files: `node_modules`, a symlink to the app's
 // runtime, and `.claude/skills -> ../.agents/skills`. Neither syncs (Nextcloud skips symlinks), so both are checked on every
 // open and repaired. They are only links: a missing, dangling or foreign link is replaced (a new link under a temporary
 // name, then a rename over the old one). A real folder or file is never removed here: the caller asks first.

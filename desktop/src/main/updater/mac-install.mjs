@@ -1,4 +1,4 @@
-// The macOS update without a paid certificate (plan 3.7, S6). electron-updater downloads the zip and checks its SHA-512; its own
+// The macOS update without a paid certificate. electron-updater downloads the zip and checks its SHA-512; its own
 // install step hands the zip to Squirrel.Mac, which needs a signature it can validate (ad-hoc builds fail with "code failed to satisfy
 // specified code requirement(s)"). So the app unzips the new bundle next to the old one, checks it, and lets a detached helper swap the
 // two after this process has exited and open the new one. No Electron import: every system call comes in through `run`.

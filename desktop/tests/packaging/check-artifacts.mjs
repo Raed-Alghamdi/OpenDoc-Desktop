@@ -2,7 +2,7 @@
 // Checks the Linux installers in desktop/dist: each file carries the app version and the build number in its own metadata (not
 // just its name; the AppImage has no version in its name), and latest-linux.yml lists every installer and carries build: and commit:.
 //
-// It also checks that each package carries the agent integrations with their dot folders (I2) and the design pack file type (E9: the
+// It also checks that each package carries the agent integrations with their dot folders and the design pack file type (the
 // shared-mime entry and the .desktop file's MimeType line).
 //
 // Usage: node desktop/tests/packaging/check-artifacts.mjs [--dist <folder>] [--runtime <folder>] [--require-rpm]
@@ -39,8 +39,8 @@ const iconFiles = [
   '/usr/share/icons/hicolor/scalable/apps/opendoc-desktop.svg',
   '/usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg',
 ];
-// The agent integrations (I2) sit in the app's resources with their dot folders, which a careless file filter would drop, and the
-// design pack file type (E9) is a shared-mime entry that the package installs next to the .desktop file.
+// The agent integrations sit in the app's resources with their dot folders, which a careless file filter would drop, and the
+// design pack file type is a shared-mime entry that the package installs next to the .desktop file.
 const integrationFiles = [
   'resources/integrations/claude/.claude-plugin/marketplace.json',
   'resources/integrations/codex/.agents/plugins/marketplace.json',
@@ -129,7 +129,7 @@ check('AppImage', () => {
   return name;
 });
 
-// What the updater reads from inside each install (plan 3.7, S6): the type word, the feed (app-update.yml) and, for the AUR only, the
+// What the updater reads from inside each install: the type word, the feed (app-update.yml) and, for the AUR only, the
 // marker that switches it off. A file in a package is read straight from its archive (rpm through rpm2cpio).
 const debMember = (file, prefix) => tool('ar', ['t', file]).split('\n').find((entry) => entry.startsWith(prefix));
 const inPackage = (kind, file, inner) => {
@@ -160,7 +160,7 @@ for (const [kind, extension] of [['deb', '.deb'], ['pacman', '.pacman'], ['rpm',
   });
 }
 
-// The design pack file type (E9): the shared-mime entry is the repository's own file, and the .desktop file names its type, so a
+// The design pack file type: the shared-mime entry is the repository's own file, and the .desktop file names its type, so a
 // double-click on a *.opendoc.zip offers this app.
 const mimeSource = readFileSync(path.join(desktop, 'resources', 'mime', 'opendoc-desktop.xml'), 'utf8');
 const mimeType = mimeSource.match(/<mime-type type="([^"]+)"/)[1];

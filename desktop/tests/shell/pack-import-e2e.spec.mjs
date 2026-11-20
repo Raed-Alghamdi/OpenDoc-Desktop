@@ -1,5 +1,5 @@
 // A design pack opened from outside the page, with the page's real Import dialog (src/app/PackDialogs.tsx, mounted in src/app/main.tsx),
-// under Electron on the virtual display (plan E9, end to end). Two apps take part, each with its own profile and workspace:
+// under Electron on the virtual display (end to end). Two apps take part, each with its own profile and workspace:
 //   * the sender exports two themes through the Export dialog (so the packs are real files in output/packs/), and its Show in folder
 //     button reaches the shell, which reveals the file it just wrote;
 //   * the recipient (a workspace without those themes) is opened with a pack on the command line, then given packs by a second

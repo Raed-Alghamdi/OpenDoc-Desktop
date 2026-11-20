@@ -1,4 +1,4 @@
-// Which kind of install this is, and when the updater may run at all (plan 3.7, S6): every row of the detection order.
+// Which kind of install this is, and when the updater may run at all: every row of the detection order.
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';

@@ -1,4 +1,4 @@
-// The upgrade itself (plan 3.4): back up, run the registry's steps, move the pin, then `check` and `review` every document
+// The upgrade itself: back up, run the registry's steps, move the pin, then `check` and `review` every document
 // with the new version and report what failed. Each stage that fails stops the rest and says which one it was.
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';

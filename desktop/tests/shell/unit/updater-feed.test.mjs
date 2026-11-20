@@ -1,4 +1,4 @@
-// The release address rules (contracts, "Update rules"), the release page link and the files a release must list.
+// The release address rules, the release page link and the files a release must list.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { builtInRepository, feedProviderOptions, parseFeedAddress, releasePageUrl, releaseRepository, repositoryFromUpdateConfig, releaseTag, updateConfigIsLoopback } from '../../../src/main/updater/feed.mjs';

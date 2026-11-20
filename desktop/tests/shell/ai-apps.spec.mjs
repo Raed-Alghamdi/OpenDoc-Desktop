@@ -1,4 +1,4 @@
-// "Connect your AI apps" (plan I3) under Electron on the virtual display: the first-run offer, Skip, the menu item, Connect and Disconnect
+// "Connect your AI apps" under Electron on the virtual display: the first-run offer, Skip, the menu item, Connect and Disconnect
 // with fake vendor commands in a scratch world, a blocked result with the vendor's words, and the refresh at launch.
 // Every launch points the app's integration module at a scratch world (support/integrations.mjs): the real Claude Code and Codex
 // configuration is never read or written. Screenshots go to $OPENDOC_I3_SHOTS when it is set.

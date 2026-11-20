@@ -1,4 +1,4 @@
-// "Connect your AI apps" (plan I3): the shell's layer over the integration module (src/main/integrations). It builds the one
+// "Connect your AI apps": the shell's layer over the integration module (src/main/integrations). It builds the one
 // module instance of an app run, turns detect() and status() into the rows the screen draws, and keeps the startup refresh.
 // The screen itself is renderer/ai-apps.html; the calls it makes are registered in desktop-shell.mjs.
 import { readFileSync } from 'node:fs';

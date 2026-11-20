@@ -1,4 +1,4 @@
-// The read-only handshake with the service (contract "E3 and U4"): the app passes `readOnly: { reason, message }` to
+// The read-only handshake with the service: the app passes `readOnly: { reason, message }` to
 // prepareOpenDocService, and a service that does not set `readOnlySupported: true` is never started, so a workspace that
 // must be read-only is never served writable.
 import assert from 'node:assert/strict';

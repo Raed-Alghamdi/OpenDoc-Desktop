@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The real AppImage update, build 1 to build 2, on a virtual display with a scratch HOME (plan E7). Not part of `pnpm verify`: it needs
+// The real AppImage update, build 1 to build 2, on a virtual display with a scratch HOME. Not part of `pnpm verify`: it needs
 // two AppImages built by electron-builder, so it is run by hand:
 //
 //   node desktop/tests/shell/updater/appimage-run.mjs --first <build 1 output folder> --second <build 2 output folder> --work <empty scratch folder>

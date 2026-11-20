@@ -1,4 +1,4 @@
-// Robustness (plan E1 step 4): the service is restarted when it crashes or stops answering, a crash screen
+// Robustness: the service is restarted when it crashes or stops answering, a crash screen
 // (served by the app) shows when restarting stops helping, nothing survives a quit or a kill -9 of the main process,
 // and a second launch focuses the first instance.
 import { expect, test } from '@playwright/test';
@@ -21,7 +21,7 @@ test.describe.serial('the service is supervised', () => {
     await stubNative(app);
     page = await app.firstWindow();
     await libraryReady(page);
-    // What the page is told about the host (stream U's message listens to the same bridge), and a marker that shows the page is never reloaded.
+    // What the page is told about the host (the page's own message listens to the same bridge), and a marker that shows the page is never reloaded.
     await page.evaluate(() => { window.__states = []; window.__marker = 'same page'; window.opendocDesktop.onHostState(({ state }) => window.__states.push(state)); });
   });
 

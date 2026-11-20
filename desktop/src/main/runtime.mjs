@@ -1,5 +1,5 @@
 // The runtime the app carries: a folder with `node_modules/opendoc` (the CLI and service), `package.json` and
-// `build-info.json` ({ build, commit, builtAt }), built by the packaging work (E2). The app runs the CLI with its
+// `build-info.json` ({ build, commit, builtAt }), built by the packaging work. The app runs the CLI with its
 // own executable as Node (ELECTRON_RUN_AS_NODE), so users need no Node or npm.
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';

@@ -1,4 +1,4 @@
-// The build-aware version check (plan 3.7: "version first, then build"). No Electron import, so plain Node tests can load it.
+// The build-aware version check (version first, then build). No Electron import, so plain Node tests can load it.
 //
 // electron-updater's stock check (AppUpdater.isUpdateAvailable) parses both versions with semver and answers "no update" when they
 // are equal, so build 2 of 0.6.1 would never reach a user running build 1. This wraps any updater class:

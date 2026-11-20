@@ -1,4 +1,4 @@
-// The updater as the app uses it (plan 3.7): which install this is, when it checks, what the user is told and offered, and what
+// The updater as the app uses it: which install this is, when it checks, what the user is told and offered, and what
 // happens at quit. No Electron import: the shell hands in the config handle, the dialog, the updater factory and the app calls, so
 // the unit tests drive it with fakes. electron-updater itself is built by classes.mjs (see electron.mjs).
 //

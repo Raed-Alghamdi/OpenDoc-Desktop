@@ -1,4 +1,4 @@
-// Installing a deb, rpm or pacman file with one asynchronous pkexec call (plan 3.7, S6): the command lines, the checksum check done as
+// Installing a deb, rpm or pacman file with one asynchronous pkexec call: the command lines, the checksum check done as
 // root on a copy, and what exit codes 126 and 127 mean. A fake pkexec first on PATH runs the real script with fake package tools.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';

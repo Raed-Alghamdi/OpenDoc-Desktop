@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Makes the desktop app carry a version: desktop/package.json, and the PKGBUILD and .SRCINFO in desktop/aur (pkgver and pkgrel; the
-// checksum stays SKIP until aur-bump.yml fills it in for a real release). The contracts say `desktop/package.json` always equals the
+// checksum stays SKIP until aur-bump.yml fills it in for a real release). `desktop/package.json` always equals the
 // root `package.json`, and upstream's merge moves only the root one, so upstream-watch runs this after a merge that changed it.
 //
 // Usage: node desktop/release/set-version.mjs --version <x.y.z> [--build <n>] [--root <repository folder>]

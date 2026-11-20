@@ -96,7 +96,7 @@ export function prepare({
     back();
     throw new Error(`After the merge package.json says ${versionAt('HEAD')}, not ${plan.version}.`);
   }
-  // upstream moves only the root version; the desktop app follows it (contracts, "Version numbers").
+  // upstream moves only the root version; the desktop app follows it.
   const build = nextBuild(plan.version, tags);
   const changed = setDesktopVersion(repo, plan.version, build);
   if (changed.length) {

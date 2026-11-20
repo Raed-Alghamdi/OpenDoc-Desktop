@@ -1,4 +1,4 @@
-// "Connect your AI apps" (I3), below the screen: the module's options, the rows the screen draws, and what Connect, Disconnect and
+// "Connect your AI apps", below the screen: the module's options, the rows the screen draws, and what Connect, Disconnect and
 // Forget do through the real integration module with fake vendor commands. Every world is scratch: its own home, XDG folders, data
 // folder and PATH, with the login shell not read, so nothing here can reach the real Claude Code or Codex.
 import assert from 'node:assert/strict';

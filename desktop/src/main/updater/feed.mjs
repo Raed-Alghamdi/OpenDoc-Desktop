@@ -1,5 +1,5 @@
-// The release address (contracts, "Update rules"). The built-in one is electron-builder's `resources/app-update.yml` (the fork's GitHub
-// releases until the handover). `config.json` `updateFeed` overrides it: https only, and plain http only for loopback addresses so
+// The release address. The built-in one is electron-builder's `resources/app-update.yml` (the fork's GitHub
+// releases, until releases move to the upstream project). `config.json` `updateFeed` overrides it: https only, and plain http only for loopback addresses so
 // tests can use a local feed. Anything else is refused. No Electron import.
 
 /** The fork's releases: where release pages are when nothing else says (and the fallback when app-update.yml is missing). */

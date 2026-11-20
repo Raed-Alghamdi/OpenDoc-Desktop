@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Builds the runtime folder the desktop app carries (plan 3.3): this fork's OpenDoc core installed with npm into
+// Builds the runtime folder the desktop app carries: this fork's OpenDoc core installed with npm into
 // desktop/build/runtime/<platform>-<arch>, on the machine (or CI runner) that packages for that platform.
 //
 // Usage: node desktop/runtime/build.mjs [--build <integer>] [--skip-pack]

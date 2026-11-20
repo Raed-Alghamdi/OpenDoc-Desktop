@@ -1,4 +1,4 @@
-// Where the runtime lives (E3). The deb, rpm, pacman and macOS builds keep it in the app's resources folder, which stays
+// Where the runtime lives. The deb, rpm, pacman and macOS builds keep it in the app's resources folder, which stays
 // put. An AppImage's resources are inside a mount that exists only while the app runs, so a workspace's `node_modules` link
 // cannot point there: the AppImage copies the runtime to `<data>/runtime/<version>-<build>/` at launch and the app runs
 // everything from the copy. The workspace links name `<data>/runtime/current/node_modules`, and `current` is a link to the

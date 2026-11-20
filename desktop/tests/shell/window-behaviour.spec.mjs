@@ -1,5 +1,5 @@
-// Window behaviour (plan E1 step 3): the Leave/Stay dialog for the page's own prompt, the close guard for unsaved
-// drafts (decision D-d), a cancelled quit that leaves a working app, window state, and the stubbed-out OS calls.
+// Window behaviour: the Leave/Stay dialog for the page's own prompt, the close guard for unsaved
+// drafts, a cancelled quit that leaves a working app, window state, and the stubbed-out OS calls.
 import { expect, test } from '@playwright/test';
 import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';

@@ -1,6 +1,6 @@
-// .opendoc/desktop.json (contracts.md, C3): { pid, startedAt, version, build, readOnly? }, present while the app has the
+// .opendoc/desktop.json: { pid, startedAt, version, build, readOnly? }, present while the app has the
 // workspace open. `readOnly: { reason, message }` is there only while the app has the workspace open read-only: the CLI reads it
-// and refuses writes with that message (U4), and it is gone with the record, or from the next record when the workspace is writable. A file whose pid is gone, or whose pid now belongs to another program, is stale.
+// and refuses writes with that message, and it is gone with the record, or from the next record when the workspace is writable. A file whose pid is gone, or whose pid now belongs to another program, is stale.
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { processExists, runsSameProgram } from './process-info.mjs';

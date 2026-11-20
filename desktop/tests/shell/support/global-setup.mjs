@@ -62,7 +62,7 @@ async function unpackedApp(runtimeMarker) {
 /**
  * A workspace as npm leaves one (what a user has who synced a folder from a device that installed with npm): a real
  * node_modules, a package-lock.json, the exact pin, and a marker without `managed`. Made from the template by an npm install
- * of the same tarball, as the pre-U1 `init` did.
+ * of the same tarball, as `init` did before it could work without npm.
  */
 async function npmWorkspace(tarballFile) {
   await rm(npmGoldenWorkspace, { recursive: true, force: true });

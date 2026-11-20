@@ -1,4 +1,4 @@
-// The app's config.json (contracts.md, "the app's config.json keys"). Written only by the shell, read by the
+// The app's config.json. Written only by the shell, read by the
 // router skill and the updater. Unknown keys survive a rewrite; the file is replaced atomically with mode 0600.
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -63,10 +63,10 @@ export function forgetWorkspace(config, path) {
   });
 }
 
-/** The checkbox "Upgrade my workspaces without asking from now on" (contracts: `upgradeWithoutAsking`, a boolean). */
+/** The checkbox "Upgrade my workspaces without asking from now on" (`upgradeWithoutAsking`, a boolean). */
 export const upgradesWithoutAsking = async config => (await config.read()).upgradeWithoutAsking === true;
 export const setUpgradeWithoutAsking = (config, value) => config.update({ upgradeWithoutAsking: Boolean(value) });
 
-/** The first-run "Connect your AI apps" screen (contracts: `aiAppsOffered`, a boolean). Absent means it has not been shown. */
+/** The first-run "Connect your AI apps" screen (`aiAppsOffered`, a boolean). Absent means it has not been shown. */
 export const aiAppsOffered = async config => (await config.read()).aiAppsOffered === true;
 export const markAiAppsOffered = config => config.update({ aiAppsOffered: true });

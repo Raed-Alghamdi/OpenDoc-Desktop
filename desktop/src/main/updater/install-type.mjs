@@ -1,4 +1,4 @@
-// Which kind of install this is, and whether the in-app updater may run at all (plan 3.7, S6). The first match wins:
+// Which kind of install this is, and whether the in-app updater may run at all. The first match wins:
 //   development run                           inactive (unless a test switch names a resources folder)
 //   resources/update-disabled                 managed   the package manager owns the app (the AUR package): no updater object, no network
 //   config.json checkForUpdates === false     off       switched off by the user: no updater object, no network

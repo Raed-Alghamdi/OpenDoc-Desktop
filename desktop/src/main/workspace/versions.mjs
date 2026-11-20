@@ -1,4 +1,4 @@
-// The version table (plan 3.4): a workspace's pin against the app's runtime. Pure functions, no files.
+// The version table: a workspace's pin against the app's runtime. Pure functions, no files.
 export const packageNames = { normal: '@ryanyahya/opendoc', headless: '@ryanyahya/opendoc-headless' };
 
 /** `{ major, minor, patch }` for an exact stable version `x.y.z` (what the CLI's isStableVersion accepts), else null. */

@@ -1,4 +1,4 @@
-// The stable copy (contracts C4): the app's `integrations/` folder copied to its data folder, so Claude Code (which reads a local
+// The stable copy: the app's `integrations/` folder copied to its data folder, so Claude Code (which reads a local
 // marketplace in place) and the other apps are never pointed into the app bundle or an AppImage mount, which move or vanish.
 import { rename, rm } from 'node:fs/promises';
 import { requiredFiles } from './apps.mjs';

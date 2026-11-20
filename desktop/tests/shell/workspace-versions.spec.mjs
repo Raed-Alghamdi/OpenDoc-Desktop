@@ -1,4 +1,4 @@
-// E3 (plan 3.4): linking a workspace to the app's OpenDoc, the version table, read-only for real, the upgrade with its backup,
+// Linking a workspace to the app's OpenDoc, the version table, read-only for real, the upgrade with its backup,
 // the result screen and Restore, Create without npm, the CLI next to the app, the AppImage's runtime copy, and the backups
 // list. Every launch has a scratch HOME with its own XDG folders (support/app.mjs), so backups and runtime copies land inside
 // tmp/shell-tests, never in the real data folder.
@@ -238,7 +238,7 @@ test.describe.serial('opening: the link, adoption and the pin', () => {
   });
 });
 
-// ---- read-only for real (U4): the service opens the workspace read-only, the banner shows the app's message, a write is refused
+// ---- read-only for real: the service opens the workspace read-only, the banner shows the app's message, a write is refused
 
 const patchMessage = 'This workspace is on OpenDoc 0.6.9, newer than the 0.6.1 in this app. Update the app to edit it.';
 const minorMessage = 'This workspace was upgraded by OpenDoc 0.7. Update the app to edit it.';

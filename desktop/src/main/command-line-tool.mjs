@@ -1,4 +1,4 @@
-// The `opendoc` command for agents, as the app sees it (plan 3.5). The file work is in cli-shim.mjs.
+// The `opendoc` command for agents, as the app sees it. The file work is in cli-shim.mjs.
 //   AppImage (Linux, started through its AppImage): at every launch the command in ~/.local/bin is written or pointed
 //   at this AppImage, and the user is told once if ~/.local/bin is not on their PATH.
 //   macOS: the menu item "Install Command-Line Tool" installs it; at launch an installed command is kept current.

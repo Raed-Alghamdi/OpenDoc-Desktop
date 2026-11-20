@@ -1,4 +1,4 @@
-// A deb, rpm or pacman install end to end in the real app (plan E7): the update downloads in the background, "Restart to Update" runs
+// A deb, rpm or pacman install end to end in the real app: the update downloads in the background, "Restart to Update" runs
 // one pkexec call (a fake one on PATH, with fake package tools), a cancelled prompt keeps the download and the app keeps running, a
 // corrupted download is refused, and the window stays alive while the password prompt is open. Also "what changed", shown once.
 import { expect, test } from '@playwright/test';

@@ -1,6 +1,6 @@
 // The git half of upstream-watch.yml (desktop/release/prepare.mjs, set-version.mjs, fake-upstream.mjs) on scratch repositories:
 // an "upstream", the fork's bare "origin" and a working clone on `roadmap`. Nothing here reaches a network or the real repositories.
-// The last test chains this with decide.mjs for each row of E13's "done when" list.
+// The last test chains this with decide.mjs for each row of the release rules.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -219,7 +219,7 @@ test('set-version is idempotent and changes only the desktop version and the AUR
   assert.throws(() => setDesktopVersion(w.work, '0.6', 1), /x\.y\.z/);
 });
 
-// The rehearsal the integrator runs on GitHub: fake upstream branches made by fake-upstream.mjs, a test target branch.
+// The rehearsal a maintainer runs on GitHub: fake upstream branches made by fake-upstream.mjs, a test target branch.
 test('a rehearsal never writes main or a real tag: fake upstream patch, minor and conflict on a test branch', () => {
   const w = world();
   git(w.work, 'checkout', '--quiet', '-b', 'test/dryrun');
@@ -269,7 +269,7 @@ test('the command line writes the workflow outputs', () => {
   assert.match(lines.candidate_sha, /^[0-9a-f]{40}$/);
 });
 
-// E13's "done when", end to end on the scratch repositories: what prepare finds feeds what decide.mjs does with the check results.
+// The release rules, end to end on the scratch repositories: what prepare finds feeds what decide.mjs does with the check results.
 test('the done-when list, row by row, through prepare and decide', () => {
   const outcome = (w, { gate, verify = 'success', desktop: built = 'success', mode = 'auto', tags = ['desktop-v0.6.1-1'] }) => {
     const found = prepare(options(w, { mode, tags }));

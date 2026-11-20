@@ -1,5 +1,5 @@
 // What the app's runtime says about itself, read from its files (nothing is run): the OpenDoc version and edition, the
-// workspace format its CLI writes, and whether its service can open a workspace read-only (U4).
+// workspace format its CLI writes, and whether its service can open a workspace read-only.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { packageNames, parseVersion } from './versions.mjs';
@@ -29,7 +29,7 @@ export function withoutComments(source) {
 }
 
 /**
- * Whether the runtime's service honours `readOnly` (U4 sets `readOnlySupported: true` on what `prepareOpenDocService`
+ * Whether the runtime's service honours `readOnly` (the service sets `readOnlySupported: true` on what `prepareOpenDocService`
  * returns). Read from the service's source, so it is known before anything is changed; the service host checks the real
  * object when it starts, and fails with `read-only-unsupported` if this guess was wrong. Comments are ignored, and so is a
  * type (`readOnlySupported: true;` in an interface): only the property of an object literal counts, which ends in `,` or `}`.

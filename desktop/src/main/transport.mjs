@@ -1,4 +1,4 @@
-// The one module that carries the app's requests to the OpenDoc service, with no port anywhere (plan 3.2, S3's Host A).
+// The one module that carries the app's requests to the OpenDoc service, with no port anywhere.
 //
 // The service runs in a child of this executable (ELECTRON_RUN_AS_NODE, tsx loaded, the workspace as its working
 // directory). The main process answers `app://opendoc` by sending each request over the child's IPC channel; the
@@ -96,7 +96,7 @@ function creditGate(size) {
  * Start the service host for the workspace at `root`.
  * @param options.location { entry, tsx } from serviceLocation(); null when the runtime has no service
  * @param options.signal aborts a start that is still going (the app is quitting); the host is killed
- * @param options.readOnly { reason, message } to run the service read-only (U4); a service that cannot fails with code 'read-only-unsupported'
+ * @param options.readOnly { reason, message } to run the service read-only; a service that cannot fails with code 'read-only-unsupported'
  */
 export async function startTransport({ root, location, logFile, startupTimeout = 30_000, signal, readOnly }) {
   if (!location) throw new TransportError('The OpenDoc runtime that comes with the app was not found, so the workspace cannot be opened.');

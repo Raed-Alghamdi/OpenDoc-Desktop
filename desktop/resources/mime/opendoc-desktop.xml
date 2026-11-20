@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The OpenDoc design pack file type (E9). The deb, rpm and pacman packages install this file as
+     /usr/share/mime/packages/opendoc-desktop.xml, and the .desktop file's MimeType line names the type, so a double-click on a
+     *.opendoc.zip opens the app with the file's path. A pack is still a ZIP file, so it stays a subclass of application/zip: archive
+     managers keep offering to open it, and plain *.zip files are not matched by this entry. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-opendoc-pack">
+    <comment>OpenDoc design pack</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.opendoc.zip"/>
+    <generic-icon name="package-x-generic"/>
+  </mime-type>
+</mime-info>

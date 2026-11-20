@@ -78,7 +78,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await request(path, init)).json();
 }
 
-/* Design packs (C5). Export and install are JSON; inspect uploads the chosen file as multipart and runs no pack code. */
+/* Design packs. Export and install are JSON; inspect uploads the chosen file as multipart and runs no pack code. */
 export type PackItemInfo = { kind: 'theme' | 'template'; id: string; selected: boolean };
 export type PackExportInput = { themes: string[]; templates: string[]; id?: string; name?: string; version?: string; author?: string; license?: string };
 export type PackExportResult = { file: string; relativeFile?: string; sha256: string; items: PackItemInfo[]; previews: string[] };

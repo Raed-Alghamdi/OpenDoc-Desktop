@@ -4,7 +4,7 @@ import { comparePin, isManagedHere, packageMetadata, readWorkspaceMarker, worksp
 import { readOnlyCode, type ReadOnlyState } from '../shared/read-only';
 
 /**
- * Which `opendoc` commands may run while a workspace is read-only (plan 3.4): reading, rendering into `.opendoc/`,
+ * Which `opendoc` commands may run while a workspace is read-only (the version policy): reading, rendering into `.opendoc/`,
  * exporting into `output/`, and the export history. A command that is on neither list is refused, so a command
  * added later is safe until someone decides. tests/read-only.test.ts keeps both lists in step with the registry.
  * Each entry is the command path as typed; `create` and `update` also depend on a flag (see `isWriteCommand`).
@@ -43,7 +43,7 @@ export function isWriteCommand(command: string, args: string[]): boolean {
 }
 
 /**
- * In a workspace the desktop app manages, a pin newer than this runtime is read-only (plan 3.4): the same minor with a newer
+ * In a workspace the desktop app manages, a pin newer than this runtime is read-only (the version policy): the same minor with a newer
  * patch, or a newer minor. The app's own opening says the same in its own words; this covers the CLI run on its own.
  */
 async function pinReadOnly(root: string): Promise<ReadOnlyState | null> {

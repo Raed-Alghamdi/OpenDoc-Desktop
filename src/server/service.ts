@@ -129,7 +129,7 @@ export async function prepareOpenDocService(options: { root: string; production:
     if (!materialCache || materialCache.version !== materialsVersion) materialCache = { version: materialsVersion, result: scanMaterials(root, workspace.list()) };
     return materialCache.result.catch(error => { materialCache = undefined; throw error; });
   }
-  // Pack block (P1): Import pauses the watcher for the catalog folders while files are published, then replays what it missed.
+  // Pack block: Import pauses the watcher for the catalog folders while files are published, then replays what it missed.
   let packsPaused = false;
   const pausedPaths = new Set<string>();
   const packHooks: PackHooks = {
@@ -359,7 +359,7 @@ export async function prepareOpenDocService(options: { root: string; production:
           selectedAsset = { kind: asset.kind, id: asset.id, revision: asset.revision,
             ...(requested.variation !== undefined ? { variation: requested.variation } : {}), ...(requested.face !== undefined ? { face: requested.face } : {}) };
         }
-        // One selection, or a list (C1): `selection` stays the first of `selections`.
+        // One selection, or a list: `selection` stays the first of `selections`.
         if (value.selection != null && value.selections != null) throw new Error('Send selection or selections, not both.');
         const selections = value.selections != null ? readSelections(value.selections, value.blockId) : [readSelection(value.selection, value.blockId)].filter(item => item !== null);
         // Every selected place is observed context for agents, so each must be in the document, on a page it has.
@@ -467,7 +467,7 @@ export async function prepareOpenDocService(options: { root: string; production:
           const value = await body(req);
           if (state.status !== 'ready' || state.artifact?.hash !== value.hash) throw new Conflict('The preview changed. Wait for the latest version before commenting.');
           if (value.selections != null) {
-            // Several places: a list of selections, the first of which may be a phrase (C1). `blockId` is optional and, if sent, is the first place.
+            // Several places: a list of selections, the first of which may be a phrase. `blockId` is optional and, if sent, is the first place.
             if (value.selection != null) throw new Error('Send selection or selections, not both.');
             const selections = readSelections(value.selections, value.blockId ?? (Array.isArray(value.selections) ? value.selections[0]?.blockId : null) ?? null);
             if (value.blockId != null && value.blockId !== selections[0]?.blockId) throw new Error('The first selection must be the comment\'s block.');
@@ -561,7 +561,7 @@ export async function prepareOpenDocService(options: { root: string; production:
       if (closed) throw new Error('OpenDoc is closing.');
       try {
         await clearPendingPackUploads(root); // Half-staged uploads of a crashed run would hold upload slots for an hour.
-        // One source watcher feeds the catalogs, history and the workspace. Pack installs (P1) pause and resume it from here.
+        // One source watcher feeds the catalogs, history and the workspace. Pack installs pause and resume it from here.
         watcher = openWatcher();
         workspace.on('workspace-error', error => console.error('Workspace refresh failed:', error));
         await workspace.refresh();

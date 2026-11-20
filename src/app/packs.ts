@@ -44,7 +44,7 @@ export function chosenText(choice: Pick<PackChoice, 'themes' | 'templates'>) {
   return parts.length ? parts.join(' and ') : 'Nothing';
 }
 
-/* The export form. C5 takes a name, an ID, a version, an author and a license; there is no description. */
+/* The export form. The export route takes a name, an ID, a version, an author and a license; there is no description. */
 
 export interface ExportForm { name: string; version: string; author: string; license: string }
 export const emptyExportForm: ExportForm = { name: '', version: '1.0.0', author: '', license: '' };
@@ -190,7 +190,7 @@ export function createHostRegistry() {
 export const importHosts = createHostRegistry();
 
 /**
- * The entry point for the desktop shell (E9) and anything else outside the dialog: open Import, optionally with a pack file
+ * The entry point for the desktop shell and anything else outside the dialog: open Import, optionally with a pack file
  * already chosen. It inspects at once when a file is given; nothing is installed until the user ticks trust and presses Install.
  */
 export function openPackImport(file?: PackFileInput) { importEntry.open(file); }

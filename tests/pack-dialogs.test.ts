@@ -56,7 +56,7 @@ test('pack names become IDs the server accepts, and the file name is known befor
   assert.equal(packFileName(form({ name: 'تصميم' }), 'acme'), 'acme-1.0.0.opendoc.zip');
 });
 
-test('the export request sends what C5 accepts and leaves empty fields to the server', () => {
+test('the export request sends what the pack export route accepts and leaves empty fields to the server', () => {
   const choice = { themes: ['acme'], templates: ['report'] };
   assert.deepEqual(exportRequest(choice, form()), { themes: ['acme'], templates: ['report'], version: '1.0.0' });
   assert.deepEqual(exportRequest(choice, form({ name: ' Acme design ', author: ' Sam ', license: 'Use freely.', version: '1.2.0' })),

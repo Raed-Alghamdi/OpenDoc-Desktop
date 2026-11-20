@@ -239,7 +239,7 @@ process.on('SIGTERM', () => { rmSync('.opendoc/server.json', { force: true }); p
   assert.match(lines.pop()!, /not running/);
 });
 
-test('C3: start refuses beside the desktop app before validating the installation', async t => {
+test('start refuses beside the desktop app before validating the installation', async t => {
   const f = await fixture();
   try {
     await control(f.root, 'desktop.json', desktopJson(alive(t)));
@@ -249,7 +249,7 @@ test('C3: start refuses beside the desktop app before validating the installatio
   } finally { await f.cleanup(); }
 });
 
-test('C3: start reuses a verified service', async t => {
+test('start reuses a verified service', async t => {
   const f = await fixture();
   const lines = printed(t);
   try {
@@ -260,7 +260,7 @@ test('C3: start reuses a verified service', async t => {
   } finally { await f.cleanup(); }
 });
 
-test('C3: comments add works directly beside the desktop app', async t => {
+test('comments add works directly beside the desktop app', async t => {
   const f = await fixture();
   printed(t);
   try {
@@ -275,7 +275,7 @@ test('C3: comments add works directly beside the desktop app', async t => {
   } finally { await f.cleanup(); }
 });
 
-test('C3: export works directly beside the desktop app', { timeout: 60_000 }, async t => {
+test('export works directly beside the desktop app', { timeout: 60_000 }, async t => {
   const f = await fixture();
   try {
     const calls: string[] = [];
@@ -288,7 +288,7 @@ test('C3: export works directly beside the desktop app', { timeout: 60_000 }, as
   } finally { await f.cleanup(); }
 });
 
-test('C3: history is not recorded by CLI commands beside the desktop app, and is once the record is stale', async t => {
+test('history is not recorded by CLI commands beside the desktop app, and is once the record is stale', async t => {
   const f = await fixture();
   try {
     await control(f.root, 'desktop.json', desktopJson(alive(t)));
@@ -299,7 +299,7 @@ test('C3: history is not recorded by CLI commands beside the desktop app, and is
   } finally { await f.cleanup(); }
 });
 
-test('C3: history restore refuses unsaved text edits beside the desktop app or the service, and passes with no owner or a stale record', { timeout: 60_000 }, async t => {
+test('history restore refuses unsaved text edits beside the desktop app or the service, and passes with no owner or a stale record', { timeout: 60_000 }, async t => {
   const f = await fixture();
   printed(t);
   try {
@@ -366,7 +366,7 @@ async function snapshot(root: string) {
   return out;
 }
 
-test('C3: packs install refuses beside the desktop app, after taking the lock, and changes nothing', { timeout: 60_000 }, async t => {
+test('packs install refuses beside the desktop app, after taking the lock, and changes nothing', { timeout: 60_000 }, async t => {
   const f = await packFixture(t);
   await control(f.recipient, 'desktop.json', desktopJson(alive(t)));
   const before = await snapshot(f.recipient);
@@ -376,7 +376,7 @@ test('C3: packs install refuses beside the desktop app, after taking the lock, a
   assert.equal((await installPack(f.recipient, f.file, { dryRun: true })).installed, false);
 });
 
-test('C3: packs install still refuses beside a service with the stop-first message', { timeout: 60_000 }, async t => {
+test('packs install still refuses beside a service with the stop-first message', { timeout: 60_000 }, async t => {
   const f = await packFixture(t);
   const live = await sessionServer(t);
   await control(f.recipient, 'server.json', JSON.stringify({ origin: live.origin, token: live.token, pid: process.pid }));
@@ -485,7 +485,7 @@ test('a record the app is still writing is read again before it is refused', asy
   assert.deepEqual(await workspaceOwner(root), { mode: 'desktop', pid });
 });
 
-test('C3: start and packs install refuse beside an unreadable desktop record instead of running under the app', { timeout: 60_000 }, async t => {
+test('start and packs install refuse beside an unreadable desktop record instead of running under the app', { timeout: 60_000 }, async t => {
   const f = await fixture();
   try {
     await control(f.root, 'desktop.json', 'not json');

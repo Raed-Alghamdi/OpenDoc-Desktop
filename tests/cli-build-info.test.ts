@@ -11,7 +11,7 @@ const run = promisify(execFile);
 
 /**
  * The desktop app's runtime has the layout `<runtime>/node_modules/opendoc`, with `build-info.json` beside
- * `node_modules` (contracts, "Version numbers"), not inside the package. This makes a light stand-in: a real copy of the
+ * `node_modules`, not inside the package. This makes a light stand-in: a real copy of the
  * package's code (a link would resolve back to the checkout) and links to the checkout's dependencies.
  */
 async function runtimeLike(t: TestContext, buildInfo?: unknown) {

@@ -16,7 +16,7 @@ export function isStableVersion(value: unknown): boolean {
 }
 
 /**
- * Where a workspace's pin stands against the running OpenDoc (plan 3.4):
+ * Where a workspace's pin stands against the running OpenDoc (the version policy):
  * `current` is the same minor with the same or an older patch (it opens normally and the app moves the pin up),
  * `newer-patch` and `newer-minor` open read-only, and `older-minor` is an upgrade only the app can run.
  */
@@ -114,8 +114,8 @@ export async function isManagedHere(root: string) {
 }
 
 /**
- * The installed application of a workspace the desktop app manages, which is the app's own runtime. The 3.4 version
- * table applies instead of the exact npm pin, and the CLI never says "npm install": a workspace from an older minor
+ * The installed application of a workspace the desktop app manages, which is the app's own runtime. The version
+ * policy table applies instead of the exact npm pin, and the CLI never says "npm install": a workspace from an older minor
  * is the app's to upgrade. A newer pin returns the runtime and the read-only guard (read-only.ts) keeps writes out.
  */
 async function appHoldsReadOnly(root: string): Promise<boolean> {

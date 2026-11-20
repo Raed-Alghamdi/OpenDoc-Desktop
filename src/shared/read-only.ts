@@ -1,4 +1,4 @@
-/** Why the desktop app opened a workspace read-only (plan 3.4). The app writes the message; every surface shows it as given. */
+/** Why the desktop app opened a workspace read-only (the version policy). The app writes the message; every surface shows it as given. */
 export const readOnlyReasons = ['newer-patch', 'newer-minor', 'declined-upgrade', 'restored-backup'] as const;
 export interface ReadOnlyState { reason: typeof readOnlyReasons[number]; message: string }
 

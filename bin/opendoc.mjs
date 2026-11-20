@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import './closed-output.mjs';
 import { register } from 'tsx/esm/api';
 
 register();

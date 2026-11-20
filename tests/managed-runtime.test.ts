@@ -184,11 +184,34 @@ test('the version table in a managed workspace: older patch opens, newer patch a
 
 test('update in a managed workspace says to update the app, before it asks any registry', { timeout: 120_000 }, async t => {
   const workspace = await created(t);
-  for (const args of [['update'], ['update', '--check'], ['update', '--version', '9.9.9']]) {
+  // Installing is refused, with an error exit, whatever the options. (There is no npm on this PATH, so a registry call would fail differently.)
+  for (const args of [['update'], ['update', '--version', '9.9.9']]) {
     const result = await opendoc(workspace, ...args, '--json');
     assert.equal(result.code, 1, args.join(' '));
-    assert.match(JSON.parse(result.stdout.trim().split('\n').at(-1)!).error, /managed by the OpenDoc desktop app\. Update the app instead\./);
+    const body = JSON.parse(result.stdout.trim().split('\n').at(-1)!);
+    assert.match(body.error, /managed by the OpenDoc desktop app\. Update the app instead\./);
+    assert.deepEqual([body.ok, body.status], [false, 'error']);
+    const plain = await opendoc(workspace, ...args);
+    assert.equal(plain.code, 1, args.join(' '));
+    assert.match(plain.stderr, /managed by the OpenDoc desktop app\. Update the app instead\./);
   }
+});
+
+test('update --check in a managed workspace answers without an error and without the registry', { timeout: 120_000 }, async t => {
+  const workspace = await created(t);
+  const message = "The OpenDoc desktop app manages this workspace's OpenDoc and updates it with the app: use Help > Check for Updates... (or your package manager for the AUR build).";
+  for (const args of [['update', '--check'], ['update', '--check', '--version', '9.9.9']]) {
+    const result = await opendoc(workspace, ...args, '--json');
+    assert.equal(result.code, 0, args.join(' '));
+    assert.deepEqual(JSON.parse(result.stdout), { status: 'managed', managed: true, currentVersion: pkg.version, check: true, explicit: args.includes('--version'), message });
+    const plain = await opendoc(workspace, ...args);
+    assert.equal(plain.code, 0, args.join(' '));
+    assert.equal(plain.stdout, `OpenDoc ${pkg.version}. ${message}\n`);
+    assert.equal(plain.stderr, '');
+  }
+  // Nothing was installed or written by asking.
+  const result = await opendoc(workspace, 'update', '--help');
+  assert.match(result.stdout, /In a workspace the desktop app manages, --check says that the app updates it and installing is refused/);
 });
 
 test('the flag counts only where the app\'s runtime is found: an npm checkout treats a managed marker as an npm workspace', { timeout: 120_000 }, async t => {

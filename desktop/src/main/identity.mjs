@@ -17,6 +17,8 @@ export const serviceOrigin = `${shellScheme}://${serviceHost}`;
 export const environment = {
   runtime: 'OPENDOC_DESKTOP_RUNTIME',
   healthInterval: 'OPENDOC_DESKTOP_HEALTH_MS',
+  // A JSON file of options for the integration module (ai-apps.mjs). Honoured only by an app that is not packaged.
+  integrations: 'OPENDOC_DESKTOP_INTEGRATIONS_OPTIONS',
 };
 
 /** The app's version, from desktop/package.json (equal to OpenDoc's own). Electron's app.getVersion() reads the

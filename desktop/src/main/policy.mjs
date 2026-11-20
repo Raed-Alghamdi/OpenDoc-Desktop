@@ -1,4 +1,5 @@
 // What a window may load, open and ask for. Pure functions, so the rules are tested without Electron.
+import { createHash } from 'node:crypto';
 import { shellHost, shellScheme } from './identity.mjs';
 
 const webSchemes = new Set(['http:', 'https:', 'mailto:']);
@@ -14,12 +15,35 @@ export function originOf(value) {
   return url.protocol === `${shellScheme}:` ? `${url.protocol}//${url.host}` : url.origin;
 }
 
-/** The Content-Security-Policy for the workspace pages: the service's own address and nothing else. */
-export function contentSecurityPolicy() {
+/**
+ * The sha256 source of every inline script in an HTML page, as a CSP source ('sha256-...'). The page's own boot script (it applies
+ * the saved appearance before the first paint) is inline, and the policy allows scripts only from the page's address, so the
+ * policy names that exact text instead of allowing inline scripts in general. Scripts with a src are not inline and need nothing.
+ */
+export function inlineScriptHashes(html) {
+  const hashes = new Set();
+  for (const [, attributes, text] of String(html).matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
+    if (/\ssrc\s*=/i.test(` ${attributes}`) || !text) continue;
+    hashes.add(`'sha256-${createHash('sha256').update(text, 'utf8').digest('base64')}'`);
+  }
+  return [...hashes];
+}
+
+/** The page the service answers for the app's start address: its inline scripts are the ones the policy names. */
+export function isIndexPage(value) {
+  const url = parseUrl(value);
+  return Boolean(url && (['', '/', '/index.html'].includes(url.pathname)));
+}
+
+/**
+ * The Content-Security-Policy for the workspace pages: the service's own address and nothing else.
+ * `scriptHashes`: sources from inlineScriptHashes for the page being served (the index page only).
+ */
+export function contentSecurityPolicy({ scriptHashes = [] } = {}) {
   return [
     "default-src 'none'",
     // pdf.js compiles WebAssembly for some image formats.
-    "script-src 'self' 'wasm-unsafe-eval'",
+    ['script-src', "'self'", "'wasm-unsafe-eval'", ...scriptHashes].join(' '),
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",

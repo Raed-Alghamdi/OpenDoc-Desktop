@@ -6,12 +6,14 @@ import { readFile, realpath, rmdir, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { showAbout } from './about.mjs';
 import { installAppImageShim } from './cli-shim.mjs';
+import { AiApps, integrationOptions, refreshProblem } from './ai-apps.mjs';
 import { CommandLineTool } from './command-line-tool.mjs';
-import { createConfig, forgetWorkspace, rememberWorkspace, setUpgradeWithoutAsking, upgradesWithoutAsking } from './config.mjs';
+import { aiAppsOffered, createConfig, forgetWorkspace, markAiAppsOffered, rememberWorkspace, setUpgradeWithoutAsking, upgradesWithoutAsking } from './config.mjs';
 import { clearStaleDesktopRecord, inspectDesktopRecord, removeDesktopRecord, writeDesktopRecord } from './desktop-record.mjs';
 import { appVersion, environment, serviceOrigin } from './identity.mjs';
 import { acquireWorkspaceLock, clearStaleWorkspaceLock, WorkspaceLockError } from './lock.mjs';
 import { installMenu } from './menu.mjs';
+import { createPackInbox, readPackFile, revealablePackPath } from './pack-import.mjs';
 import { isShellUrl, originOf } from './policy.mjs';
 import { cliPath, readBuildInfo, runCli } from './runtime.mjs';
 import { inspectService } from './service-session.mjs';
@@ -36,15 +38,22 @@ export class DesktopShell {
    * @param options.runtime the runtime folder the app carries (resources/runtime)
    * @param options.dataDir where backups and the AppImage's runtime copy go (workspace/paths.mjs)
    * @param options.appImage true when running from an AppImage: the runtime is copied to the data folder at launch
+   * @param options.packs the inbox of design packs opened from outside (launch arguments, a second launch, macOS open-file; pack-import.mjs)
+   * @param options.integrationSettings { packaged, resourcesPath, env } for the AI apps module (ai-apps.mjs)
    */
-  constructor({ runtime, templatePath, fallbackRoot, dataDir, appImage = false }) {
+  constructor({ runtime, templatePath, fallbackRoot, dataDir, appImage = false, packs, integrationSettings = {} }) {
     const userData = app.getPath('userData');
     this.runtime = runtime;
     this.dataDir = dataDir ?? join(userData, 'data');
     this.appImage = appImage;
     this.modules = join(runtime, 'node_modules'); // what a workspace's node_modules link names
     this.runtimeProblem = null;
-    this.shellWindows = new Set(); // the status, result and backups windows
+    this.shellWindows = new Set(); // the status, result, backups and AI apps windows
+    this.packs = packs ?? createPackInbox();
+    this.pendingPack = null; // { name, bytes }: a pack that waits for a workspace page to take it
+    this.integrationSettings = integrationSettings;
+    this.aiApps = null;
+    this.aiAppsWindow = null;
     this.statusState = { title: '', text: '' };
     this.result = null;
     this.fallbackRoot = fallbackRoot; // Development: the repository, when the runtime folder has no service
@@ -80,8 +89,11 @@ export class DesktopShell {
     this.build = await readBuildInfo(this.runtime);
     this.version = await appVersion();
     guardAllContents(() => this.#origins());
+    this.aiApps = new AiApps(integrationOptions({ ...this.integrationSettings, dataDir: this.dataDir, build: this.build?.build ?? null }), { log: line => console.log(`[integrations] ${line}`) });
     this.#registerIpc();
     await this.#refreshMenu();
+    // A pack opened before now (a launch argument, macOS open-file) is read now and waits for a workspace page.
+    this.packs.attach(path => void this.#packOpened(path));
     const { defaultWorkspace } = await this.config.read();
     if (typeof defaultWorkspace === 'string' && await this.#isWorkspace(defaultWorkspace)) {
       const result = await this.openWorkspace(defaultWorkspace);
@@ -91,6 +103,8 @@ export class DesktopShell {
     void this.commandLine.launch();
     // The updater checks only while the app is open: at launch, then daily. It never holds the app back or throws.
     void this.updates.start();
+    // Keeps what the user connected in step with this app's files; a no-op when nothing is connected.
+    void this.#refreshIntegrations();
   }
 
   /** The AppImage keeps its runtime in a mount that goes away with the app: use a copy in the data folder (workspace/appimage-runtime.mjs). */
@@ -271,11 +285,15 @@ export class DesktopShell {
       current.window = new WorkspaceWindow({ session: ses, stateFile: this.windowStateFile });
       await current.window.ready;
       current.window.closed.then(() => this.#windowClosed(current));
+      // A pack that waits goes to the page each time the workspace page has loaded (also after a reload).
+      current.window.window.webContents.on('did-finish-load', () => this.#deliverPack());
       await this.#load(current);
+      this.#deliverPack();
       await lock.release();
       lock = null;
       this.#closePicker();
       await this.#refreshMenu();
+      void this.#offerAiApps();
       for (const note of prepared.notes) void ask('showMessageBox', this.#parent(), { type: 'info', title: note.title, message: note.message, detail: note.detail, buttons: ['OK'], noLink: true });
       return { ok: true };
     } catch (error) {
@@ -527,6 +545,8 @@ export class DesktopShell {
         reveal: () => { if (this.current) shell.showItemInFolder(this.current.root); },
         showLog: () => this.#showLog(),
         backups: () => void this.#showBackups(),
+        importPack: () => void this.#importFromDialog(),
+        connectAiApps: () => void this.#showAiApps(),
         about: () => void showAbout(this.#parent(), this.build),
         installCommand: () => void this.commandLine.installFromMenu(),
         checkForUpdates: () => void this.updates.checkNow(),
@@ -591,14 +611,86 @@ export class DesktopShell {
     } catch (error) { return { ok: false, message: error.message }; }
   }
 
+  // ---------- AI apps ----------
+
+  /** The window of "Connect your AI apps". `first`: the first-run offer (its button says Skip). */
+  async #showAiApps({ first = false } = {}) {
+    if (this.aiAppsWindow && !this.aiAppsWindow.isDestroyed()) { this.aiAppsWindow.focus(); return; }
+    const window = createShellWindow(this.#shellSession(), { width: 800, height: 760, title: 'Connect your AI apps', parent: this.#parent() });
+    this.aiAppsWindow = window;
+    this.#trackShellWindow(window);
+    window.on('closed', () => { if (this.aiAppsWindow === window) this.aiAppsWindow = null; });
+    await window.loadURL(shellPageUrl('ai-apps.html', first ? { first: '1' } : {})).catch(() => {});
+  }
+
+  /** Once, after the first workspace is open: show the screen and record that it was shown, whatever the user does with it. */
+  async #offerAiApps() {
+    try {
+      if (this.stopped || await aiAppsOffered(this.config)) return;
+      await markAiAppsOffered(this.config);
+      await this.#showAiApps({ first: true });
+    } catch (error) { console.error('Could not offer the AI apps screen:', error.message); }
+  }
+
+  /** At launch: update what is connected. Silent unless it failed for an app that is still connected. */
+  async #refreshIntegrations() {
+    try {
+      const problems = refreshProblem(await this.aiApps.refresh());
+      if (!problems || this.stopped) return;
+      const answer = await ask('showMessageBox', this.#parent(), {
+        type: 'warning', title: 'AI apps could not be updated', message: 'opendoc-desktop could not update OpenDoc in an AI app it is connected to.',
+        detail: `${problems.join('\n\n')}\n\nThe screen shows the details, and lets you disconnect.`,
+        buttons: ['Open Connect AI Apps', 'Close'], defaultId: 0, cancelId: 1, noLink: true,
+      });
+      if (answer.response === 0) await this.#showAiApps();
+    } catch (error) { console.error('Could not update the AI apps:', error.message); }
+  }
+
+  // ---------- design packs opened from outside (E9) ----------
+
+  /** A pack path from a launch argument, a second launch, open-file or File > Import: read it here, then give it to the page. */
+  async #packOpened(path) {
+    if (this.stopped) return;
+    const read = await readPackFile(path);
+    if (!read.ok) {
+      await ask('showMessageBox', this.#parent(), { type: 'error', title: 'Could not open the design pack', message: read.message, buttons: ['Close'], defaultId: 0, cancelId: 0, noLink: true });
+      return;
+    }
+    // The Import dialog reviews one pack at a time: a newer one replaces one that has not been delivered.
+    this.pendingPack = { name: read.name, bytes: read.bytes };
+    this.#focus();
+    this.#deliverPack();
+  }
+
+  /** Send the waiting pack to the open workspace's page once it is loaded (its preload holds it until the page listens). */
+  #deliverPack() {
+    const pack = this.pendingPack;
+    const current = this.current;
+    const window = current?.window?.window;
+    if (!pack || !window || window.isDestroyed() || originOf(window.webContents.mainFrame.url) !== serviceOrigin) return;
+    this.pendingPack = null;
+    this.#toPage(current, 'opendoc:import-pack', pack);
+  }
+
+  async #importFromDialog() {
+    // A name filter cannot say ".opendoc.zip" everywhere: macOS can only filter on the last extension.
+    const filters = process.platform === 'darwin'
+      ? [{ name: 'Design packs (.opendoc.zip)', extensions: ['zip'] }]
+      : [{ name: 'OpenDoc design packs', extensions: ['opendoc.zip'] }, { name: 'All zip files', extensions: ['zip'] }];
+    const choice = await ask('showOpenDialog', this.#parent(), { title: 'Import a design pack', buttonLabel: 'Import', properties: ['openFile'], filters });
+    if (!choice.canceled && choice.filePaths[0]) await this.#packOpened(choice.filePaths[0]);
+  }
+
   // ---------- the pages' calls ----------
 
   #registerIpc() {
-    const handle = (channel, run) => ipcMain.handle(`shell:${channel}`, (event, ...args) => {
+    // `only` (a function giving a window) narrows a call to the one window that has a use for it.
+    const handle = (channel, run, only) => ipcMain.handle(`shell:${channel}`, (event, ...args) => {
       // Only the app's own pages, in their top frame, may call the main process.
       // The page must also be in one of the app's own windows (the picker, or the workspace window showing the crash screen).
       const windows = [this.picker, this.current?.window?.window, ...this.shellWindows].filter(window => window && !window.isDestroyed());
       if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame || !isShellUrl(event.senderFrame.url) || !windows.some(window => window.webContents === event.sender)) throw new Error('Not allowed.');
+      if (only && only()?.webContents !== event.sender) throw new Error('Not allowed.');
       return run(...args);
     });
     handle('recent', async () => {
@@ -646,6 +738,25 @@ export class DesktopShell {
       return { ok: true };
     });
     handle('backup-delete', name => this.#deleteBackup(name));
+    handle('pending-pack', () => this.pendingPack ? { name: this.pendingPack.name } : null);
+    const aiAppsWindow = () => this.aiAppsWindow && !this.aiAppsWindow.isDestroyed() ? this.aiAppsWindow : null;
+    handle('ai-apps-info', () => this.aiApps.info(), aiAppsWindow);
+    handle('ai-apps-connect', ids => this.aiApps.connect(ids), aiAppsWindow);
+    handle('ai-apps-disconnect', (ids, options) => this.aiApps.disconnect(ids, { forget: options?.forget === true }), aiAppsWindow);
+    // Skip and Close both end here; the first-run flag is already set (it is set when the screen is shown).
+    handle('ai-apps-close', () => { this.aiAppsWindow?.close(); return { ok: true, quiet: true }; }, aiAppsWindow);
+
+    // Called by the workspace page (not a shell page), so it has its own check: the open workspace's window, top frame, service address.
+    ipcMain.handle('opendoc:show-in-folder', async (event, path) => {
+      const current = this.current;
+      const window = current?.window?.window;
+      const frame = event.senderFrame;
+      if (!current || !window || window.isDestroyed() || event.sender !== window.webContents || !frame || frame !== event.sender.mainFrame || originOf(frame.url) !== serviceOrigin) throw new Error('Not allowed.');
+      const real = await revealablePackPath(current.root, path);
+      if (!real) { console.warn('[show-in-folder] refused a path that is not a file inside output/packs of the open workspace'); return { ok: false }; }
+      shell.showItemInFolder(real);
+      return { ok: true };
+    });
   }
 
   /** A second launch of the app: show the window that is already open. */

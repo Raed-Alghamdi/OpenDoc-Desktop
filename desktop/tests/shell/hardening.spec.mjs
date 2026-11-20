@@ -29,11 +29,11 @@ test.describe.serial('hardening', () => {
     expect(exposed).toEqual({ require: 'undefined', process: 'undefined', module: 'undefined', buffer: 'undefined', shell: 'undefined' });
   });
 
-  test('the workspace page gets the two bridge functions, and nothing else of the shell', async () => {
+  test('the workspace page gets the bridge functions, and nothing else of the shell', async () => {
     const bridge = await page.evaluate(() => ({ keys: Object.keys(window.opendocDesktop ?? {}).sort(), types: Object.values(window.opendocDesktop ?? {}).map(item => typeof item) }));
-    expect(bridge).toEqual({ keys: ['onChange', 'onHostState'], types: ['function', 'function'] });
+    expect(bridge).toEqual({ keys: ['onChange', 'onHostState', 'onImportPack', 'showInFolder'], types: ['function', 'function', 'function', 'function'] });
     // Each subscription returns the function that stops it.
-    expect(await page.evaluate(() => [window.opendocDesktop.onChange(() => {}), window.opendocDesktop.onHostState(() => {})].map(item => typeof item))).toEqual(['function', 'function']);
+    expect(await page.evaluate(() => [window.opendocDesktop.onChange(() => {}), window.opendocDesktop.onHostState(() => {}), window.opendocDesktop.onImportPack(() => {})].map(item => typeof item))).toEqual(['function', 'function', 'function']);
     // A page that is not the workspace (a window the page opens, an iframe, the app's own pages) has no bridge.
     const frame = await page.evaluate(async () => {
       const element = document.createElement('iframe');

@@ -3,7 +3,7 @@ import { appName, originalProject } from './identity.mjs';
 import { basename } from 'node:path';
 
 /**
- * @param actions { open, create, openRecent(path), reveal, showLog, backups, about, installCommand, checkForUpdates, setAutomaticUpdates(checked), restartToUpdate, openExternal(url) }
+ * @param actions { open, create, openRecent(path), reveal, showLog, backups, importPack, connectAiApps, about, installCommand, checkForUpdates, setAutomaticUpdates(checked), restartToUpdate, openExternal(url) }
  * @param state { workspaceOpen: boolean, recent: string[], updates?: { show, automatic, checkEnabled, restartReady, installing } }
  */
 export function menuTemplate({ platform = process.platform, actions, state }) {
@@ -13,8 +13,9 @@ export function menuTemplate({ platform = process.platform, actions, state }) {
     : [{ label: 'No recent workspaces', enabled: false }];
   const about = { label: `About ${appName}`, click: () => actions.about() };
   const updates = updateItems({ actions, state: state.updates });
+  const aiApps = { label: 'Connect AI Apps…', click: () => actions.connectAiApps() };
   return [
-    ...(mac ? [{ label: appName, submenu: [about, ...updates, { type: 'separator' }, { label: 'Install Command-Line Tool…', click: () => actions.installCommand() }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }] : []),
+    ...(mac ? [{ label: appName, submenu: [about, ...updates, { type: 'separator' }, { label: 'Install Command-Line Tool…', click: () => actions.installCommand() }, aiApps, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }] : []),
     {
       label: 'File',
       submenu: [
@@ -22,6 +23,7 @@ export function menuTemplate({ platform = process.platform, actions, state }) {
         { label: 'New Workspace…', accelerator: 'CmdOrCtrl+Shift+N', click: () => actions.create() },
         { label: 'Open Recent', submenu: recent },
         { type: 'separator' },
+        { label: 'Import Design Pack…', enabled: state.workspaceOpen, click: () => actions.importPack() },
         { label: 'Reveal Workspace', enabled: state.workspaceOpen, click: () => actions.reveal() },
         { label: 'Workspace Backups…', click: () => actions.backups() },
         { label: 'Show Log', click: () => actions.showLog() },
@@ -35,7 +37,7 @@ export function menuTemplate({ platform = process.platform, actions, state }) {
       role: 'help',
       submenu: [
         { label: `${originalProject.name} on GitHub`, click: () => actions.openExternal(originalProject.url) },
-        ...(mac ? [] : [{ type: 'separator' }, about, ...updates]),
+        ...(mac ? [] : [{ type: 'separator' }, about, ...updates, { type: 'separator' }, aiApps]),
       ],
     },
   ];

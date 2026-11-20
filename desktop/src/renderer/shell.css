@@ -40,3 +40,33 @@ table.backups td.name { font-weight: 600; overflow-wrap: anywhere; }
 table.backups td:last-child { white-space: nowrap; }
 table.backups td button { margin-left: 6px; padding: 4px 10px; }
 [hidden] { display: none !important; }
+.checking { display: flex; align-items: center; gap: 10px; color: var(--muted); margin: 8px 0 16px; }
+.spinner { width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; border-top-color: var(--line); border-right-color: var(--accent); } }
+.error { color: var(--danger); }
+ul.apps { list-style: none; margin: 0 0 16px; padding: 0; border: 1px solid var(--line); border-radius: 8px; }
+ul.apps li.app { padding: 12px 14px; border-top: 1px solid var(--line); }
+ul.apps li.app:first-child { border-top: 0; }
+ul.apps .line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+ul.apps .name { font-weight: 600; }
+ul.apps input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+ul.apps .row-actions { margin-left: auto; display: flex; gap: 8px; }
+ul.apps .row-actions button { padding: 4px 10px; }
+ul.apps .note { margin: 6px 0 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.badge { font-size: 12px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
+.badge.connected { color: var(--accent); border-color: var(--accent); }
+.badge.broken, .badge.gone, .badge.stale { color: var(--danger); border-color: var(--danger); }
+.bar { margin: 8px 0 20px; }
+#results h2 { margin-top: 8px; }
+#results h3 { font-size: 15px; margin: 0 0 4px; }
+section.result { border: 1px solid var(--line); border-left-width: 4px; border-radius: 8px; padding: 12px 14px; margin: 0 0 12px; }
+section.result.good { border-left-color: var(--accent); }
+section.result.bad { border-left-color: var(--danger); }
+section.result pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px ui-monospace, 'SF Mono', Menlo, monospace; max-height: 240px; overflow: auto; }
+section.result pre.failure { color: var(--danger); }
+details.steps { margin-top: 8px; }
+details.steps summary { cursor: pointer; color: var(--muted); }
+.step { padding: 8px 0; border-top: 1px solid var(--line); margin-top: 8px; }
+.step .command { color: var(--muted); }
+.step.failed strong { color: var(--danger); }

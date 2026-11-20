@@ -30,13 +30,13 @@ const ar = which('ar');
 const bsdtar = which('bsdtar');
 
 // The files a package carries that the script reads, as a folder tree.
-function stage(root, kind, { mime = true, integrations = true, policy = policySource, helperMode = 0o755 } = {}) {
+function stage(root, kind, { mime = true, integrations = true, policy = policySource, helperMode = 0o755, menuName = 'OpenDoc Desktop' } = {}) {
   const write = (file, text) => { mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); writeFileSync(path.join(root, file), text); };
   write('usr/share/icons/hicolor/scalable/apps/opendoc-desktop.svg', '<svg/>');
   write('usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg', '<svg/>');
   write('opt/opendoc-desktop/resources/package-type', `${kind}\n`);
   write('opt/opendoc-desktop/resources/app-update.yml', 'provider: github\nowner: someone\nrepo: something\n');
-  write('usr/share/applications/opendoc-desktop.desktop', '[Desktop Entry]\nName=opendoc-desktop\nExec=/opt/opendoc-desktop/opendoc-desktop %U\nMimeType=application/x-opendoc-pack;\n');
+  write('usr/share/applications/opendoc-desktop.desktop', `[Desktop Entry]\nName=${menuName}\nExec=/opt/opendoc-desktop/opendoc-desktop %U\nMimeType=application/x-opendoc-pack;\n`);
   if (mime) write('usr/share/mime/packages/opendoc-desktop.xml', mimeSource);
   write(`usr/share/polkit-1/actions/${policyName}`, policy);
   write('opt/opendoc-desktop/resources/updater/install-update', helperSource);
@@ -77,7 +77,7 @@ function makeDist(scratch, options = {}) {
   writeFileSync(appImage, [
     `#!${process.execPath}`,
     "const fs = require('fs');",
-    "const files = { 'resources/app-update.yml': 'provider: github\\nowner: someone\\n', 'opendoc-desktop.desktop': '[Desktop Entry]\\nMimeType=application/x-opendoc-pack;\\n' };",
+    "const files = { 'resources/app-update.yml': 'provider: github\\nowner: someone\\n', 'opendoc-desktop.desktop': '[Desktop Entry]\\nName=OpenDoc Desktop\\nMimeType=application/x-opendoc-pack;\\n' };",
     "if (process.argv[2] !== '--appimage-extract' || !(process.argv[3] in files)) process.exit(1);",
     "const target = 'squashfs-root/' + process.argv[3];",
     "fs.mkdirSync(require('path').dirname(target), { recursive: true });",
@@ -127,7 +127,10 @@ test('a dist with no .rpm passes without --require-rpm and every installer that 
     assert.match(result.stdout, /^ok {4}pacman update prompt: /m);
     assert.match(result.stdout, /^ok {4}rpm update prompt: no \.rpm/m);
     assert.match(result.stdout, /^ok {4}pacman file type: application\/x-opendoc-pack/m);
-    assert.match(result.stdout, /^ok {4}AppImage update files: .*MimeType/m);
+    assert.match(result.stdout, /^ok {4}deb menu name: Name=OpenDoc Desktop$/m);
+    assert.match(result.stdout, /^ok {4}pacman menu name: Name=OpenDoc Desktop$/m);
+    assert.match(result.stdout, /^ok {4}rpm menu name: no \.rpm/m);
+    assert.match(result.stdout, /^ok {4}AppImage update files: .*MimeType and Name=OpenDoc Desktop/m);
     assert.match(result.stdout, /^ok {4}latest-linux\.yml: .*3 files/m);
   });
 });
@@ -136,7 +139,7 @@ test('--require-rpm turns a missing .rpm back into a failure, in every check tha
   withDist({}, (scratch) => {
     const result = run(scratch, '--require-rpm');
     assert.equal(result.status, 1);
-    for (const label of ['rpm', 'rpm update files', 'rpm file type', 'rpm update prompt', 'latest-linux.yml']) assert.match(result.stdout, new RegExp(`^FAIL {2}${label}: `, 'm'), label);
+    for (const label of ['rpm', 'rpm update files', 'rpm file type', 'rpm menu name', 'rpm update prompt', 'latest-linux.yml']) assert.match(result.stdout, new RegExp(`^FAIL {2}${label}: `, 'm'), label);
     assert.match(result.stdout, /^ok {4}deb: /m);
   });
 });
@@ -164,6 +167,16 @@ test('a package without the shared-mime entry or the integrations fails, naming 
     assert.equal(result.status, 1);
     assert.match(result.stdout, /^FAIL {2}deb: missing resources\/integrations\/claude\/\.claude-plugin\/marketplace\.json/m);
     assert.match(result.stdout, /^FAIL {2}pacman: missing resources\/integrations\//m);
+  });
+});
+
+test('a package whose menu entry has the product name instead of the menu name fails', { skip }, () => {
+  withDist({ menuName: 'opendoc-desktop' }, (scratch) => {
+    const result = run(scratch);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /^FAIL {2}deb menu name: the \.desktop Name is the menu name/m);
+    assert.match(result.stdout, /^FAIL {2}pacman menu name: /m);
+    assert.match(result.stdout, /^ok {4}deb file type: /m);
   });
 });
 

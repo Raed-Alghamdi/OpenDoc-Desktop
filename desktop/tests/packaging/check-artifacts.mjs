@@ -3,7 +3,7 @@
 // just its name; the AppImage has no version in its name), and latest-linux.yml lists every installer and carries build: and commit:.
 //
 // It also checks that each package carries the agent integrations with their dot folders and the design pack file type (the
-// shared-mime entry and the .desktop file's MimeType line).
+// shared-mime entry and the .desktop file's MimeType line), and that the .desktop file gives the menu name.
 //
 // Usage: node desktop/tests/packaging/check-artifacts.mjs [--dist <folder>] [--runtime <folder>] [--require-rpm]
 // Reads package metadata with dpkg-deb, pacman and rpm where they exist, and otherwise straight from the archive (ar and bsdtar),
@@ -33,6 +33,8 @@ const tool = (command, args, input) => {
 };
 const field = (text, name) => text.match(new RegExp(`^${name}\\s*[:=]\\s*(.*)$`, 'm'))?.[1].trim();
 const files = readdirSync(dist);
+// The menu name: electron-builder.yml's linux.desktop.entry (without it, the menu would show the product name, opendoc-desktop).
+const menuName = 'OpenDoc Desktop';
 
 // The scalable and symbolic icons are mapped in through fpm (electron-builder installs only the sized PNGs).
 const iconFiles = [
@@ -211,6 +213,14 @@ for (const [kind, extension] of [['deb', '.deb'], ['pacman', '.pacman'], ['rpm',
     assert.match(field(entry, 'Exec'), / %U$/, 'Exec must pass the opened file (%U)');
     return `${mimeType} for *.opendoc.zip, MimeType and %U in the .desktop file`;
   });
+  check(`${kind} menu name`, () => {
+    const name = files.find((entry) => entry.endsWith(extension));
+    if (!name && kind === 'rpm' && !values['require-rpm']) return 'no .rpm in dist (not required without --require-rpm)';
+    if (!name) throw new Error(`no ${extension} in dist`);
+    const entry = inPackage(kind, path.join(dist, name), 'usr/share/applications/opendoc-desktop.desktop').stdout;
+    assert.equal(field(entry, 'Name'), menuName, 'the .desktop Name is the menu name');
+    return `Name=${menuName}`;
+  });
 }
 
 check('AppImage update files', () => {
@@ -226,8 +236,10 @@ check('AppImage update files', () => {
     // The desktop entry inside the image names the type (an AppImage cannot install the shared-mime entry itself; docs/DESKTOP.md).
     const entry = spawnSync(path.join(dist, name), ['--appimage-extract', 'opendoc-desktop.desktop'], { cwd: scratch, encoding: 'utf8', timeout: 120_000 });
     assert.equal(entry.status, 0, entry.stderr);
-    assert.equal(field(readFileSync(path.join(scratch, 'squashfs-root', 'opendoc-desktop.desktop'), 'utf8'), 'MimeType'), `${mimeType};`);
-    return 'app-update.yml (github), no package-type, MimeType in the desktop entry';
+    const desktopEntry = readFileSync(path.join(scratch, 'squashfs-root', 'opendoc-desktop.desktop'), 'utf8');
+    assert.equal(field(desktopEntry, 'MimeType'), `${mimeType};`);
+    assert.equal(field(desktopEntry, 'Name'), menuName, 'the desktop entry Name is the menu name');
+    return `app-update.yml (github), no package-type, MimeType and Name=${menuName} in the desktop entry`;
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

@@ -255,14 +255,20 @@ test('opendoc start never serves a writable UI on a workspace whose pin is newer
   assert.equal(((await write.json()) as { code: string }).code, 'workspace-read-only');
 });
 
-/** An ordinary process that the CLI's name check accepts as the app: a copy of `sleep` named opendoc-desktop. */
+/**
+ * An ordinary process that the CLI's name check accepts as the app: a copy of `sleep` named opendoc-desktop.
+ * Where `sleep` is a multicall binary (the Rust coreutils on Ubuntu 26.04) it picks its tool from argv[0], so on
+ * Linux argv[0] stays `sleep`; Linux names the process after the file it runs, so the CLI still sees opendoc-desktop.
+ * macOS keeps the default argv[0], the program's own path. (Node itself will not do: it renames its main thread.)
+ */
 async function standInForApp(t: TestContext) {
   const folder = await scratch(t);
   const program = resolve(folder, 'opendoc-desktop');
-  await cp((await run('which', ['sleep'])).stdout.trim(), program);
-  const child = spawn(program, ['600'], { stdio: 'ignore' });
+  await cp((await run('which', ['sleep'])).stdout.trim(), program, { dereference: true });
+  const child = spawn(program, ['600'], { stdio: 'ignore', ...(process.platform === 'linux' ? { argv0: 'sleep' } : {}) });
   t.after(() => { child.kill('SIGKILL'); });
-  await new Promise(accept => setTimeout(accept, 100));
+  await new Promise(accept => setTimeout(accept, 300));
+  assert.equal(child.exitCode, null, 'the stand-in for the app is still running');
   return child.pid!;
 }
 

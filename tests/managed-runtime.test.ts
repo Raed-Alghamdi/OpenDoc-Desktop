@@ -256,19 +256,28 @@ test('opendoc start never serves a writable UI on a workspace whose pin is newer
 });
 
 /**
- * An ordinary process that the CLI's name check accepts as the app: a copy of `sleep` named opendoc-desktop.
- * Where `sleep` is a multicall binary (the Rust coreutils on Ubuntu 26.04) it picks its tool from argv[0], so on
- * Linux argv[0] stays `sleep`; Linux names the process after the file it runs, so the CLI still sees opendoc-desktop.
- * macOS keeps the default argv[0], the program's own path. (Node itself will not do: it renames its main thread.)
+ * An ordinary process that the CLI's name check accepts as the app. On Linux the check reads /proc/<pid>/comm, so the
+ * stand-in is Node renaming itself (process.title sets comm), and the test waits until the name shows there. A renamed
+ * copy of `sleep` does not do on Linux: on Ubuntu 26.04 sleep is the Rust coreutils, and a copy under another name exits
+ * at once. On macOS the check asks ps, and the stand-in is a copy of `sleep` named opendoc-desktop.
  */
 async function standInForApp(t: TestContext) {
-  const folder = await scratch(t);
-  const program = resolve(folder, 'opendoc-desktop');
-  await cp((await run('which', ['sleep'])).stdout.trim(), program, { dereference: true });
-  const child = spawn(program, ['600'], { stdio: 'ignore', ...(process.platform === 'linux' ? { argv0: 'sleep' } : {}) });
+  const linux = process.platform === 'linux';
+  let child: ReturnType<typeof spawn>;
+  if (linux) child = spawn(process.execPath, ['-e', "process.title = 'opendoc-desktop'; setInterval(() => {}, 60_000);"], { stdio: 'ignore' });
+  else {
+    const program = resolve(await scratch(t), 'opendoc-desktop');
+    await cp((await run('which', ['sleep'])).stdout.trim(), program);
+    child = spawn(program, ['600'], { stdio: 'ignore' });
+  }
   t.after(() => { child.kill('SIGKILL'); });
-  await new Promise(accept => setTimeout(accept, 300));
-  assert.equal(child.exitCode, null, 'the stand-in for the app is still running');
+  const deadline = Date.now() + 15_000;
+  const named = async () => !linux || (await readFile(`/proc/${child.pid}/comm`, 'utf8').catch(() => '')).trim() === 'opendoc-desktop';
+  do {
+    await new Promise(accept => setTimeout(accept, 100));
+    assert.equal(child.exitCode, null, 'the stand-in for the app is still running');
+  } while (!await named() && Date.now() < deadline);
+  assert.ok(await named(), 'the stand-in for the app is named opendoc-desktop');
   return child.pid!;
 }
 

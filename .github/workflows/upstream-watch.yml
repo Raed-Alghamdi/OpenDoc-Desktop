@@ -140,7 +140,7 @@ jobs:
             if [ -n "$DETAIL" ]; then echo "- $DETAIL"; fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # verify.yml on the merged candidate: its matrix (Ubuntu and both Macs), timeouts and steps, unchanged.
+  # verify.yml on the merged candidate: its matrix, timeouts and steps, unchanged.
   verify:
     needs: prepare
     if: needs.prepare.outputs.action == 'check'

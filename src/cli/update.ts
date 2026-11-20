@@ -17,11 +17,26 @@ export interface UpdateResult {
   explicit: boolean;
   cleanupWarning?: string;
 }
+/**
+ * What `update --check` answers in a workspace the desktop app manages: nothing to check here, since the app brings the
+ * runtime and updates it. No registry is asked, so there are no target or latest versions. `currentVersion` is the
+ * running runtime's.
+ */
+export interface ManagedUpdateCheck {
+  status: 'managed';
+  managed: true;
+  currentVersion: string;
+  check: true;
+  explicit: boolean;
+  message: string;
+}
 export interface UpdateDependencies {
   npm?: (args: string[], cwd: string) => Promise<string>;
   beforeActivate?: (stage: string) => Promise<void>;
   afterActivationStep?: (step: 'dependencies' | 'manifest' | 'lockfile') => Promise<void>;
 }
+
+export const managedUpdateMessage = 'The OpenDoc desktop app manages this workspace\'s OpenDoc and updates it with the app: use Help > Check for Updates... (or your package manager for the AUR build).';
 
 function versionParts(value: string): Version | null {
   if (!isStableVersion(value)) return null;
@@ -298,7 +313,7 @@ export async function runUpdate(args: string[], root: string): Promise<void> {
   try {
     if (args.includes('--help') || args.includes('-h')) {
       const { edition } = workspaceIdentity(await packageMetadata(root), await readWorkspaceMarker(root));
-      const usage = `Usage: npx opendoc update [--check] [--version <exact>] [--json]\nChecks or installs the newest stable version compatible with the current pin. Use --version to explicitly choose a stable version, including a breaking update or downgrade. ${edition === 'normal' ? 'Stop OpenDoc before installing.' : 'Finish active OpenDoc Headless commands before installing. Updates preserve the Headless edition.'}`;
+      const usage = `Usage: npx opendoc update [--check] [--version <exact>] [--json]\nChecks or installs the newest stable version compatible with the current pin. Use --version to explicitly choose a stable version, including a breaking update or downgrade. In a workspace the desktop app manages, --check says that the app updates it and installing is refused. ${edition === 'normal' ? 'Stop OpenDoc before installing.' : 'Finish active OpenDoc Headless commands before installing. Updates preserve the Headless edition.'}`;
       console.log(json ? JSON.stringify({ usage }) : usage);
       return;
     }
@@ -314,6 +329,13 @@ export async function runUpdate(args: string[], root: string): Promise<void> {
         options.version = args[++index];
         if (!options.version || options.version.startsWith('-')) throw new Error('--version requires an exact stable version.');
       } else throw new Error(`Unknown update option: ${arg}. Use update [--check] [--version <exact>] [--json].`);
+    }
+    // Checking changes nothing, so the app's workspace answers it (without the registry) instead of refusing; installing still refuses.
+    if (options.check && await isManagedHere(root)) {
+      const managed: ManagedUpdateCheck = { status: 'managed', managed: true, currentVersion: (await packageMetadata()).version, check: true, explicit: options.version !== undefined, message: managedUpdateMessage };
+      if (json) console.log(JSON.stringify(managed));
+      else console.log(`OpenDoc ${managed.currentVersion}. ${managedUpdateMessage}`);
+      return;
     }
     const result = await updateWorkspace(root, options);
     if (json) console.log(JSON.stringify(result));

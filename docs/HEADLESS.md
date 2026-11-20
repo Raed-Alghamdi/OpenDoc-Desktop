@@ -286,6 +286,7 @@ Commands that only read, or that write the workspace's own files (`create`, `doc
 | `history restore` | Restores | Refuses while `.opendoc/current.json` shows unsaved text edits in that document | The same refusal, using the record the app writes |
 | `packs install` | Installs | Refuses: stop OpenDoc first | Refuses: use Import in the app, or close it |
 | `update` (one that would install) | Installs | Refuses until the service is stopped | Refuses: update the app instead |
+| `update --check` | Reports the available versions | Reports them | Reports them; in a workspace the app manages (see Update) it says so instead |
 | `start` | Starts the service | Reuses the running service | Refuses: the workspace is open in opendoc-desktop |
 | `stop` | Reports that nothing is running | Stops the service | Refuses: close opendoc-desktop |
 | `status` | `running: false` | `mode: "service"` | `mode: "desktop"` |
@@ -401,5 +402,7 @@ npx opendoc update --json
 ```
 
 Updates stay on `@ryanyahya/opendoc-headless` and pin the selected exact version while preserving authored documents, templates, themes, assets, feedback, and project records. They update the installed application and its guidance together; they do not overwrite local catalogs with newly shipped examples. See the [update rules](../README.md#update-an-existing-workspace) for compatible versions and explicit version selection.
+
+In a workspace the desktop app manages, the app brings the runtime and updates it, so `update` is refused ("Update the app instead") even with the app closed. `update --check` changes nothing and does not ask the npm registry there: it exits 0 and prints that the app manages the workspace's OpenDoc and updates it (Help > Check for Updates..., or the package manager for the AUR build). With `--json` it prints `{ "status": "managed", "managed": true, "currentVersion": "...", "check": true, "explicit": false, "message": "..." }`, with no target or latest versions.
 
 The workspace runs trusted TSX code. Render workers contain crashes and timeouts, not hostile code. The host agent's environment owns its own isolation and access controls; see [Security](../SECURITY.md).

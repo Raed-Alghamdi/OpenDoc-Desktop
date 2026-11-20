@@ -24,7 +24,9 @@ test('a watcher started on the finished folder sees edits that the one that atta
   // The publication: a new folder, a file hard-linked into it from the stage, and the stage removed.
   await mkdir(theme); await link(resolve(staged, 'design.md'), resolve(theme, 'design.md'));
   await rm(staged, { recursive: true });
-  await until(() => before.some(path => path.endsWith('design.md') || path.endsWith('acme')), 10_000);
+  // Give the earlier watcher a moment to report the publication. On macOS it may never report it (the failure this test is
+  // about), so the wait is best effort: what matters is what the replacement sees below.
+  await until(() => before.some(path => path.endsWith('design.md') || path.endsWith('acme')), 2_000).catch(() => {});
   // The earlier watcher loses the folder (the failure seen on macOS).
   await old.unwatch(theme);
   const next = await readyWatcher(open(after));

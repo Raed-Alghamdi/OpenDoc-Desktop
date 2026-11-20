@@ -109,4 +109,6 @@ export function inspectPack(file: Blob, name: string) {
   form.set('file', file, name);
   return api<PackInspection>('/api/packs/inspect', { method: 'POST', body: form });
 }
+/** Frees an inspected pack's place on the server (the app's own staging). It answers `removed: false` for one that is already gone. */
+export const discardStagedPack = (stagedId: string) => api<{ removed: boolean }>(`/api/packs/staged/${encodeURIComponent(stagedId)}`, { method: 'DELETE' });
 export const installPack = (stagedId: string) => api<PackInstallResult>('/api/packs/install', { method: 'POST', body: JSON.stringify({ stagedId, trust: true }) });

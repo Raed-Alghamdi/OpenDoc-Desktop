@@ -77,3 +77,36 @@ async function send(path: string, write: boolean, init?: RequestInit) {
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await request(path, init)).json();
 }
+
+/* Design packs (C5). Export and install are JSON; inspect uploads the chosen file as multipart and runs no pack code. */
+export type PackItemInfo = { kind: 'theme' | 'template'; id: string; selected: boolean };
+export type PackExportInput = { themes: string[]; templates: string[]; id?: string; name?: string; version?: string; author?: string; license?: string };
+export type PackExportResult = { file: string; relativeFile?: string; sha256: string; items: PackItemInfo[]; previews: string[] };
+export type PackInspection = {
+  stagedId: string;
+  manifest: { id: string; name: string; version: string; opendocVersion: string; author?: string; license?: string };
+  items: PackItemInfo[];
+  files: { path: string; bytes: number; sha256: string }[];
+  sha256: string;
+  compatibility: { compatible: boolean; requiredVersion: string; currentVersion: string };
+  conflicts: string[];
+  added: string[];
+  reused: string[];
+  previews: string[];
+  trust: string;
+};
+export type PackInstallResult = {
+  installed: { kind: 'theme' | 'template'; id: string; selected: boolean }[];
+  files?: string[];
+  alreadyInstalled?: boolean;
+  verification?: unknown;
+  visualReview?: string;
+};
+
+export const exportPack = (input: PackExportInput) => api<PackExportResult>('/api/packs/export', { method: 'POST', body: JSON.stringify(input) });
+export function inspectPack(file: Blob, name: string) {
+  const form = new FormData();
+  form.set('file', file, name);
+  return api<PackInspection>('/api/packs/inspect', { method: 'POST', body: form });
+}
+export const installPack = (stagedId: string) => api<PackInstallResult>('/api/packs/install', { method: 'POST', body: JSON.stringify({ stagedId, trust: true }) });

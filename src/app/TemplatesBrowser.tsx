@@ -9,6 +9,7 @@ import { Icon } from './ui/Icon';
 import type { CreatePreset } from './CreateDocumentDialog';
 import { GuideDialog } from './GuideDialog';
 import { PreviewPlaceholder } from './PreviewPlaceholder';
+import { PackCardCheck, PackHeadingButtons, PackImportHost, PackSelectionBar } from './PackDialogs';
 import { tagText, type TagState, type TagTarget } from './Tags';
 import { FilterBar, FilterChoices, useHashQuery, useSortPreference } from './FilterBar';
 import { compareNewest, compareText, detailsText, filtering, itemFacets, itemFilterKeys, matchesFilters, matchesSearch, noFilters, readItemFilters, sortItems, splitHash, type SortOption } from './libraryFilters';
@@ -124,6 +125,7 @@ export function TemplatesBrowser({ selection, generation, format = 'all', connec
     ? (['document', 'presentation'] as const).map(category => ({ format: category, items: visible.filter(item => (item.descriptor.documentFormat ?? 'document') === category) })).filter(group => group.items.length)
     : [{ format, items: visible }];
   const card = (item: TemplateItem, Title: 'h2' | 'h3') => <article className="template-card" key={item.id}>
+    <PackCardCheck kind="template" id={item.id} name={item.descriptor.name} />
     <a href={`#templates/${item.id}`} className="template-card-link" aria-labelledby={`template-title-${item.id}`}>
       <div className="template-card-mat" aria-hidden="true"><TemplatePreview item={item} /></div>
       <Title id={`template-title-${item.id}`}><bdi lang={textLang(item.descriptor.name, item.language)}>{item.descriptor.name}</bdi><Icon name="arrow" size={17} /></Title>
@@ -170,6 +172,8 @@ export function TemplatesBrowser({ selection, generation, format = 'all', connec
       </> : <div className="empty-state"><h1>{loaded ? 'Template not found' : 'Loading template…'}</h1><p>{loaded ? 'It may have been moved or removed from the workspace.' : 'Preparing its PDF preview.'}</p></div>}
     </> : <>
       <div className="library-heading"><h1>Templates</h1>
+        <div className="pack-heading-actions">
+        <PackHeadingButtons kind="template" count={items.length} connected={connected} />
         <Dialog.Root open={custom} onOpenChange={open => { setCustom(open); if (open) { setCopied(false); setCopyError(''); } }}>
           <Dialog.Trigger render={<Button />}><Icon name="plus" size={17} />Create template</Dialog.Trigger>
           <Dialog.Portal>
@@ -185,7 +189,9 @@ export function TemplatesBrowser({ selection, generation, format = 'all', connec
             </Dialog.Popup>
           </Dialog.Portal>
         </Dialog.Root>
+        </div>
       </div>
+      <PackSelectionBar kind="template" available={items.map(item => item.id)} loaded={loaded} connected={connected} />
       <FilterBar search={{ label: 'Search templates', value: query, onChange: value => update({ q: value }, { replace: true }) }}
         primary={<FilterChoices label="Template format" value={format} onChange={value => update({ format: value === 'all' ? null : value })} choices={[
           { value: 'all', label: 'All', count: items.length },
@@ -205,6 +211,7 @@ export function TemplatesBrowser({ selection, generation, format = 'all', connec
         ? <div className="empty-state"><h2>No matching {noun}templates</h2><p>Try another search or filter, or show every template.</p><Button onClick={() => update(Object.fromEntries(['q', ...itemFilterKeys].map(key => [key, null])))}>Clear filters</Button></div>
         : <div className="empty-state"><h2>No {noun}templates yet</h2><p>Choose Create template to find the skill to use in your coding agent.</p></div>)}
     </>}
+    <PackImportHost connected={connected} />
     {loadError && <div className="error-banner" role="alert"><span>{loadError}</span><Button onClick={() => setAttempt(value => value + 1)}>Try again</Button></div>}
   </section>;
 }

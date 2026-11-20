@@ -65,13 +65,13 @@ nice -n 19 ionice -c 3 node desktop/runtime/dist.mjs --linux pacman deb rpm AppI
 
 Everything after the script name goes to electron-builder, and `--publish never` is added if you leave `--publish` out. The config is `desktop/electron-builder.yml`, one file for every installer.
 
-**Test builds.** A packaged app ignores the environment switches that tests use (`OPENDOC_DESKTOP_RUNTIME`, `OPENDOC_DESKTOP_UPDATE_RESOURCES`, `OPENDOC_DESKTOP_HEALTH_MS`, `OPENDOC_DESKTOP_INTEGRATIONS_OPTIONS`, `OPENDOC_PACKAGE_TARBALL`) and refuses a plain-http `updateFeed`, so that a variable set for the next launch cannot choose the code or the update source of an installed app. A build that tests need to drive through those switches (for example a real AppImage updating from a feed on 127.0.0.1) is made as a test build, by writing `opendocTestBuild: true` into the `package.json` inside the app archive. electron-builder does that with its `extraMetadata` option, which `dist.mjs` forwards:
+**Test builds.** A packaged app ignores the environment switches that tests use (`OPENDOC_DESKTOP_RUNTIME`, `OPENDOC_DESKTOP_UPDATE_RESOURCES`, `OPENDOC_DESKTOP_HEALTH_MS`, `OPENDOC_DESKTOP_INTEGRATIONS_OPTIONS`, `OPENDOC_PACKAGE_TARBALL`) and refuses a plain-http `updateFeed`, so that a variable set for the next launch cannot choose the code or the update source of an installed app. A build that tests need to drive through those switches (for example a real AppImage updating from a feed on 127.0.0.1) is made as a test build, by writing `opendocTestBuild: true` into the `package.json` inside the app archive. `OPENDOC_DESKTOP_TEST_BUILD=1` makes `dist.mjs` pass that to electron-builder (as `-c.extraMetadata.opendocTestBuild=true`, which also works by hand) and print a TEST BUILD warning:
 
 ```sh
-nice -n 19 ionice -c 3 node desktop/runtime/dist.mjs --linux AppImage --publish never -c.extraMetadata.opendocTestBuild=true
+OPENDOC_DESKTOP_TEST_BUILD=1 nice -n 19 ionice -c 3 node desktop/runtime/dist.mjs --linux AppImage --publish never
 ```
 
-A release build is made without it (the release workflow does not pass it). Never publish or install a test build as your own app. See [Test builds](../docs/DESKTOP.md#run-it-from-a-checkout) in the desktop guide.
+A release build is made without it (the release workflow does not set it, and `check-release.mjs` fails any installer that carries the field). Never publish or install a test build as your own app. See [Test builds](../docs/DESKTOP.md#run-it-from-a-checkout) in the desktop guide.
 
 Linux, in `desktop/dist/`:
 

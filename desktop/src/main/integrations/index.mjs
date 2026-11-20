@@ -16,7 +16,7 @@
 //
 // detect() -> { checkedAt, environment, apps: [ { id, name, kind, command, present, canConnect, reason, executable, viaShim,
 //                 configFolder, configFolderExists, configVariable, configFolderSource } ] }
-//   Runs nothing but the user's login shell (`$SHELL -lc env`, for PATH, CLAUDE_CONFIG_DIR and CODEX_HOME). A command is looked up as
+//   Runs nothing but the user's login shell (`$SHELL -lc /usr/bin/env`, for PATH, CLAUDE_CONFIG_DIR and CODEX_HOME). A command is looked up as
 //   a file; a mise shim is never run (running one installs the tool), and counts as the app only when mise's install folders hold
 //   the real program. `reason` is a sentence for the screen. `environment.variables` says where each config variable came from.
 // connect(ids) -> { ok, copy: { ok, changed, path, summary }, results: [ { app, name, ok, code, changed, summary, steps } ] }

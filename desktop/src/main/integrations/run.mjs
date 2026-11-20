@@ -1,6 +1,6 @@
 // Running a program on the user's behalf, and reading their login shell. Nothing here decides what to run.
 import { spawn } from 'node:child_process';
-import { constants } from 'node:fs';
+import { constants, existsSync } from 'node:fs';
 import { access } from 'node:fs/promises';
 import { basename, delimiter } from 'node:path';
 
@@ -70,7 +70,7 @@ export async function isRunnable(path) {
   try { await access(path, constants.X_OK); return true; } catch { return false; }
 }
 
-/** The names asked for, read from what `$SHELL -lc env` prints. Lines that are not NAME=value are ignored (a profile may print
+/** The names asked for, read from what the login shell's environment dump prints. Lines that are not NAME=value are ignored (a profile may print
  *  a banner), and the last assignment of a name wins. Names not asked for are never kept. */
 export function parseEnvironment(text, names) {
   const wanted = new Set(names);
@@ -82,13 +82,17 @@ export function parseEnvironment(text, names) {
   return variables;
 }
 
-/** Ask the user's login shell for `names`: `$SHELL -lc env`, with a time limit. Resolves `{ ok, shell, variables, error }`; never throws.
+/** The program that prints the environment, by absolute path when there is one: a profile need not put the system folders on PATH
+ *  (Ubuntu's /etc/profile sets none), and a bare `env` would then be not found. `/usr/bin/env` exists on Linux and macOS. */
+export const environmentCommand = (exists = existsSync) => (exists('/usr/bin/env') ? '/usr/bin/env' : 'env');
+
+/** Ask the user's login shell for `names`: `$SHELL -lc /usr/bin/env` (plain `env` when that file is missing), with a time limit. Resolves `{ ok, shell, variables, error }`; never throws.
  *  The app's own environment (a launcher or the Dock) often lacks what the user's profile sets. */
 export async function readLoginEnvironment({ shell, env = process.env, names, timeoutMs = 8000, cwd }) {
   if (process.platform === 'win32') return { ok: false, shell: null, variables: {}, error: 'Login shells are not read on Windows.' };
   if (typeof shell !== 'string' || !shell.startsWith('/')) return { ok: false, shell: shell ?? null, variables: {}, error: 'No login shell is set (SHELL is empty or not an absolute path).' };
   if (!(await isRunnable(shell))) return { ok: false, shell, variables: {}, error: `The login shell ${shell} cannot be run.` };
-  const result = await runProgram(shell, ['-lc', 'env'], { env, cwd, timeoutMs, limit: 1024 * 1024 });
+  const result = await runProgram(shell, ['-lc', environmentCommand()], { env, cwd, timeoutMs, limit: 1024 * 1024 });
   if (result.timedOut) return { ok: false, shell, variables: {}, error: `The login shell did not finish within ${Math.round(timeoutMs / 1000)} seconds.` };
   if (result.spawnError) return { ok: false, shell, variables: {}, error: result.spawnError };
   // A profile that ends with a failing command still printed the environment; accept output when there is any.

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { createIntegrations } from '../../../src/main/integrations/index.mjs';
 import { findMiseInstall, isMiseShim } from '../../../src/main/integrations/detect.mjs';
+import { environmentCommand } from '../../../src/main/integrations/run.mjs';
 import { fakeCommand, miseInstall, miseShims, scratch } from './integrations-support.mjs';
 
 const byId = (detection, id) => detection.apps.find(app => app.id === id);
@@ -115,7 +116,7 @@ test('the config folders come from the app environment, and from the login shell
   assert.equal(byId(await createIntegrations(world.options()).detect(), 'claude').configFolder, join(world.home, '.claude'), 'the default folder');
 
   const shell = join(world.root, 'fake-shell');
-  await writeFile(shell, `#!/bin/sh\n[ "$1" = "-lc" ] && [ "$2" = "env" ] || exit 9\necho "welcome banner"\necho "CLAUDE_CONFIG_DIR=${join(world.root, 'c2')}"\necho "CODEX_HOME=~/codex-in-home"\necho "PATH=${world.bin}:/usr/bin"\necho "SECRET_TOKEN=do-not-keep"\n`);
+  await writeFile(shell, `#!/bin/sh\n[ "$1" = "-lc" ] && { [ "$2" = "env" ] || [ "$2" = "/usr/bin/env" ]; } || exit 9\necho "welcome banner"\necho "CLAUDE_CONFIG_DIR=${join(world.root, 'c2')}"\necho "CODEX_HOME=~/codex-in-home"\necho "PATH=${world.bin}:/usr/bin"\necho "SECRET_TOKEN=do-not-keep"\n`);
   await chmod(shell, 0o755);
   const integrations = createIntegrations(world.options({ readLoginShell: true, shell, env: world.env({ CLAUDE_CONFIG_DIR: join(world.root, 'c1'), PATH: '/nonexistent' }) }));
   const detection = await integrations.detect();
@@ -147,10 +148,27 @@ test('a login shell that hangs, fails or is missing falls back to the app enviro
   }
 });
 
+test('the environment is read even when the login shell\'s PATH has no system folders (Ubuntu\'s /etc/profile sets none)', async () => {
+  const world = await scratch();
+  // A stand-in login shell whose profile leaves PATH useless: it runs the command it is given with PATH pointing nowhere.
+  const shell = join(world.root, 'bare-shell');
+  await writeFile(shell, `#!/bin/sh\n[ "$1" = "-lc" ] || exit 9\nPATH=/nonexistent\nexport PATH\nexport CLAUDE_CONFIG_DIR=${join(world.root, 'from-bare-shell')}\neval "$2"\n`);
+  await chmod(shell, 0o755);
+  const detection = await createIntegrations(world.options({ readLoginShell: true, shell })).detect();
+  assert.deepEqual(detection.environment.loginShell, { read: true, error: null });
+  assert.equal(byId(detection, 'claude').configFolder, join(world.root, 'from-bare-shell'));
+  assert.equal(detection.environment.variables.CLAUDE_CONFIG_DIR.source, 'login shell');
+});
+
 test('a real login shell reads what the user profile sets', async () => {
   const world = await scratch();
   await writeFile(join(world.home, '.profile'), `export CLAUDE_CONFIG_DIR=${join(world.root, 'from-profile')}\n`);
   const detection = await createIntegrations(world.options({ readLoginShell: true, shell: '/bin/sh', env: world.env() })).detect();
   assert.equal(byId(detection, 'claude').configFolder, join(world.root, 'from-profile'));
   assert.equal(detection.environment.variables.CLAUDE_CONFIG_DIR.source, 'login shell');
+});
+
+test('the environment command is the absolute /usr/bin/env when it exists, and plain env otherwise', () => {
+  assert.equal(environmentCommand(path => path === '/usr/bin/env'), '/usr/bin/env');
+  assert.equal(environmentCommand(() => false), 'env');
 });

@@ -105,7 +105,7 @@ function readJson(file) { return JSON.parse(sync.readFileSync(file, 'utf8')); }
 export function runFake(name) {
   const args = process.argv.slice(2);
   const mode = process.env.FAKE_MODE ?? '';
-  sync.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ tool: name, args, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR ?? null, CODEX_HOME: process.env.CODEX_HOME ?? null, HOME: process.env.HOME ?? null, XDG: [process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME, process.env.XDG_CACHE_HOME].map(value => value ?? null), ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE ?? null, mode })}\n`);
+  sync.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ tool: name, args, cwd: process.cwd(), cwdMode: sync.statSync('.').mode & 0o777, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR ?? null, CODEX_HOME: process.env.CODEX_HOME ?? null, HOME: process.env.HOME ?? null, XDG: [process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME, process.env.XDG_CACHE_HOME].map(value => value ?? null), ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE ?? null, mode })}\n`);
   if (mode === 'slow') setTimeout(() => {}, 60_000);
   else ({ claude: fakeClaude, codex: fakeCodex, agy: fakeAgy })[name](args, mode);
 }

@@ -36,8 +36,8 @@
 //
 // The manifest is `integrations.json` in the app's data folder, the copy is `integrations/` beside it. Calls run one at a time.
 import { existsSync } from 'node:fs';
-import { rmdir } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { mkdir, rmdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dataDirectory } from '../workspace/paths.mjs';
@@ -78,12 +78,18 @@ export function createIntegrations(options = {}) {
   const now = options.now ?? (() => new Date());
   const commandTimeoutMs = options.commandTimeoutMs ?? 120_000;
   const extraPathDirectories = options.extraPathDirectories ?? fallbackPathDirectories(home);
-  // A neutral folder for the vendor commands, so a project's own settings never mix into what they list.
-  const workingDirectory = options.workingDirectory ?? tmpdir();
+  // A neutral folder for the vendor commands, so a project's own settings never mix into what they list. It is the app's own, private
+  // to the user (a shared temp folder is writable by others, and a vendor tool may read files from where it runs).
+  const workingDirectory = options.workingDirectory ?? join(dataDir, 'integrations-work');
 
   let queue = Promise.resolve();
   /** One call at a time: the manifest and the vendors' own config are never changed by two calls together. */
-  const serial = work => { const run = queue.then(work); queue = run.catch(() => {}); return run; };
+  const serial = work => { const run = queue.then(work).finally(releaseWorkingDirectory); queue = run.catch(() => {}); return run; };
+  /** The folder the commands ran in is empty between calls: removed (it is made again when a command needs it), and the data folder with it when that leaves it empty. */
+  async function releaseWorkingDirectory() {
+    if (options.workingDirectory === undefined) await rmdir(workingDirectory).catch(() => {}); // a folder the caller named is the caller's
+    await rmdir(dataDir).catch(() => {});
+  }
 
   /** What the user's shell and the app's environment say; the login shell wins, because it holds what the user set up. */
   async function readEnvironment() {
@@ -146,6 +152,7 @@ export function createIntegrations(options = {}) {
     const context = {
       app, home, copyDirectory, record, steps, prefix: '', wasConnected: Boolean(existing), failureCode,
       async exec(label, args) {
+        await mkdir(workingDirectory, { recursive: true, mode: 0o700 });
         const result = await runProgram(executable, args, { env: vendorEnv, cwd: workingDirectory, timeoutMs: commandTimeoutMs });
         steps.push({ label: context.prefix + label, ok: result.ok, command: result.command, exitCode: result.exitCode, timedOut: result.timedOut, output: result.output || result.spawnError || '', durationMs: result.durationMs });
         return result;

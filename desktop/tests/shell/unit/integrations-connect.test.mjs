@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createIntegrations } from '../../../src/main/integrations/index.mjs';
@@ -320,4 +321,30 @@ test('the vendor commands run without the Electron variables, and the login shel
   assert.ok(calls.length > 0);
   assert.ok(calls.every(call => call.CODEX_HOME === join(world.root, 'from-login-shell') && call.ELECTRON_RUN_AS_NODE === null));
   assert.equal((await integrations.disconnect(['codex'])).ok, true);
+});
+
+test('vendor commands run in a private folder under the app\'s data folder, never in the shared temp folder', async () => {
+  const world = await setup();
+  assert.equal((await world.integrations.connect(['claude', 'codex'])).ok, true);
+  const calls = (await world.calls()).filter(call => call.tool === 'claude' || call.tool === 'codex');
+  assert.ok(calls.length >= 4);
+  const folder = join(world.data, 'integrations-work');
+  for (const call of calls) {
+    assert.equal(call.cwd, folder, call.args.join(' '));
+    assert.equal(call.cwdMode, 0o700, 'only the user can enter it');
+  }
+  assert.notEqual(folder, await realpath(tmpdir()));
+  await assert.rejects(stat(folder), { code: 'ENOENT' }, 'the empty folder is not left behind between calls');
+});
+
+test('an explicit working folder is still honoured, and left in place', async () => {
+  const world = await setup();
+  const custom = join(world.root, 'custom-cwd');
+  await mkdir(custom);
+  const integrations = createIntegrations(world.options({ env: world.env({ CLAUDE_CONFIG_DIR: world.claudeConfig }), workingDirectory: custom }));
+  assert.equal((await integrations.connect(['claude'])).ok, true);
+  const calls = (await world.calls()).filter(entry => entry.tool === 'claude');
+  assert.ok(calls.length >= 2);
+  for (const call of calls) assert.equal(call.cwd, custom);
+  assert.ok((await stat(custom)).isDirectory());
 });

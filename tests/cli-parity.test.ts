@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import ts from 'typescript';
 import { projectRoot } from './helpers';
 import { commandsFor } from '../src/cli/registry';
+import { failureCodes } from '../src/cli/errors';
 
 // Route scan: what counts as a route, and how the scan reads it
 // ==============================================================
@@ -584,4 +585,16 @@ test('the pattern expander reads the shapes the service uses', () => {
   const [, action, id] = expandPattern('^\\/api\\/p\\/(e|staged\\/([^/]+))$', 0).find(expansion => expansion.path.includes('staged'))!.caps;
   assert.deepEqual([action, id], ['staged/*', '*']);
   assert.throws(() => expandPattern('^\\/api\\/a(b', 0), /Cannot read the route pattern/);
+});
+
+test('docs/HEADLESS.md names every command and every failure code', () => {
+  const guide = readFileSync(resolve(projectRoot, 'docs/HEADLESS.md'), 'utf8');
+  for (const edition of ['normal', 'headless'] as const) {
+    for (const command of commandsFor(edition)) {
+      const path = command.path.join(' ');
+      // A code span that starts with the command, as in `comments add <doc> <block-id> "text"`.
+      assert.match(guide, new RegExp(`\`${path}(?: [^\`]*)?\``), `docs/HEADLESS.md has no \`${path}\` (${edition} edition)`);
+    }
+  }
+  for (const code of Object.keys(failureCodes)) assert.ok(guide.includes(`\`${code}\``), `docs/HEADLESS.md does not list the failure code ${code}`);
 });

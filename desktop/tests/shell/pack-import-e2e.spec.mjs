@@ -184,10 +184,9 @@ test.describe.serial('a pack from the command line, a second launch, open-file a
     await expect(importDialog(page)).toBeHidden();
   });
 
-  test('the pages ran clean, apart from two known messages that are not about packs', async () => {
-    // 1. index.html's inline appearance script is blocked by the desktop CSP (script-src 'self'): it is in every page load, packs or not.
-    // 2. A staged pack's preview PDF can be asked for just after Cancel discarded the pack (a 404 the page ignores).
-    const known = /Executing inline script violates the following Content Security Policy|Failed to load resource: the server responded with a status of 404/;
+  test('the pages ran clean', async () => {
+    // A staged pack's preview PDF can be asked for just after Cancel discarded the pack: a 404 the page ignores, and the one message allowed.
+    const known = /Failed to load resource: the server responded with a status of 404/;
     expect(app.consoleProblems.filter(line => !known.test(line))).toEqual([]);
     expect(sender.consoleProblems.filter(line => !known.test(line))).toEqual([]);
   });

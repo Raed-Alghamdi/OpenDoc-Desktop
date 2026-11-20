@@ -3,7 +3,7 @@ import { BrowserWindow, app, dialog, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { copyFile, rename, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { contentSecurityPolicy, crossOriginMutation, isWebLink, originOf, permissionAllowed, requestAllowed } from './policy.mjs';
+import { contentSecurityPolicy, crossOriginMutation, inlineScriptHashes, isIndexPage, isWebLink, originOf, permissionAllowed, requestAllowed } from './policy.mjs';
 import { serveShell } from './shell-pages.mjs';
 import { shellHost, shellScheme } from './identity.mjs';
 
@@ -75,10 +75,18 @@ export function applySessionPolicy(ses, workspace) {
       return new Response('The OpenDoc service failed to answer.', { status: 500 });
     }
     const headers = new Headers(response.headers);
+    // The start page carries a small inline script. The policy names its hash, computed from the page as the service sends it
+    // (the workspace's own build, so a change to the script in a new version is picked up without a change here).
+    let body = response.body;
+    let scriptHashes = [];
+    if (request.method === 'GET' && response.status === 200 && isIndexPage(request.url) && /^text\/html/i.test(headers.get('content-type') ?? '')) {
+      body = new Uint8Array(await response.arrayBuffer());
+      scriptHashes = inlineScriptHashes(new TextDecoder().decode(body));
+    }
     // The app's policy is added next to the service's own (for example default-src 'none'; sandbox on SVG assets). Several
     // policies all apply, and the stricter one wins, so the service's policy is never replaced. Other headers pass through.
-    headers.append('Content-Security-Policy', contentSecurityPolicy());
-    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+    headers.append('Content-Security-Policy', contentSecurityPolicy({ scriptHashes }));
+    return new Response(body, { status: response.status, statusText: response.statusText, headers });
   };
   // One handler for the app's scheme: app://shell is the shell's own pages, app://opendoc is the service. Any other host is refused.
   ses.protocol.handle(shellScheme, request => {

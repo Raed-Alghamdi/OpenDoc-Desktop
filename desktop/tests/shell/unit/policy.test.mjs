@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
-import { classifyNavigation, classifyWindowOpen, contentSecurityPolicy, crossOriginMutation, originOf, permissionAllowed, requestAllowed } from '../../../src/main/policy.mjs';
+import { classifyNavigation, classifyWindowOpen, contentSecurityPolicy, crossOriginMutation, inlineScriptHashes, isIndexPage, originOf, permissionAllowed, requestAllowed } from '../../../src/main/policy.mjs';
+import { repo, runtimeDir } from '../support/paths.mjs';
 
 const origin = 'app://opendoc';
 
@@ -62,6 +66,49 @@ test('the content security policy names only the page\'s own address', () => {
   assert.match(policy, /frame-ancestors 'none'/);
   assert.doesNotMatch(policy, /'unsafe-eval'/);
   assert.doesNotMatch(policy, /https?:/);
+});
+
+/** Every inline <script>...</script> of a page, found without the code under test (the pages here use the bare tag). */
+const inlineScripts = html => html.split('<script>').slice(1).map(part => part.slice(0, part.indexOf('</script>')));
+const sourceOf = text => `'sha256-${createHash('sha256').update(text, 'utf8').digest('base64')}'`;
+const scriptSrc = policy => policy.split('; ').find(part => part.startsWith('script-src ')).split(' ');
+
+test('the policy carries the hash of every inline script in the index.html the service serves, and never unsafe-inline', () => {
+  // The source page, and the built page of the package the tests run against when there is one (the one a workspace serves).
+  const pages = [join(repo, 'index.html'), join(runtimeDir, 'node_modules', 'opendoc', 'dist', 'index.html'), join(repo, 'dist', 'index.html')].filter(existsSync);
+  assert.ok(pages.length >= 1);
+  for (const file of pages) {
+    const html = readFileSync(file, 'utf8');
+    const scripts = inlineScripts(html);
+    assert.ok(scripts.length >= 1, `${file} has an inline script`);
+    const hashes = inlineScriptHashes(html);
+    assert.deepEqual(hashes.sort(), [...new Set(scripts.map(sourceOf))].sort(), file);
+    const sources = scriptSrc(contentSecurityPolicy({ scriptHashes: hashes }));
+    for (const text of scripts) assert.ok(sources.includes(sourceOf(text)), `${file}: ${sourceOf(text)}`);
+    assert.ok(sources.includes("'self'"));
+    assert.ok(!sources.includes("'unsafe-inline'"));
+  }
+});
+
+test('the hashes follow the page: another script gives another hash, scripts with a src and empty ones give none', () => {
+  const one = '<head><script>window.a = 1;</script></head>';
+  const other = '<head><script>window.a = 2;</script></head>';
+  assert.equal(inlineScriptHashes(one).length, 1);
+  assert.notDeepEqual(inlineScriptHashes(one), inlineScriptHashes(other));
+  assert.deepEqual(inlineScriptHashes('<script type="module" crossorigin src="/assets/index.js"></script><script src=/x.js></script><script></script>'), []);
+  assert.deepEqual(inlineScriptHashes(`${one}${one}`), inlineScriptHashes(one));
+  assert.equal(inlineScriptHashes('<SCRIPT type="module">import "/x";</SCRIPT>').length, 1);
+  // Without the page's scripts the policy is as strict as before.
+  assert.deepEqual(scriptSrc(contentSecurityPolicy()), ['script-src', "'self'", "'wasm-unsafe-eval'"]);
+  assert.deepEqual(scriptSrc(contentSecurityPolicy({ scriptHashes: inlineScriptHashes(one) })).slice(0, 3), ['script-src', "'self'", "'wasm-unsafe-eval'"]);
+});
+
+test('only the start page is looked at for inline scripts', () => {
+  assert.equal(isIndexPage('app://opendoc/'), true);
+  assert.equal(isIndexPage('app://opendoc'), true);
+  assert.equal(isIndexPage('app://opendoc/index.html'), true);
+  assert.equal(isIndexPage('app://opendoc/index.html?x=1#y'), true);
+  for (const path of ['/assets/index.js', '/api/documents', '/other.html', '/assets/index.html', '/api/files/index.html']) assert.equal(isIndexPage(`app://opendoc${path}`), false, path);
 });
 
 test('only a click-to-copy write is a permission the app grants', () => {

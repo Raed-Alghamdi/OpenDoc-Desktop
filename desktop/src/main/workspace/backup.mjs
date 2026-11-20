@@ -11,8 +11,8 @@
 // workspace's `.opendoc/`, replaces files one at a time through a temporary name and a rename, removes the files the backup
 // does not have, and leaves identical files alone. A failure at any step rolls back from the safety copy, and the safety copy
 // is deleted only when the rollback fully succeeded.
-import { chmod, copyFile, cp, lstat, mkdir, open, readFile, readdir, readlink, rename, rm, rmdir, statfs, symlink, utimes, writeFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { chmod, copyFile, cp, lstat, mkdir, open, readFile, readdir, readlink, realpath, rename, rm, rmdir, statfs, symlink, utimes, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, sep } from 'node:path';
 import { readMarker } from './marker.mjs';
 import { backupsDirectory } from './paths.mjs';
 
@@ -241,6 +241,25 @@ async function placeAtomically(source, info, target) {
   } catch (error) { await rm(temporary, { force: true }).catch(() => {}); throw error; }
 }
 
+/**
+ * Refuse a path of the workspace whose parent folder, with every link in it followed, is outside the workspace. The workspace is the
+ * user's own, but a folder in it may be a link to somewhere else (a synced folder, a mistake), and a restore must never write, remove or
+ * copy a file there. The nearest folder that exists is resolved, because a restore may be about to create the rest.
+ */
+async function assertInside(rootReal, root, relative) {
+  let folder = dirname(join(root, relative));
+  let real;
+  for (;;) {
+    try { real = await realpath(folder); break; } catch (error) {
+      if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+      const up = dirname(folder);
+      if (up === folder) throw error;
+      folder = up;
+    }
+  }
+  if (real !== rootReal && !real.startsWith(rootReal + sep)) throw new BackupError('outside', `${relative} would be changed outside the workspace: a link in its path leads to ${real}. Nothing was changed there.`);
+}
+
 const journalFile = root => join(root, '.opendoc', journalName);
 
 async function writeJournal(root, journal) {
@@ -281,8 +300,9 @@ async function rollback({ root, journal, step }) {
   const savedRoot = join(journal.beforeDirectory, copyFolder);
   const { plan } = journal;
   const errors = [];
+  const rootReal = await realpath(root);
   const attempt = async (stage, relative, run) => {
-    try { await step({ stage, path: relative }); await run(); } catch (error) { errors.push(`${relative}: ${error.message}`); }
+    try { await step({ stage, path: relative }); await assertInside(rootReal, root, relative); await run(); } catch (error) { errors.push(`${relative}: ${error.message}`); }
   };
   const was = { file: new Set([...plan.remove, ...plan.replace]), dir: new Set(plan.rmdirs) }; // what a path was before the restore
   await removeTemps(root, plan);
@@ -355,6 +375,13 @@ export async function restoreBackup({ root, dataDir, name, now = new Date(), fre
   if (removeExtras) for (const [relative, now] of current) if (!wanted.has(relative)) (now.type === 'dir' ? plan.rmdirs : plan.remove).push(relative);
   for (const key of Object.keys(plan)) plan[key].sort();
 
+  // Nothing is read or written through a link that leaves the workspace: checked for the whole plan before anything changes.
+  // (A path below a link or folder the plan itself removes first is checked when its turn comes, once the link is gone.)
+  const rootReal = await realpath(root);
+  const goneFirst = new Set([...plan.remove, ...plan.rmdirs]);
+  const underRemoved = relative => relative.split('/').slice(0, -1).some((_, index, parts) => goneFirst.has(parts.slice(0, index + 1).join('/')));
+  for (const relative of new Set(Object.values(plan).flat())) if (!underRemoved(relative)) await assertInside(rootReal, root, relative);
+
   // Room for the safety copy, and for the temporary files beside the replaced ones.
   const saved = [...plan.replace, ...plan.remove];
   const savedBytes = bytesOf(current, saved);
@@ -399,9 +426,10 @@ export async function restoreBackup({ root, dataDir, name, now = new Date(), fre
   const kept = [];
   const swapped = new Set(plan.add); // a folder that must become a file cannot stay
   try {
-    for (const relative of plan.remove) { await step({ stage: 'remove', path: relative }); await rm(join(root, relative), { force: true }); }
+    for (const relative of plan.remove) { await step({ stage: 'remove', path: relative }); await assertInside(rootReal, root, relative); await rm(join(root, relative), { force: true }); }
     for (const relative of [...plan.rmdirs].sort((a, b) => depth(b) - depth(a))) {
       await step({ stage: 'rmdir', path: relative });
+      await assertInside(rootReal, root, relative);
       // A folder the backup lacks that holds version control or sync metadata (never restored, never removed) stays, and is reported.
       await rmdir(join(root, relative)).catch(error => {
         if (error.code === 'ENOENT') return;
@@ -409,9 +437,9 @@ export async function restoreBackup({ root, dataDir, name, now = new Date(), fre
         throw error;
       });
     }
-    for (const relative of [...plan.mkdirs].sort((a, b) => depth(a) - depth(b))) { await step({ stage: 'mkdir', path: relative }); await mkdir(join(root, relative), { recursive: true }); }
-    for (const relative of plan.replace) { await step({ stage: 'replace', path: relative }); await placeAtomically(join(backupRoot, relative), wanted.get(relative), join(root, relative)); }
-    for (const relative of plan.add) { await step({ stage: 'add', path: relative }); await placeAtomically(join(backupRoot, relative), wanted.get(relative), join(root, relative)); }
+    for (const relative of [...plan.mkdirs].sort((a, b) => depth(a) - depth(b))) { await step({ stage: 'mkdir', path: relative }); await assertInside(rootReal, root, relative); await mkdir(join(root, relative), { recursive: true }); }
+    for (const relative of plan.replace) { await step({ stage: 'replace', path: relative }); await assertInside(rootReal, root, relative); await placeAtomically(join(backupRoot, relative), wanted.get(relative), join(root, relative)); }
+    for (const relative of plan.add) { await step({ stage: 'add', path: relative }); await assertInside(rootReal, root, relative); await placeAtomically(join(backupRoot, relative), wanted.get(relative), join(root, relative)); }
     await step({ stage: 'finish', path: '' });
   } catch (error) {
     try { await rollback({ root, journal, step }); }

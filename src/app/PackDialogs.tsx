@@ -265,15 +265,15 @@ function ImportBody({ request, open, connected, onClose, onBusy }: { request: Im
             <p><bdi>Version {manifest.version}</bdi>{manifest.author && <> · by <bdi>{manifest.author}</bdi></>} · needs OpenDoc {manifest.opendocVersion}</p>
             {manifest.license && <p className="pack-license" dir="auto">License: <bdi>{manifest.license}</bdi></p>}
           </header>
+          {blockers.map(blocker => <div key={blocker.kind} className="pack-blocker" role={blocker.kind === 'nothing-new' ? 'status' : 'alert'}>
+            <p>{blocker.message}</p>
+            {blocker.kind === 'conflicts' && <ul className="pack-conflicts">{inspection.conflicts.slice(0, 12).map(path => <li key={path}><bdi>{path}</bdi></li>)}{inspection.conflicts.length > 12 && <li>and {inspection.conflicts.length - 12} more</li>}</ul>}
+          </div>)}
           <PackItems items={inspection.items} />
           {inspection.previews.length > 0 && <section aria-label="Previews from the sender"><h3>Previews from the sender</h3>
             <div className="pack-previews">{inspection.previews.map(url => <PackPreview key={url} url={url} label={previewLabel(url)} />)}</div>
             <p className="field-hint">These PDFs come from the sender. They show what the sender saw, not what is safe.</p></section>}
           <PackFiles inspection={inspection} />
-          {blockers.map(blocker => <div key={blocker.kind} className="pack-blocker" role={blocker.kind === 'nothing-new' ? 'status' : 'alert'}>
-            <p>{blocker.message}</p>
-            {blocker.kind === 'conflicts' && <ul className="pack-conflicts">{inspection.conflicts.slice(0, 12).map(path => <li key={path}><bdi>{path}</bdi></li>)}{inspection.conflicts.length > 12 && <li>and {inspection.conflicts.length - 12} more</li>}</ul>}
-          </div>)}
           {!refused && !blockers.some(blocker => blocker.kind === 'nothing-new') && <div className="pack-trust">
             <label className="pack-trust-label"><input type="checkbox" checked={trusted} disabled={installing} onChange={event => setTrusted(event.target.checked)} aria-describedby={`${trust}-trust`} />
               <span>I trust where this pack came from, and I want OpenDoc to run its code.</span></label>

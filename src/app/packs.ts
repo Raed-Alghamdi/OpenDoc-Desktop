@@ -95,7 +95,7 @@ export function packBlockers(inspection: Pick<PackInspection, 'compatibility' | 
   const blockers: PackBlocker[] = [];
   const { compatibility, conflicts, added } = inspection;
   if (!compatibility.compatible) blockers.push({ kind: 'incompatible', message: `This pack needs OpenDoc ${compatibility.requiredVersion} or a later patch of the same minor version. This workspace runs ${compatibility.currentVersion}. Ask the sender to export it again with this version.` });
-  if (conflicts.length) blockers.push({ kind: 'conflicts', message: 'These files already exist in this workspace with different contents, so nothing was installed. OpenDoc never overwrites an existing design. Ask the sender to export with different design IDs, or import the pack into another workspace.' });
+  if (conflicts.length) blockers.push({ kind: 'conflicts', message: 'These files already exist in this workspace with different contents, so this pack can’t be installed. OpenDoc never overwrites an existing design. Ask the sender to export with different design IDs, or import the pack into another workspace.' });
   if (!conflicts.length && compatibility.compatible && !added.length) blockers.push({ kind: 'nothing-new', message: 'Everything in this pack is already installed, unchanged.' });
   if (context.readOnly) blockers.push({ kind: 'read-only', message: context.readOnly });
   if (context.connected === false) blockers.push({ kind: 'offline', message: 'Reconnect to OpenDoc to install.' });

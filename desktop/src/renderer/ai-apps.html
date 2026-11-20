@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect your AI apps</title>
+<link rel="stylesheet" href="shell.css">
+</head>
+<body>
+<main class="wide">
+  <h1>Connect your AI apps</h1>
+  <p class="lede">Connect OpenDoc to the AI apps you use, so that a session in Claude Code, Codex or another app can find OpenDoc and make documents with it. Nothing is changed until you press Connect, and every result is shown here. You can disconnect at any time.</p>
+  <div id="checking" class="checking" role="status"><span class="spinner" aria-hidden="true"></span><span>Looking for AI apps on this computer&hellip;</span></div>
+  <div id="problem" class="error" role="alert" hidden></div>
+  <ul id="apps" class="apps" hidden></ul>
+  <div class="actions bar">
+    <button id="connect" class="primary" type="button" disabled>Connect</button>
+    <button id="close" type="button">Close</button>
+    <button id="recheck" type="button">Check again</button>
+  </div>
+  <div id="results" aria-live="polite"></div>
+</main>
+<script src="ai-apps.js"></script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # opendoc-desktop
 
-A self-contained desktop app for [OpenDoc](https://github.com/RyanYahya/OpenDoc) on Linux and macOS, built with Electron. It carries its own runtime, so users install no Node or npm, and it installs the `opendoc` command for agents.
+A self-contained desktop app for [OpenDoc](https://github.com/RyanYahya/OpenDoc) on Linux and on macOS (Apple Silicon), built with Electron. It carries its own runtime, so users install no Node or npm, and it installs the `opendoc` command for agents.
 
 This package is private to the repository: OpenDoc's npm packages do not include `desktop/`.
 
@@ -28,7 +28,7 @@ Everything runs from the repository root. Node 24 (the version in `.node-version
 pnpm install --frozen-lockfile
 ```
 
-Build on the platform you build for. The runtime holds native pieces for one platform and architecture, and electron-builder takes the runtime of the machine it runs on. So a macOS build must run on a Mac (CI uses one macOS runner per architecture), and the Linux installers are made on Linux (x86_64 only for now).
+Build on the platform you build for. The runtime holds native pieces for one platform and architecture, and electron-builder takes the runtime of the machine it runs on. So a macOS build must run on a Mac (CI uses an Apple Silicon runner; there is no Intel Mac build), and the Linux installers are made on Linux (x86_64 only for now).
 
 ### 1. The runtime
 
@@ -79,7 +79,7 @@ Next to them: `latest-linux.yml`, and the unpacked app in `linux-unpacked/`. The
 On macOS:
 
 ```sh
-node desktop/runtime/dist.mjs --mac zip dmg --arm64 --publish never   # --x64 on an Intel Mac
+node desktop/runtime/dist.mjs --mac zip dmg --arm64 --publish never
 ```
 
 This makes `opendoc-desktop-<version>-<build>-<arch>.zip` and `.dmg`, and `latest-mac.yml`. The app is signed ad hoc (identity `-`) and not notarized, so the first launch needs "Open Anyway" (see [docs/DESKTOP.md](../docs/DESKTOP.md#install)).
@@ -90,7 +90,9 @@ Check the Linux output with:
 node desktop/tests/packaging/check-artifacts.mjs [--require-rpm]
 ```
 
-It expects all four installers in `desktop/dist/`. It reads the version and build number from each package's own metadata, and checks that `latest-linux.yml` lists every installer with its checksum. Where the `rpm` tool is not installed it checks the `.rpm` by file name only; `--require-rpm` makes that an error (CI uses it).
+It expects the installers in `desktop/dist/`. Without `--require-rpm`, a missing `.rpm` is not an error (an `rpm` file that is listed must exist); with it, a missing one is. CI uses it. It reads the version and build number from each package's own metadata, and checks that `latest-linux.yml` lists every installer with its checksum. Where the `rpm` tool is not installed it checks the `.rpm` by file name only; `--require-rpm` makes that an error. It also checks that each package carries the integration files (with their dot folders), the shared-mime file for `.opendoc.zip` and the `.desktop` file's `MimeType` line.
+
+Check an unpacked app (`linux-unpacked`, or a macOS `.app`) with `node desktop/tests/packaging/check-packaged.mjs --require linux` (or `--require mac`): the integration files are there, the source `check.mjs` passes against the packaged copy, and on macOS the Info.plist's document type for `.opendoc.zip` is right.
 
 ### The AUR package
 
@@ -119,22 +121,28 @@ It runs on a `desktop-v*` tag, on a pull request that touches `desktop/**`, `scr
   4. runs `node --test "desktop/tests/packaging/*.test.mjs"` and `node --test desktop/tests/smoke/runtime.test.mjs`;
   5. runs the shell unit tests (`node desktop/tests/shell/run.mjs --unit`; on Ubuntu `/bin/sh` is `dash`, which the launcher and the host's watcher shell must run under);
   6. builds pacman, deb, rpm and AppImage;
-  7. runs `check-artifacts.mjs --require-rpm` and the runtime test again inside the unpacked app;
+  7. runs `check-packaged.mjs --require linux` on the unpacked app, then `check-artifacts.mjs --require-rpm` and the runtime test again inside it;
   8. allows the app sandbox on the runner (Ubuntu 24.04 restricts user namespaces);
   9. runs the packaged-app smoke test (`node desktop/tests/smoke/run.mjs`, under Xvfb);
   10. keeps the files as artifacts for 5 days.
 - **integrations** (`ubuntu-latest`): `node desktop/integrations/check.mjs`, which validates the plugin and skill files.
-- **mac** (`macos-latest` for arm64 and `macos-15-intel` for x64): builds the runtime, runs the same two test groups and the shell unit tests, builds zip and dmg, runs the smoke test in the runner's own session, and keeps the files for 5 days.
-- **release** (tags only; needs `linux` and `mac`): merges the two macOS `latest-mac.yml` files (`desktop/runtime/merge-mac-metadata.mjs`) and creates the draft release with `gh release create --draft`.
+- **mac** (`macos-latest`, Apple Silicon): builds the runtime, runs the same two test groups and the shell unit tests, builds zip and dmg, runs `check-packaged.mjs --require mac`, runs the smoke test in the runner's own session, and keeps the files for 5 days.
+- **release** (tags only; needs `linux` and `mac`): uses the Apple Silicon build's `latest-mac.yml` as it is (there is nothing to merge) and creates the draft release with `gh release create --draft`.
 
 ## Release automation (one-time setup)
 
-<!-- E13 PLACEHOLDER: replace this paragraph with the details written by the release automation work (E13):
-     upstream-watch.yml and aur-bump.yml, the publishing gate (one repository variable, off by default), the AUR key secret and
-     the second variable, the dry-run inputs, the one-time `gh workflow enable` for the fork's scheduled workflows, the
-     60-day repository-activity rule, and how a failed run is reported. -->
+`.github/workflows/upstream-watch.yml` watches OpenDoc upstream and prepares each new app build; `aur-bump.yml` keeps the AUR package in step. Both stay inert until switched on, and publish nothing on their own unless the repository variable `DESKTOP_AUTO_PUBLISH` is `true`. Even then a release publishes itself only when all of these hold: it is an upstream patch release, the merge was clean, every check is green, and an earlier release of the same x.y line has already gone out by hand. Everything else (a new minor version, a rebuild, a conflict resolved by hand, a red check) waits as a draft release, with an issue in this repository that mentions the owner. Tags are `desktop-v<version>-<build>`; the build number counts up per version.
 
-Not written yet: the workflows `upstream-watch.yml` and `aur-bump.yml` and their settings are being built, and this section is completed when they land.
+`aur-bump.yml` makes the new `PKGBUILD` and `.SRCINFO` from a published release's pacman file and uploads them as an artifact. It pushes them to the AUR only when the secret `AUR_SSH_KEY`, the variable `AUR_HOST_KEY_SHA256` (the AUR host key's fingerprint) and the variable `AUR_PUSH` set to `true` all exist; none does until the first AUR publication is approved.
+
+Two things the fork's owner has to do, because GitHub does not do them:
+
+1. The daily schedule is committed commented out (it stays off until the first release has gone out by hand). To switch it on, un-comment the `schedule:` block in `upstream-watch.yml`, push it to `roadmap`, and run `gh workflow enable upstream-watch.yml --repo <owner>/OpenDoc-Desktop` once: a fork's scheduled workflows start disabled.
+2. GitHub switches a scheduled workflow off after 60 days without repository activity, so make sure something is committed at least every 60 days, or re-enable it with the same command.
+
+`roadmap` is the repository's default branch, which is where GitHub runs schedules from, so the workflow file must be on it. The schedule uses an odd minute because the top of the hour is busy and runs get dropped. A run that stops (a conflict, or a red check) also fails, so GitHub's failure mail reaches the owner.
+
+To rehearse a run without touching `roadmap`, `main` or the real tags, make a stand-in upstream with `desktop/release/fake-upstream.mjs` and use the inputs of `upstream-watch.yml` (`target_branch`, `upstream_ref`). A rehearsal tags everything `dryrun-`, publishes only as a pre-release and never pushes to the AUR.
 
 ## Tests
 

@@ -64,5 +64,7 @@ buttons[1].addEventListener('click', () => act(async () => {
   say('Creating the workspace. This can take a minute…');
   return window.opendocShell.create(choice.path);
 }));
+// A design pack that was opened before any workspace was: it opens once the user chooses one.
+void window.opendocShell.pendingPack().then(pack => { if (pack && !params.get('error')) say(`Choose a workspace to review ${pack.name}. It opens in the Import dialog.`); });
 if (params.get('error')) void show({ ok: false, message: params.get('error'), code: params.get('code'), path: params.get('path') }, params.get('path') || undefined);
 void load();

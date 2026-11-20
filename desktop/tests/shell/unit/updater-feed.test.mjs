@@ -1,7 +1,7 @@
 // The release address rules, the release page link and the files a release must list.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { builtInRepository, feedProviderOptions, parseFeedAddress, releasePageUrl, releaseRepository, repositoryFromUpdateConfig, releaseTag, updateConfigIsLoopback } from '../../../src/main/updater/feed.mjs';
+import { builtInRepository, feedLabel, feedProviderOptions, isBuiltInFeed, parseFeedAddress, releasePageUrl, releaseRepository, repositoryFromUpdateConfig, releaseTag, updateConfigIsLoopback } from '../../../src/main/updater/feed.mjs';
 import { isForeignUrl, malformedMetadata, metadataFiles, releaseFileFor } from '../../../src/main/updater/release-files.mjs';
 
 test('https addresses are accepted', () => {
@@ -9,12 +9,35 @@ test('https addresses are accepted', () => {
 });
 
 test('plain http is accepted for loopback addresses only', () => {
-  for (const address of ['http://127.0.0.1:8099/generic/', 'http://localhost:8099/', 'http://[::1]:8099/feed']) assert.equal(parseFeedAddress(address).ok, true, address);
+  for (const address of ['http://127.0.0.1:8099/generic/', 'http://localhost:8099/', 'http://[::1]:8099/feed']) assert.equal(parseFeedAddress(address, { allowLoopback: true }).ok, true, address);
   for (const address of ['http://example.org/feed', 'http://192.168.1.5/feed', 'http://127.0.0.2/feed', 'http://127.0.0.1.example.org/feed', 'http://0.0.0.0/feed', 'http://localhost.example.org/']) {
-    const result = parseFeedAddress(address);
+    const result = parseFeedAddress(address, { allowLoopback: true });
     assert.equal(result.ok, false, address);
     assert.match(result.message, /https/);
   }
+});
+
+test('a build that is not for tests refuses plain http even on loopback, and still accepts https', () => {
+  for (const address of ['http://127.0.0.1:8099/generic/', 'http://localhost:8099/', 'http://[::1]:8099/feed']) {
+    const result = parseFeedAddress(address);
+    assert.equal(result.ok, false, address);
+    assert.match(result.message, /not accepted by this build/);
+    assert.equal(parseFeedAddress(address, { allowLoopback: false }).ok, false, address);
+  }
+  assert.equal(parseFeedAddress('https://updates.example.org/opendoc/').ok, true);
+  assert.equal(parseFeedAddress('https://127.0.0.1:8443/feed').ok, true, 'https on loopback is https');
+});
+
+test('a feed is named by its origin (a GitHub repository by owner and name), and the built-in repository is not a different feed', () => {
+  const options = address => feedProviderOptions(parseFeedAddress(address, { allowLoopback: true }).url);
+  assert.equal(feedLabel(options('https://updates.example.org:8443/opendoc/feed?x=1')), 'https://updates.example.org:8443');
+  assert.equal(feedLabel(options('https://github.com/Someone/Fork/releases')), 'https://github.com/Someone/Fork');
+  assert.equal(feedLabel(options('http://127.0.0.1:8099/github-like')), 'http://127.0.0.1:8099');
+  assert.equal(feedLabel(null), null);
+  assert.equal(isBuiltInFeed(options('https://github.com/Raed-Alghamdi/OpenDoc-Desktop'), builtInRepository), true);
+  assert.equal(isBuiltInFeed(options('https://github.com/Someone/Fork'), builtInRepository), false);
+  assert.equal(isBuiltInFeed(options('https://updates.example.org/feed'), builtInRepository), false);
+  assert.equal(isBuiltInFeed(null, builtInRepository), false);
 });
 
 test('anything else is refused: other schemes, user names, text that is not an address, empty values', () => {
@@ -29,7 +52,7 @@ test('an address that hides another host behind a user name is refused', () => {
 });
 
 test('which provider an address means', () => {
-  const options = address => feedProviderOptions(parseFeedAddress(address).url);
+  const options = address => feedProviderOptions(parseFeedAddress(address, { allowLoopback: true }).url);
   assert.deepEqual(options('https://github.com/Raed-Alghamdi/OpenDoc-Desktop'), { provider: 'github', owner: 'Raed-Alghamdi', repo: 'OpenDoc-Desktop' });
   assert.deepEqual(options('https://github.com/RyanYahya/OpenDoc/releases'), { provider: 'github', owner: 'RyanYahya', repo: 'OpenDoc' });
   assert.deepEqual(options('http://127.0.0.1:8099/github-like'), { provider: 'github', owner: builtInRepository.owner, repo: builtInRepository.repo, host: '127.0.0.1:8099', protocol: 'http' });

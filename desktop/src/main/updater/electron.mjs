@@ -11,10 +11,11 @@ import { UpdateController } from './controller.mjs';
 import { readHelperLogs } from './mac-install.mjs';
 import { isLoopbackHost, updateConfigIsLoopback } from './feed.mjs';
 import { guardRedirects, guardSession } from './http-guard.mjs';
+import { readTestBuild, testModeAllowed } from '../build-mode.mjs';
 
 /**
  * Environment variables that tests and development builds read.
- * OPENDOC_DESKTOP_UPDATE_RESOURCES: a folder to treat as the packaged app's `resources` (with update-disabled, package-type and
+ * OPENDOC_DESKTOP_UPDATE_RESOURCES (an installed app ignores it unless it is a test build, see build-mode.mjs): a folder to treat as the packaged app's `resources` (with update-disabled, package-type and
  * app-update.yml in it). Without it a development run never checks for updates. It switches nothing on by itself: the install type,
  * the switch in config.json and the address rules apply as in a packaged app.
  */
@@ -69,16 +70,20 @@ function fileLogger(folder) {
  * @param options.onAppImageMoved async (newPath): the AppImage got a new file name
  */
 export function createUpdates({ config, getVersion, getBuild, parent, onChange, onAppImageMoved }) {
-  const testResources = process.env[updaterEnvironment.resources] || null;
+  // An installed app takes neither the test resources folder nor a plain-http loopback feed, unless it was built as a test build.
+  // (index.mjs has already removed the switch from the environment; this keeps the rule here too.)
+  const testMode = testModeAllowed({ packaged: app.isPackaged, testBuild: readTestBuild() });
+  const testResources = testMode ? process.env[updaterEnvironment.resources] || null : null;
   const packaged = app.isPackaged || Boolean(testResources);
   const controller = new UpdateController({
     config,
     packaged,
+    allowLoopbackFeed: testMode,
     resourcesDir: testResources ?? (app.isPackaged ? process.resourcesPath : null),
     getVersion,
     getBuild,
-    createUpdater: (type, { feed, logger }) => {
-      const Updater = createUpdaterClass(type, { getBuild: () => getBuild() ?? 0, getFeedBase: () => feedBase(feed) });
+    createUpdater: (type, { feed, logger, feedLabel = null }) => {
+      const Updater = createUpdaterClass(type, { getBuild: () => getBuild() ?? 0, getFeedBase: () => feedBase(feed), getFeedLabel: () => feedLabel });
       const updater = new Updater(null, new VersionedAppAdapter(getVersion()));
       // Requests and redirects stay on https (loopback http only when the feed, or the test app-update.yml, is on loopback). Three layers:
       // the redirect handlers, createRequest (the differential download), and a catch-all on the session's webRequest.

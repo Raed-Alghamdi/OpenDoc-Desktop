@@ -55,9 +55,10 @@ const writable = path => access(path, constants.W_OK).then(() => true, () => fal
  * for the types that need a click, `installDownloaded()` (resolves { outcome: 'installed' | 'cancelled' | 'failed' | 'blocked', message? }).
  * @param options.getBuild the running build number
  * @param options.getFeedBase () => the feed's address (text or URL) when `updateFeed` is set, else null: file addresses must stay on its origin
+ * @param options.getFeedLabel () => the words that name a feed that is not the built-in address (shown in the system's password prompt), else null
  * @param options.seams for tests: install (replaces installPackage), appImagePath, statfs, swapOps, macState, macInstall
  */
-export function createUpdaterClass(type, { getBuild, getFeedBase = () => null, seams = {} }) {
+export function createUpdaterClass(type, { getBuild, getFeedBase = () => null, getFeedLabel = () => null, seams = {} }) {
   const Base = bases[type];
   if (!Base) throw new Error(`No updater for install type ${type}.`);
   const Checked = withConfigFallback(withReleaseFile(withBuildCompare(Base, getBuild), type, getFeedBase));
@@ -123,7 +124,7 @@ export function createUpdaterClass(type, { getBuild, getFeedBase = () => null, s
       async installDownloaded() {
         const found = this.downloaded();
         if (!found) return { outcome: 'failed', message: 'There is no downloaded update to install.' };
-        return (seams.install ?? installPackage)({ type, ...found, log: message => this._logger.info(message) });
+        return (seams.install ?? installPackage)({ type, ...found, feedLabel: getFeedLabel(), log: message => this._logger.info(message) });
       }
 
       // The stock installs are synchronous (they freeze every window while the password prompt is open), so none of them may run.

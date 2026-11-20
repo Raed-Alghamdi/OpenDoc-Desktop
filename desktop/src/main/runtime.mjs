@@ -6,9 +6,12 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { environment } from './identity.mjs';
 
-/** Where the runtime is: the override for tests and development, the packaged resources, or the dev build folder. */
-export function runtimeLocation({ env = process.env, packaged, resourcesPath, developmentRoot, platform = process.platform, arch = process.arch }) {
-  if (env[environment.runtime]) return env[environment.runtime];
+/**
+ * Where the runtime is: the override for tests and development, the packaged resources, or the dev build folder.
+ * An installed app (packaged, and not a test build) never takes the override: an environment variable must not choose the code it runs.
+ */
+export function runtimeLocation({ env = process.env, packaged, testBuild = false, resourcesPath, developmentRoot, platform = process.platform, arch = process.arch }) {
+  if (env[environment.runtime] && (!packaged || testBuild)) return env[environment.runtime];
   if (packaged) return join(resourcesPath, 'runtime');
   return join(developmentRoot, 'build', 'runtime', `${platform}-${arch}`);
 }

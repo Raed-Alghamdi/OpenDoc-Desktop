@@ -6,10 +6,17 @@ import { test } from 'node:test';
 import { cliPath, nodeModeEnvironment, readBuildInfo, runtimeLocation } from '../../../src/main/runtime.mjs';
 
 test('the runtime is where the override says, else in the resources, else in the dev build folder', () => {
-  assert.equal(runtimeLocation({ env: { OPENDOC_DESKTOP_RUNTIME: '/x/rt' }, packaged: true, resourcesPath: '/r', developmentRoot: '/d' }), '/x/rt');
+  assert.equal(runtimeLocation({ env: { OPENDOC_DESKTOP_RUNTIME: '/x/rt' }, packaged: false, resourcesPath: '/r', developmentRoot: '/d' }), '/x/rt');
+  assert.equal(runtimeLocation({ env: { OPENDOC_DESKTOP_RUNTIME: '/x/rt' }, packaged: true, testBuild: true, resourcesPath: '/r', developmentRoot: '/d' }), '/x/rt');
   assert.equal(runtimeLocation({ env: {}, packaged: true, resourcesPath: '/r', developmentRoot: '/d' }), '/r/runtime');
   assert.equal(runtimeLocation({ env: {}, packaged: false, resourcesPath: '/r', developmentRoot: '/d', platform: 'linux', arch: 'x64' }), '/d/build/runtime/linux-x64');
   assert.equal(cliPath('/r/runtime'), '/r/runtime/node_modules/opendoc/bin/opendoc.mjs');
+});
+
+test('an installed app that is not a test build ignores the runtime override', () => {
+  const env = { OPENDOC_DESKTOP_RUNTIME: '/x/rt' };
+  assert.equal(runtimeLocation({ env, packaged: true, resourcesPath: '/r', developmentRoot: '/d' }), '/r/runtime');
+  assert.equal(runtimeLocation({ env, packaged: true, testBuild: false, resourcesPath: '/r', developmentRoot: '/d' }), '/r/runtime');
 });
 
 test('build-info.json gives the build number; a missing or odd file gives null', async () => {

@@ -17,7 +17,7 @@ const settle = () => new Promise(accept => setImmediate(accept));
  * @param options.script what the scripted updater does (see FakeUpdater)
  * @param options.answers dialog answers: a number (button index), a function from the dialog options, or a list taken in order
  */
-async function setup({ type = 'deb', config = {}, script = {}, build = 1, version = '0.6.1', answers = 0, packaged = true } = {}) {
+async function setup({ type = 'deb', config = {}, script = {}, build = 1, version = '0.6.1', answers = 0, packaged = true, allowLoopbackFeed = true } = {}) {
   const folder = await scratch('controller');
   const resources = join(folder, 'resources');
   await mkdir(resources);
@@ -35,6 +35,7 @@ async function setup({ type = 'deb', config = {}, script = {}, build = 1, versio
   const controller = new UpdateController({
     config: configFile,
     packaged,
+    allowLoopbackFeed,
     resourcesDir: resources,
     getVersion: () => version,
     getBuild: () => build,
@@ -108,6 +109,47 @@ test('an accepted address reaches the updater as a provider (a generic folder he
   const builtIn = await setup();
   await builtIn.controller.start();
   assert.equal(builtIn.calls.created[0].feed, null);
+});
+
+test('an installed app that is not a test build refuses a plain-http loopback address: no updater, nothing requested, the reason shown', async () => {
+  const { controller, calls, log, shown } = await setup({ allowLoopbackFeed: false, config: { updateFeed: 'http://127.0.0.1:8099/generic' } });
+  await controller.start();
+  assert.equal(calls.created.length, 0);
+  assert.ok(log.some(line => /refused the update address.*not accepted by this build/.test(line)));
+  await controller.checkNow();
+  assert.equal(shown.at(-1).message, 'Could not check for updates');
+  assert.match(shown.at(-1).detail, /not accepted by this build/);
+});
+
+test('an https address is allowed in an installed app, and the restart prompt names where the update comes from', async () => {
+  const custom = await setup({ allowLoopbackFeed: false, config: { updateFeed: 'https://updates.example.org:8443/opendoc/' }, script: { check: downloadedUpdate('0.6.1', 2) }, answers: 1 });
+  await custom.controller.start();
+  await settle();
+  await custom.controller.idle();
+  assert.deepEqual(custom.calls.created[0].feed, { provider: 'generic', url: 'https://updates.example.org:8443/opendoc/' });
+  assert.equal(custom.calls.created[0].feedLabel, 'https://updates.example.org:8443');
+  const prompt = custom.shown.find(options => /ready/.test(options.message));
+  assert.match(prompt.detail, /comes from https:\/\/updates\.example\.org:8443, the update address set in config\.json/);
+  const github = await setup({ config: { updateFeed: 'https://github.com/Someone/Fork' }, script: { check: downloadedUpdate('0.6.1', 2) }, answers: 1 });
+  await github.controller.start();
+  await settle();
+  await github.controller.idle();
+  assert.equal(github.calls.created[0].feedLabel, 'https://github.com/Someone/Fork');
+  assert.match(github.shown.find(options => /ready/.test(options.message)).detail, /comes from https:\/\/github\.com\/Someone\/Fork/);
+});
+
+test('the built-in address (none set, or the packaged repository named in config.json) shows no feed in the prompt', async () => {
+  const none = await setup({ script: { check: downloadedUpdate('0.6.1', 2) }, answers: 1 });
+  await none.controller.start();
+  await settle();
+  await none.controller.idle();
+  assert.equal(none.calls.created[0].feedLabel, null);
+  assert.doesNotMatch(none.shown.find(options => /ready/.test(options.message)).detail, /comes from/);
+  const same = await setup({ config: { updateFeed: 'https://github.com/Raed-Alghamdi/OpenDoc-Desktop' }, script: { check: downloadedUpdate('0.6.1', 2) }, answers: 1 });
+  await same.controller.start();
+  await settle();
+  await same.controller.idle();
+  assert.equal(same.calls.created[0].feedLabel, null);
 });
 
 // ---------- AppImage ----------

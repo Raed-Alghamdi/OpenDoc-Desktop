@@ -58,8 +58,8 @@ test('media edit sets kind, description and attribution, replaces or clears sour
   const f = await withMedia();
   t.after(f.cleanup);
   output(t);
-  await runMediaCli(['edit', 'proof', 'photo', '--kind', 'illustration', '--description', 'A drawing of the harbour.', '--attribution', 'Raed', '--source', 'Only note', '--json'], f.root);
-  assert.deepEqual(await readMeta(f.root), { title: 'Harbour', description: 'A drawing of the harbour.', file: 'image.png', kind: 'illustration', alt: 'Boats at dawn', attribution: 'Raed', sources: ['Only note'], data: 'data.json', recipe: 'recipe.md' });
+  await runMediaCli(['edit', 'proof', 'photo', '--kind', 'illustration', '--description', 'A drawing of the harbour.', '--attribution', 'Harbour Studio', '--source', 'Only note', '--json'], f.root);
+  assert.deepEqual(await readMeta(f.root), { title: 'Harbour', description: 'A drawing of the harbour.', file: 'image.png', kind: 'illustration', alt: 'Boats at dawn', attribution: 'Harbour Studio', sources: ['Only note'], data: 'data.json', recipe: 'recipe.md' });
   await runMediaCli(['edit', 'proof', 'photo', '--source', 'One', '--source', 'Two', '--json'], f.root);
   assert.deepEqual((await readMeta(f.root)).sources, ['One', 'Two'], 'every --source, in order, replaces the list');
   await runMediaCli(['edit', 'proof', 'photo', '--clear-alt', '--clear-attribution', '--clear-sources', '--json'], f.root);

@@ -104,6 +104,17 @@ npx opendoc export my-report --json
 
 This writes `output/my-report.pdf`. Export renders fresh in Headless, independently of any browser session or stale server state. Keep source unchanged between final review and export, and use the exported file for delivery.
 
+Each export is kept in the document's export history:
+
+```sh
+npx opendoc export history list my-report
+npx opendoc export history reveal <export-id>
+npx opendoc export history delete <export-id>
+npx opendoc export history restore <export-id>
+```
+
+`list` shows the newest first and marks an entry unavailable when its file was moved, removed, or changed outside OpenDoc. `reveal` prints the file's path; add `--open` to also show it in the system file manager. `delete` removes the receipt and the output file when the file is untouched, and prints the `restore` command that undoes it.
+
 ## Presentations
 
 Create a slide scaffold with `--format presentation`, or use a presentation template whose format is inferred:
@@ -145,10 +156,19 @@ Headless has no reader; comments go through the same `comments` command:
 ```sh
 npx opendoc comments add my-report report-summary "Cite the survey here." --phrase "grew 12%"
 npx opendoc comments list my-report --anchors
+npx opendoc comments edit my-report <comment-id> "Cite the 2025 survey here."
 npx opendoc comments resolve my-report <comment-id>
 ```
 
-`add` checks the block against a fresh render of saved source. `--phrase` anchors the comment to one occurrence of those words in the block, such as one table cell; add `--target <field-id>` when the words appear in more than one text field. `list --anchors` adds `anchorStatus` (`attached`, `changed`, or `missing`) and `targetAvailable` to each comment, so after a revision the agent can see which feedback still finds its text. `delete` keeps the record and prints its `comments restore` command, and `list --deleted` shows comments deleted in the last 90 days. Resolve a comment only after making and verifying the change; [opendoc-apply-comments](../.agents/skills/opendoc-apply-comments/SKILL.md) covers the workflow.
+`add` checks the block against a fresh render of saved source. `--phrase` anchors the comment to one occurrence of those words in the block, such as one table cell; add `--target <field-id>` when the words appear in more than one text field. `list --anchors` adds `anchorStatus` (`attached`, `changed`, or `missing`) and `targetAvailable` to each comment, so after a revision the agent can see which feedback still finds its text. `edit` replaces the text of an open or resolved comment and keeps the earlier text in the comment's history; add `--expected-version N` to refuse the edit when the comment has changed since you read its `version`. `delete` keeps the record and prints its `comments restore` command, and `list --deleted` shows comments deleted in the last 90 days. Resolve a comment only after making and verifying the change; [opendoc-apply-comments](../.agents/skills/opendoc-apply-comments/SKILL.md) covers the workflow.
+
+One comment can cover several places. Give the first block as usual and add `--also <block-id>` for each further block, one `--also` per block:
+
+```sh
+npx opendoc comments add my-report report-summary "Use the same figure in all three." --also report-findings --also report-table --also-phrase "12%"
+```
+
+An `--also-phrase "exact words"` (and an `--also-target <field-id>`, needed only when the words appear in more than one text field) belongs to the `--also` just before it. `list --anchors` shows each place under `targets`, and the comment's own `anchorStatus` is the worst of them. `--also-phrase` is refused while the browser edition's service is running (run `npx opendoc stop` first); with opendoc-desktop open, or with nothing running, it works. While the service runs, `--also` takes whole blocks only.
 
 ## Create themes and templates remotely
 
@@ -168,6 +188,189 @@ Verify catalog discovery with `themes inspect <id>` or `templates inspect <id>`,
 OpenDoc produces files and machine-readable results. The agent sends the requested artifacts through its existing attachment, download, or storage capabilities, within the user's requested destination and scope. For example, a messaging agent may attach the PDF to its current conversation; another agent may expose a downloadable file.
 
 Return accessible artifacts, not a remote-only filesystem path the recipient cannot open. Do not send internal review manifests, source material, or unrelated workspace files unless requested. Keep the final response focused on the deliverables and any concrete unresolved limits. The recipient should never need to install OpenDoc, start its GUI, or repeat the agent's review to complete the requested production workflow.
+
+## Command line reference
+
+Every command accepts `--json` for a structured result and `--workspace <folder>` to choose the workspace. `<command> --help` prints that command's usage, and `--help --json` prints `{ "usage": "..." }`.
+
+### Machine-readable help
+
+`npx opendoc help --json` prints the whole catalogue, built from the same list that the argument parsers are tested against:
+
+```json
+{ "version": "...", "edition": "headless", "commands": [{ "path": ["comments", "add"], "summary": "...", "args": [{ "name": "doc", "required": true, "repeatable": false }], "options": [{ "name": "phrase", "type": "string", "repeatable": false, "required": false, "description": "..." }], "json": true }], "globalOptions": [{ "name": "json", "...": "..." }, { "name": "workspace", "...": "..." }] }
+```
+
+An agent can read it instead of parsing usage text. `edition` says which commands exist: `start`, `status`, `stop` and `context` are listed only in normal OpenDoc. `npx opendoc --version --json` prints `{ "version": "..." }`, and adds `build: { build, commit, builtAt }` when the runtime is the desktop app's, which records its build.
+
+### Failures and exit codes
+
+A failed command with `--json` prints one object on standard output (the text of the error also goes to standard error):
+
+```json
+{ "ok": false, "error": "No OpenDoc workspace found ...", "code": "no-workspace" }
+```
+
+`error` is the message for people; `code` is stable, so match on it rather than on the wording. Exit status 2 means a usage error (code `usage`: an unknown command or option, a missing argument); every other failure exits 1. A document that fails to render in `review` or `export` is reported as `status: "error"` in the result instead. A failure that fits no other code has code `failed`.
+
+| Code | Meaning |
+| --- | --- |
+| `usage` | The command line is wrong. Exit status 2. |
+| `unsupported-runtime` | This Node.js version cannot run OpenDoc. |
+| `unsupported-edition` | The command does not exist in this edition, such as `start` in Headless. |
+| `no-workspace` | No workspace was found from the current folder or `--workspace`. |
+| `workspace-invalid` | The folder is not an initialized workspace, or its marker, format or edition is not supported. |
+| `installation-invalid` | The workspace's installed OpenDoc is missing or does not match its pin. |
+| `workspace-locked` | Another OpenDoc command holds the workspace, or its lock is unreadable. |
+| `desktop-owns-workspace` | opendoc-desktop has the workspace open and the command needs it closed. |
+| `service-running` | The browser edition's service is running and the command needs it stopped. |
+| `service-unavailable` | The recorded service did not answer. |
+| `owner-shutting-down` | The previous OpenDoc session is still finishing its shutdown. |
+| `workspace-read-only` | The workspace is read-only and the command writes. The message says why. |
+| `owner-unconfirmed` | A session record (`.opendoc/server.json` or `desktop.json`) is unreadable, or its owner could not be confirmed. |
+| `timeout` | The command waited for something that did not happen in time. |
+| `invalid-record` | A workspace file the command reads, such as `.opendoc/current.json`, is not valid. |
+| `not-found` | A document, comment, version, theme, template, asset, export or file does not exist. |
+| `conflict` | The item changed since it was read, or it already exists. |
+| `invalid-input` | A value was refused: a bad ID, a bad option value, a refused change. |
+| `restore-refused` | A history restore was refused because it would lose work or does not apply. |
+| `document-changed` | The source changed while the command was working, so nothing was published. |
+| `render-failed` | A document, theme or template did not render; `issues` lists what is wrong. |
+| `typecheck-failed` | The workspace did not typecheck. |
+| `already-exists` | The thing to create already exists. |
+| `unsafe-path` | A location is not a regular workspace folder, so nothing was written. |
+| `permission-denied` | The operating system refused access to a file or folder. |
+| `failed` | Any other failure. |
+
+### Commands for normal OpenDoc
+
+Normal OpenDoc has four commands that Headless does not, because they concern an app or a service, and `init` takes two more options:
+
+```sh
+npx --yes @ryanyahya/opendoc init ./workspace --no-start
+npx opendoc status --json
+npx opendoc stop
+npx opendoc context --json
+```
+
+- `init [folder] --no-start` creates the workspace and stops there, without starting OpenDoc or a browser; `--no-open` starts OpenDoc without opening a browser. Without a folder, `init` asks for one at a terminal and refuses when input is not interactive.
+- `status` reports who has the workspace open: `{ "running": true, "mode": "service", "pid": 1234, "origin": "http://127.0.0.1:4310" }` for the browser edition, `{ "running": true, "mode": "desktop", "pid": 1234 }` for opendoc-desktop, and `{ "running": false, "mode": null }` when nothing does.
+- `stop` stops the service that `opendoc start` began. It refuses for opendoc-desktop (`desktop-owns-workspace`: close the app instead), and reports that nothing is running when that is so.
+- `context` prints what the app last recorded in `.opendoc/current.json`: the open document, the selection, unsaved text edits and pending comments, with `stale: true` when nothing has the workspace open or the document has moved on since. The plain-text form names only the document, the active block and the first selection's quote; `--json` prints the whole record, including every place of a multi-place selection in `selections`. It fails with `not-found` before the app has written a record.
+
+### While opendoc-desktop or the browser service has the workspace open
+
+Commands that only read, or that write the workspace's own files (`create`, `documents`, `tags`, `check` and the like), work in every state: the app's file watcher picks the changes up. These behave differently depending on who has the workspace open:
+
+| Command | Nothing running (and Headless) | Browser service running | opendoc-desktop open |
+| --- | --- | --- | --- |
+| `comments add` | Renders the saved source and writes the comment | Posts to the service, which checks its live preview; `--also-phrase` is refused | Works directly, as with nothing running; the app refreshes its window |
+| `export` | Renders fresh and writes `output/` | Exports the service's ready preview | Works directly with its own render |
+| History recorded by other commands | Recorded before the command runs | Skipped; the service's watcher records it | Skipped; the app records it |
+| `history restore` | Restores | Refuses while `.opendoc/current.json` shows unsaved text edits in that document | The same refusal, using the record the app writes |
+| `packs install` | Installs | Refuses: stop OpenDoc first | Refuses: use Import in the app, or close it |
+| `update` (one that would install) | Installs | Refuses until the service is stopped | Refuses: update the app instead |
+| `start` | Starts the service | Reuses the running service | Refuses: the workspace is open in opendoc-desktop |
+| `stop` | Reports that nothing is running | Stops the service | Refuses: close opendoc-desktop |
+| `status` | `running: false` | `mode: "service"` | `mode: "desktop"` |
+| `review --export` | Works | Works | Works |
+
+Every refusal that names opendoc-desktop ends with the way out of a stale record: if opendoc-desktop is not running, delete `.opendoc/desktop.json` and try again. A record whose process is gone, or is not opendoc-desktop, is ignored on its own.
+
+### Read-only workspaces
+
+opendoc-desktop opens a workspace read-only when a newer version of OpenDoc made it, when you declined its upgrade, or after you restored a backup. In a workspace that the app manages, the command line follows the same rule for a workspace on a newer patch or minor version than the app. A command that writes then fails with code `workspace-read-only` and a message that says why, for example:
+
+```json
+{ "ok": false, "error": "This workspace was upgraded by OpenDoc 0.7. Update the app to edit it.", "code": "workspace-read-only" }
+```
+
+Commands that read, render or export keep working: every `list`, `inspect`, `show`, `find`, `trash` and `block` subcommand, `check`, `review`, `export` and `export history`, `templates check|preview`, `themes check|preview`, `media check`, `packs export` and `packs inspect`, `create --list`, `update --check`, `context`, `status`, `stop`, `start` and `help`. Every other command, such as `create`, `comments add`, `history restore` and `packs install`, is refused, and so is any command added later until someone decides it is safe. For the reasons `declined-upgrade` and `restored-backup`, only the open app holds the workspace read-only: once it quits, the commands write again.
+
+A workspace made by an older minor version than the app is the app's to upgrade. Commands that open it stop with "This workspace was made with OpenDoc <old> and this app has <new>. Open this workspace in opendoc-desktop to upgrade it." (code `failed`, exit status 1). `--version` still answers.
+
+### Every command
+
+| Command | What it does |
+| --- | --- |
+| `help` | Print the commands, or with --json the catalogue of every command, its arguments and options. |
+| `init [folder]` | Create a workspace and open OpenDoc; `--no-start` stops after creating it and `--no-open` starts without a browser. Headless has `init <folder>`, which creates a workspace without a server. |
+| `start [folder]` | Start the workspace's installed runtime and open it in the browser. Normal OpenDoc only. |
+| `create [id]` | Create a document or presentation, or list the starters with --list. |
+| `projects list` | List projects and their theme defaults. |
+| `projects create <id>` | Create a project. |
+| `projects update <id>` | Rename a project or change its theme defaults. |
+| `projects assign <document-id> <project-id>` | Move a document into a project. |
+| `projects delete <project-id>` | Delete an empty project. |
+| `documents rename <id> <title...>` | Change the name OpenDoc shows for a document. |
+| `documents duplicate <id>` | Copy a document into a new one with its own history. |
+| `documents delete <id>` | Move a document to Trash and print its restore command. |
+| `documents trash` | List deleted documents, most recent first. |
+| `documents restore <restore-id>` | Restore a document from Trash. |
+| `templates list` | List templates. |
+| `templates inspect <id>` | Show a template's descriptor, paths and guide. |
+| `templates check <id>` | Render a template's preview and report issues. |
+| `templates preview <id>` | Write a template's preview PDF. |
+| `themes list` | List themes. |
+| `themes inspect <id>` | Show a theme's description, palette, paths and guide size. |
+| `themes check <id>` | Render a theme's preview and report issues. |
+| `themes preview <id>` | Write a theme's preview PDF. |
+| `themes folders list` | List theme folders and the themes in them. |
+| `themes folders create <name>` | Create a theme folder. |
+| `themes folders rename <name> <new-name>` | Rename a theme folder. |
+| `themes folders delete <name>` | Delete a theme folder; its themes become unfiled. |
+| `themes assign <theme-id> <folder>` | File a theme in a folder, or none to unfile it. |
+| `themes tags <theme-id>` | Show or change a theme's tags (kept for scripts; opendoc tags covers every kind). |
+| `tags list` | List the types, statuses, languages and custom tags in use, with counts. |
+| `tags show <kind> <id>` | Show one item's type, status, language and tags. |
+| `tags add <kind> <id> <tag...>` | Add types or custom tags to an item. |
+| `tags remove <kind> <id> <tag...>` | Remove tags from an item. |
+| `tags set <kind> <id> [tag...]` | Replace an item's tags. |
+| `tags status <document-id> [status]` | Show or set a document's status: draft, in-review, final or archived. |
+| `tags find [tag...]` | Find documents, presentations, themes and templates by tag, type, status or language. |
+| `tags create <custom-tag>` | Create a custom tag. |
+| `tags delete <custom-tag>` | Delete a custom tag. |
+| `assets list [kind]` | List logos and fonts. |
+| `assets inspect <kind> <id>` | Show an asset and its current revision. |
+| `assets import logo` | Import a logo from an SVG or PNG file. |
+| `assets import font` | Import a font family from TTF or OTF files. |
+| `assets revise <kind> <id>` | Change an asset's metadata from a JSON file. |
+| `assets add-variation <logo-id>` | Add a variation to a logo. |
+| `assets add-faces <font-id>` | Add faces to a font family. |
+| `assets archive <kind> <id>` | Archive an asset. |
+| `assets restore <kind> <id>` | Restore an archived asset. |
+| `assets defaults <theme-id>` | Show or change a theme's default assets. |
+| `assets bind <document-id> <slot> <asset-id>` | Bind an asset to a document's logo, body font or heading font. |
+| `assets unbind <document-id> <slot>` | Remove a binding from a document. |
+| `media list [document]` | List the media of one document, or of every document. |
+| `media import <document> <media-id>` | Import an image into a document. |
+| `media record <document> <media-id>` | Record the generation inputs of reviewed media. |
+| `media check <document> <media-id>` | Report whether recorded media is fresh, stale or unrecorded. |
+| `comments list <doc>` | List a document's comments. |
+| `comments resolve <doc> <comment-id>` | Resolve a comment. |
+| `comments reopen <doc> <comment-id>` | Reopen a resolved comment. |
+| `comments delete <doc> <comment-id>` | Delete a comment; it stays restorable for 90 days. |
+| `comments restore <doc> <comment-id>` | Restore a deleted comment. |
+| `comments add <doc> <block-id> <text...>` | Add a comment on a block, or on exact words in it, or on several places. |
+| `comments edit <doc> <comment-id> <text...>` | Replace the text of an open or resolved comment. |
+| `history list <doc>` | List a document's versions, newest first. |
+| `history show <doc> <version>` | Show what a version changed compared with the current source. |
+| `history block <doc> <block-id>` | Show one block's earlier versions. |
+| `history restore <doc> <version>` | Restore a version, one block, or one section. |
+| `packs export` | Export themes and templates as a pack file. |
+| `packs inspect <file>` | Inspect a pack without running its code. |
+| `packs install <file>` | Check or install a pack's themes and templates. |
+| `export [document-id...]` | Export documents as PDF or editable PowerPoint. |
+| `export history list <doc>` | List a document's earlier exports, newest first. |
+| `export history delete <export-id>` | Delete an earlier export and its file. |
+| `export history restore <export-id>` | Undo the deletion of an earlier export. |
+| `export history reveal <export-id>` | Print an earlier export's file path. |
+| `review [document-id]` | Generate page images, text and review issues for a document, theme or template. |
+| `check` | Typecheck workspace documents, themes and templates. |
+| `update` | Check for, or explicitly install, a compatible OpenDoc version. |
+| `context` | Show what the OpenDoc app has selected. Normal OpenDoc only. |
+| `status` | Show whether OpenDoc is running for this workspace. Normal OpenDoc only. |
+| `stop` | Stop the OpenDoc service started with opendoc start; it does not stop opendoc-desktop. Normal OpenDoc only. |
 
 ## Update
 

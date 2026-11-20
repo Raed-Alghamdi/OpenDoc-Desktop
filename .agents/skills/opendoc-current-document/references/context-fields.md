@@ -9,6 +9,7 @@ Read only the section relevant to the selected object. Field paths describe obse
 - `title` is the authored PDF title from `meta.title`; `name` is the library name, which a rename can change without touching source. Match the user's wording against both.
 - `status`, `error`, and `revision`: the render state and its counter; `status` is `idle` when no document is open. `renderHash` identifies the last successful PDF, which `status: rendering` or `error` can leave visible.
 - `provenance`, `source`, `blockId`, `selectedBlock`, `selection`, `selectionCurrent`, and `selectedText` locate the selected block or phrase; verify them against source as described in step 2.
+- `selections`: every selected place, in the order the app holds them (one entry for one selection, `[]` for none). `selection` equals `selections[0]`, the only entry that can be a phrase; the others are whole components, one per block. `blockId`, `selectedBlock`, and `source` belong to the active block, which can be any entry; `selectionCurrent` and `selectedText` describe `selection` only. Each entry carries its own `renderHash` and `revision`, to compare with the file's.
 - The **Templates** view writes no template context: a template being viewed never appears here. Resolve it from the request or `npx opendoc templates list`.
 
 ## Media selection
@@ -31,6 +32,6 @@ Use [Assets](../../../../docs/ASSETS.md) for binding, logo placement, and font c
 
 - `rendering` / `error` status can leave an older successful PDF visible. Read the error and current source before making a claim about the displayed revision.
 - `manualEdit` describes editing activity, pending count, draft-preview status, and the latest committed correction, without exposing draft text. An open editor is not a request to act.
-- `pendingComments` lists open comments. Pending phrase comments retain the original quote. `anchorStatus: changed` requires inspecting the intended passage; `missing` or `targetAvailable: false` means the owning block is unavailable. Retain its feedback rather than choosing another occurrence. `commentsError` means the comments file could not be read; report it rather than treating the document as having no feedback.
+- `pendingComments` lists open comments. Pending phrase comments retain the original quote. `anchorStatus: changed` requires inspecting the intended passage; `missing` or `targetAvailable: false` means the owning block is unavailable. Retain its feedback rather than choosing another occurrence. A comment on several places also has `targets`, each with its own `blockId`, `quote`, `anchor`, `anchorStatus`, `targetAvailable`, and `selection`; its top-level `anchorStatus` is the worst of them and its top-level `blockId` and `quote` repeat `targets[0]`, so judge each place by its own entry. `commentsError` means the comments file could not be read; report it rather than treating the document as having no feedback.
 
 A requested project move goes through `npx opendoc projects assign <document-id> <project-id>` ([opendoc-organize](../../opendoc-organize/SKILL.md)); context files are generated observations, never edited by hand.

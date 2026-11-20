@@ -5,7 +5,8 @@
 //   node desktop/tests/shell/updater/appimage-run.mjs --first <build 1 output folder> --second <build 2 output folder> --work <empty scratch folder>
 //
 // Each output folder holds `opendoc-desktop-x86_64.AppImage`, electron-builder's `latest-linux.yml` and `linux-unpacked/` (whose
-// resources/runtime/build-info.json gives the build number; the script adds `build:` and `commit:` to the metadata, as the release build does).
+// resources/runtime/build-info.json gives the build number; the script writes `build:` and `commit:` into the metadata, replacing the lines
+// dist.mjs already wrote, as the release build does).
 //
 // Case 1: build 1 runs with `updateFeed` pointing at a loopback feed that offers build 2. It downloads the update, the app is quit
 //   (SIGTERM), the AppImage file is now build 2, ~/.local/bin/opendoc (in the scratch HOME) still works, and the next launch is build 2.
@@ -17,12 +18,13 @@
 // Every launch is `xvfb-run` inside `timeout -s KILL`, with the Claude app's display and Electron variables removed. It never touches the real HOME.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { constants, createReadStream } from 'node:fs';
-import { chmod, copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, readdir, readlink, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { strippedVariables } from '../support/environment.mjs';
 import { startFeed } from './support/feed.mjs';
+import { addBuildFields } from '../../../runtime/release-metadata.mjs';
 
 const { values } = parseArgs({ options: { first: { type: 'string' }, second: { type: 'string' }, work: { type: 'string' }, keep: { type: 'boolean', default: false } } });
 if (!values.first || !values.second || !values.work) {
@@ -48,10 +50,9 @@ async function describeBuild(folder) {
   return { dir, file: join(dir, appName), build: info.build, commit: info.commit, sha512: await hashFile(join(dir, appName)), size: (await stat(join(dir, appName))).size };
 }
 
-/** latest-linux.yml with the top-level build and commit lines the release build adds. */
+/** latest-linux.yml with the top-level build and commit lines the release build adds (dist.mjs's own lines are replaced, never doubled). */
 async function stampedMetadata(release) {
-  const text = await readFile(join(release.dir, 'latest-linux.yml'), 'utf8');
-  return text.replace(/^(version: .*)$/m, `$1\nbuild: ${release.build}\ncommit: ${release.commit}`);
+  return addBuildFields(await readFile(join(release.dir, 'latest-linux.yml'), 'utf8'), release.build, release.commit);
 }
 
 async function publish(feed, release, { corrupt = false } = {}) {
@@ -158,7 +159,10 @@ function runCommand(scratch) {
 }
 
 const pathOf = request => request.path.split('?')[0];
-const runtimeFolders = async scratch => (await readdir(join(scratch.home, '.local', 'share', 'opendoc-desktop', 'runtime')).catch(() => [])).filter(name => !name.startsWith('.'));
+const runtimeRoot = scratch => join(scratch.home, '.local', 'share', 'opendoc-desktop', 'runtime');
+/** The runtime copies (`<version>-<build>`), without the `current` link that points at the newest one. */
+const runtimeFolders = async scratch => (await readdir(runtimeRoot(scratch)).catch(() => [])).filter(name => !name.startsWith('.') && name !== 'current');
+const currentRuntime = async scratch => readlink(join(runtimeRoot(scratch), 'current')).catch(() => null);
 
 const launches = [];
 let feed;
@@ -196,6 +200,7 @@ try {
   const cli = runCommand(good);
   check(cli.status === 0 && cli.text.length > 20, '~/.local/bin/opendoc works after the swap', `exit ${cli.status}`);
   check((await runtimeFolders(good)).some(name => name.endsWith(`-${second.build}`)), 'the command ran build 2 (its runtime copy is for build 2)', (await runtimeFolders(good)).join(', '));
+  check(String(await currentRuntime(good)).endsWith(`-${second.build}`), 'runtime/current points at the build 2 copy', String(await currentRuntime(good)));
 
   const mark = await logSize(good);
   run = launch(good, 'good-2');
@@ -206,6 +211,10 @@ try {
   check(new RegExp(`updated from 0\\.6\\.1, build ${first.build} to 0\\.6\\.1, build ${second.build}`).test(text2), `the relaunch is build ${second.build}: the app logs the update from build ${first.build}`);
   const config = JSON.parse(await readFile(good.config, 'utf8'));
   check(config.lastRun?.build === second.build, 'config.json records the last run as build 2', JSON.stringify(config.lastRun));
+  // The swap consumed the downloaded AppImage but left update-info.json in pending/; the relaunch check that finds nothing newer clears it.
+  const cleared = await until('the pending folder is emptied', async () => /the downloaded update was removed: nothing newer is left/.test(await logText(good, mark)), { run, seconds: 60 });
+  const left = await readdir(good.pending).catch(() => []);
+  check(cleared && left.length === 0, 'the relaunch check emptied the updater\'s pending folder (nothing left from the swap)', left.join(', ') || 'empty');
   const exit2 = await quit(run);
   check(exit2 !== null, 'the relaunched app quit on SIGTERM');
   check(await hashFile(good.appImage) === second.sha512, 'the AppImage stays build 2');

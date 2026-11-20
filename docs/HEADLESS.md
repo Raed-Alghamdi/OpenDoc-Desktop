@@ -139,6 +139,8 @@ A remote environment need not have Microsoft PowerPoint installed. Complete avai
 Headless has no library menu; use the same commands for document lifecycle and grouping:
 
 ```sh
+npx opendoc documents list --json
+npx opendoc documents show my-report --json
 npx opendoc documents rename my-report "Quarterly report"
 npx opendoc documents duplicate my-report --id my-report-q3 --title "Q3 report" --json
 npx opendoc documents delete my-report-q3
@@ -147,7 +149,21 @@ npx opendoc documents restore my-report-q3
 npx opendoc projects assign my-report client-work
 ```
 
+`list` prints one line per document (`--json` prints an array): its `id`, `title` (the name given in OpenDoc, else the title the source states, else the ID), `path`, `format`, `projectId` and `project`, `type`, custom `tags`, `documentStatus`, `language` and `updatedAt` (when its source files last changed; comments don't count). `show <id>` adds `meta` (the `title`, `description` and `kind` the source states as plain text), the source `files` the document is built from (index, theme, data, and the like, with size and time) and its `media`. Both read the saved files and never render, so they are quick and run no authored code: a title the source computes shows as `authoredTitle: null` until you `review` the document, and the app's render state (`status`, `revision`, the page list) is not part of the answer. They work beside the app and the browser service, and in a read-only workspace.
+
 `delete` moves the document to Trash with its history, comments, tags, and status, and prints its restore command; `restore` takes that restore ID, or the document ID when Trash holds one copy. A duplicate starts its own history and has no status. [Projects](PROJECTS.md#commands) describes each command.
+
+## Edit a media item's details
+
+`media edit` changes the details the app's media editor changes: a media item's title, description, kind, alt text, attribution and sources, through the same code as the app, so the media browser shows the change at once:
+
+```sh
+npx opendoc media edit my-report harbour --title "Harbour at dawn" --alt "Fishing boats at dawn"
+npx opendoc media edit my-report harbour --source "Field notes" --source "https://example.com/survey" --json
+npx opendoc media edit documents/my-report/media/harbour/image.png --clear-alt
+```
+
+Name the item by document and media ID, or by the path of its image, `meta.json` or folder (relative to the current folder). A field you don't name keeps its value, and so do `file`, `data` and `recipe`. `--source` replaces the whole list, once per source; `--clear-alt`, `--clear-attribution` and `--clear-sources` remove a field. `--expected-revision <revision>` refuses the edit with code `conflict` when the item changed since you read its `metadataRevision` (from `media list`); without it the edit applies to the record as it is now. The result is `{ documentId, id, metadataRevision, changed, file, meta }`, where `meta` is the saved record. Editing details never records a generated visual as reviewed (`media record` does). Without `--json` the command prints a one-line summary and the new revision. See [Media](MEDIA.md) for the fields.
 
 ## Leave and apply feedback
 
@@ -260,7 +276,7 @@ npx opendoc context --json
 
 ### While opendoc-desktop or the browser service has the workspace open
 
-Commands that only read, or that write the workspace's own files (`create`, `documents`, `tags`, `check` and the like), work in every state: the app's file watcher picks the changes up. These behave differently depending on who has the workspace open:
+Commands that only read, or that write the workspace's own files (`create`, `documents`, `media edit`, `tags`, `check` and the like), work in every state: the app's file watcher picks the changes up. These behave differently depending on who has the workspace open:
 
 | Command | Nothing running (and Headless) | Browser service running | opendoc-desktop open |
 | --- | --- | --- | --- |
@@ -302,6 +318,8 @@ A workspace made by an older minor version than the app is the app's to upgrade.
 | `projects update <id>` | Rename a project or change its theme defaults. |
 | `projects assign <document-id> <project-id>` | Move a document into a project. |
 | `projects delete <project-id>` | Delete an empty project. |
+| `documents list` | List every document: title, path, project, type, tags, status, language and when it last changed. Reads the saved files and does not render. |
+| `documents show <id>` | Show one document's metadata, the source files it is built from, and its media. |
 | `documents rename <id> <title...>` | Change the name OpenDoc shows for a document. |
 | `documents duplicate <id>` | Copy a document into a new one with its own history. |
 | `documents delete <id>` | Move a document to Trash and print its restore command. |
@@ -344,6 +362,7 @@ A workspace made by an older minor version than the app is the app's to upgrade.
 | `assets unbind <document-id> <slot>` | Remove a binding from a document. |
 | `media list [document]` | List the media of one document, or of every document. |
 | `media import <document> <media-id>` | Import an image into a document. |
+| `media edit <document> [media-id]` | Change a media item's title, description, kind, alt text, attribution or sources. Name the item by document and media ID, or by the path of its image, meta.json or folder. |
 | `media record <document> <media-id>` | Record the generation inputs of reviewed media. |
 | `media check <document> <media-id>` | Report whether recorded media is fresh, stale or unrecorded. |
 | `comments list <doc>` | List a document's comments. |

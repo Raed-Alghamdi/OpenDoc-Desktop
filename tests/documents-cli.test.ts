@@ -119,7 +119,7 @@ test('the documents command is listed in the main command line help', async t =>
   const lines: string[] = [];
   t.mock.method(console, 'log', (line: string) => { lines.push(line); });
   await main(['--help']);
-  assert.match(lines.join('\n'), /npx opendoc documents +Rename, duplicate, delete, and restore documents/);
+  assert.match(lines.join('\n'), /npx opendoc documents +List, show, rename, duplicate, delete, and restore documents/);
 });
 
 

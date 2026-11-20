@@ -269,6 +269,32 @@
     {
       "path": [
         "documents",
+        "list"
+      ],
+      "summary": "List every document: title, path, project, type, tags, status, language and when it last changed. Reads the saved files and does not render.",
+      "args": [],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "documents",
+        "show"
+      ],
+      "summary": "Show one document's metadata, the source files it is built from, and its media.",
+      "args": [
+        {
+          "name": "id",
+          "required": true,
+          "repeatable": false
+        }
+      ],
+      "options": [],
+      "json": true
+    },
+    {
+      "path": [
+        "documents",
         "rename"
       ],
       "summary": "Change the name OpenDoc shows for a document.",
@@ -1385,6 +1411,98 @@
           "repeatable": false,
           "required": false,
           "description": "photo, illustration, chart, diagram, or image."
+        }
+      ],
+      "json": true
+    },
+    {
+      "path": [
+        "media",
+        "edit"
+      ],
+      "summary": "Change a media item's title, description, kind, alt text, attribution or sources. Name the item by document and media ID, or by the path of its image, meta.json or folder.",
+      "args": [
+        {
+          "name": "document",
+          "required": true,
+          "repeatable": false
+        },
+        {
+          "name": "media-id",
+          "required": false,
+          "repeatable": false
+        }
+      ],
+      "options": [
+        {
+          "name": "title",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "New title."
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "New description."
+        },
+        {
+          "name": "kind",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "photo, illustration, chart, diagram, or image."
+        },
+        {
+          "name": "alt",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "New alt text."
+        },
+        {
+          "name": "attribution",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "New credit line."
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "repeatable": true,
+          "required": false,
+          "description": "A provenance note or location. Replaces the whole list; repeat for each source."
+        },
+        {
+          "name": "clear-alt",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Remove the alt text."
+        },
+        {
+          "name": "clear-attribution",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Remove the attribution."
+        },
+        {
+          "name": "clear-sources",
+          "type": "boolean",
+          "repeatable": false,
+          "required": false,
+          "description": "Remove every source."
+        },
+        {
+          "name": "expected-revision",
+          "type": "string",
+          "repeatable": false,
+          "required": false,
+          "description": "Refuse the edit when the item is no longer at this metadataRevision (from media list)."
         }
       ],
       "json": true

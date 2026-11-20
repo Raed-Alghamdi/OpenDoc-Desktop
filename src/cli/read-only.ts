@@ -11,7 +11,7 @@ import { readOnlyCode, type ReadOnlyState } from '../shared/read-only';
  */
 export const readOnlyCommands = [
   'help', 'check', 'review', 'export', 'context', 'status', 'stop', 'start', 'init', 'update',
-  'projects list', 'documents trash', 'templates list', 'templates inspect', 'templates check', 'templates preview',
+  'projects list', 'documents trash', 'documents list', 'documents show', 'templates list', 'templates inspect', 'templates check', 'templates preview',
   'themes list', 'themes inspect', 'themes check', 'themes preview', 'themes folders list',
   'tags list', 'tags show', 'tags find', 'assets list', 'assets inspect', 'media list', 'media check',
   'comments list', 'history list', 'history show', 'history block', 'packs export', 'packs inspect',
@@ -24,7 +24,7 @@ export const writeCommands = [
   'themes folders create', 'themes folders rename', 'themes folders delete', 'themes assign', 'themes tags',
   'tags add', 'tags remove', 'tags set', 'tags status', 'tags create', 'tags delete',
   'assets import logo', 'assets import font', 'assets revise', 'assets add-variation', 'assets add-faces', 'assets archive', 'assets restore', 'assets defaults', 'assets bind', 'assets unbind',
-  'media import', 'media record',
+  'media import', 'media record', 'media edit',
   'comments resolve', 'comments reopen', 'comments delete', 'comments restore', 'comments add', 'comments edit',
   'history restore', 'packs install',
 ];

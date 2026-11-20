@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { readFile, realpath } from 'node:fs/promises';
-import { applicationRoot } from '../runtime/paths';
+import { applicationRoot, managedRuntime } from '../runtime/paths';
 import { discoverWorkspace, explicitWorkspace, installedApplication, packageIdentity, packageMetadata, packageNames, type Edition } from './workspace';
 import { runProcess } from './process';
 import { withWorkspaceLock } from './lock';
@@ -60,11 +60,18 @@ export function parseGlobalArgs(args: string[]) {
 }
 
 /**
+ * Where `build-info.json` is looked for: the desktop runtime's own folder, which holds `node_modules/opendoc` (the
+ * runtime build writes the file beside the runtime's package.json, not inside this package). An npm install is no
+ * runtime, so it looks in the package folder, where there is no such file.
+ */
+const buildInfoFolder = () => managedRuntime()?.directory ?? applicationRoot;
+
+/**
  * The build the desktop runtime was made from, when it says so. The runtime build writes
  * `build-info.json` beside the runtime's package.json; npm packages don't have it.
  * A missing or unreadable file means no build to report, never a failure.
  */
-export async function readBuildInfo(root = applicationRoot): Promise<{ build?: number | string; commit?: string; builtAt?: string } | undefined> {
+export async function readBuildInfo(root = buildInfoFolder()): Promise<{ build?: number | string; commit?: string; builtAt?: string } | undefined> {
   let info: Record<string, unknown>;
   try { info = JSON.parse(await readFile(resolve(root, 'build-info.json'), 'utf8')); } catch { return undefined; }
   if (!info || typeof info !== 'object' || Array.isArray(info)) return undefined;
@@ -77,10 +84,10 @@ export async function readBuildInfo(root = applicationRoot): Promise<{ build?: n
   return Object.keys(result).length ? result : undefined;
 }
 
-/** What `--version --json` prints: the version, plus the runtime's build when it has one. */
-export async function versionResult(root = applicationRoot) {
-  const { version } = await packageMetadata(root);
-  const build = await readBuildInfo(root);
+/** What `--version --json` prints: the version, plus the runtime's build when it has one. A `root` holds both files. */
+export async function versionResult(root?: string) {
+  const { version } = await packageMetadata(root ?? applicationRoot);
+  const build = await readBuildInfo(root ?? buildInfoFolder());
   return { version, ...(build ? { build } : {}) };
 }
 

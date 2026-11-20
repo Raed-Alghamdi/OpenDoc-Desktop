@@ -73,7 +73,7 @@ export function minorPublished(version, tags) {
 
 export const titlePrefix = (rehearsal) => `[upstream-watch]${rehearsal ? '[rehearsal]' : ''} OpenDoc`;
 
-// An open issue for this upstream version that is still waiting for Raed (every title except the "published" notice has a colon
+// An open issue for this upstream version that is still waiting for the repository owner (every title except the "published" notice has a colon
 // after the version). While one is open, the daily run does not build the same thing again.
 export function findWaitingIssue(issues, version, rehearsal = false) {
   const start = `${titlePrefix(rehearsal)} ${version}:`;

@@ -7,13 +7,13 @@ name: Upstream watch
 #   prepare  fetches upstream's main and mirrors it to the `main` branch (a plain copy, never forced). When upstream's version differs,
 #            it merges upstream (a merge, never a rebase) into a CANDIDATE branch cut from the target branch (`roadmap`), moves the
 #            desktop app's version up to match, and pushes that branch. A conflict is aborted and reported; nothing else is pushed.
-#   verify   the same commands as verify.yml, on the candidate.
+#   verify   verify.yml, called on the candidate (its optional `ref` input).
 #   desktop  desktop.yml on the candidate: every installer, the smoke tests and a DRAFT release desktop-v<version>-<build>.
 #   finish   decides (desktop/release/decide.mjs). Only when verify and desktop are green does the merge move into the target branch,
 #            by fast-forward. It publishes the draft only if all of these hold: the repository variable DESKTOP_AUTO_PUBLISH is `true`,
 #            it is an upstream patch release, the merge was clean, every check is green, and an earlier release of the same x.y line has
 #            gone out. A new minor, a rebuild, a hand-merged conflict, a red check and a conflict never publish. A published release
-#            then calls aur-bump.yml. Whatever happens that needs Raed, an issue in this repository says so (and mentions the owner),
+#            then calls aur-bump.yml. Whatever happens that needs the repository owner, an issue in this repository says so (and mentions the owner),
 #            and a run that stopped is also red, so GitHub's failure mail reaches the same person.
 #
 # Rehearsal: a run is a rehearsal when `target_branch` is not `roadmap` or `upstream_ref` names a branch of this repository that stands
@@ -93,7 +93,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
-      # The published releases and tags decide the build number; open issues say whether an earlier run is still waiting for Raed.
+      # The published releases and tags decide the build number; open issues say whether an earlier run is still waiting for the repository owner.
       - name: List the releases and the open issues
         env:
           GH_TOKEN: ${{ github.token }}
@@ -140,41 +140,15 @@ jobs:
             if [ -n "$DETAIL" ]; then echo "- $DETAIL"; fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # What verify.yml runs, on the merged candidate. verify.yml itself checks out the commit this workflow started on (the old tip of the
-  # target branch), so calling it would test the wrong code; these are its commands. Keep the two in step (the matrix and the steps).
+  # verify.yml on the merged candidate: its matrix (Ubuntu and both Macs), timeouts and steps, unchanged.
   verify:
     needs: prepare
     if: needs.prepare.outputs.action == 'check'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, macos-15-intel]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.os == 'macos-15-intel' && 45 || 25 }}
-    env:
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.prepare.outputs.candidate_sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .node-version
-      - uses: pnpm/action-setup@v6
-        with:
-          cache: true
-      - run: pnpm install --frozen-lockfile
-      - name: Verify source, build, and tests
-        run: pnpm verify
-      - run: pnpm package:pack --skip-build
-      - name: Accept the installed release and updates
-        run: |
-          opendoc_version=$(node -p 'require("./package.json").version')
-          node scripts/accept-package.mjs "output/packages/ryanyahya-opendoc-${opendoc_version}.tgz"
-          node scripts/accept-update.mjs "output/packages/ryanyahya-opendoc-${opendoc_version}.tgz"
-          node scripts/accept-package.mjs "output/packages/ryanyahya-opendoc-headless-${opendoc_version}.tgz"
-          node scripts/accept-update.mjs "output/packages/ryanyahya-opendoc-headless-${opendoc_version}.tgz"
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify.yml
+    with:
+      ref: ${{ needs.prepare.outputs.candidate_sha }}
 
   # Every installer, the smoke tests on all three runners, and a draft release. It never publishes (see desktop.yml).
   desktop:
@@ -275,7 +249,7 @@ jobs:
         if: steps.promote.outcome == 'success'
         continue-on-error: true
         run: git push --quiet origin --delete "$CANDIDATE_BRANCH"
-      # One issue per outcome that needs Raed: a draft waiting, a stop, a red check, and a notice of what published itself. A second
+      # One issue per outcome that needs the repository owner: a draft waiting, a stop, a red check, and a notice of what published itself. A second
       # run with the same title adds a comment instead of a second issue.
       - name: Open the issue
         env:

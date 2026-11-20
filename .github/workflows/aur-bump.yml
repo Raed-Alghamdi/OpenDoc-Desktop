@@ -3,13 +3,13 @@ name: AUR bump
 # Keeps the AUR package opendoc-desktop-bin in step with a published release (plan 3.7, E13). From the release's pacman file and its
 # update metadata it makes the new PKGBUILD and .SRCINFO (pkgver = OpenDoc version, pkgrel = build number, the real SHA-256 in place
 # of SKIP) and uploads them as an artifact. It pushes them to the AUR only when BOTH exist: the repository secret AUR_SSH_KEY and the
-# repository variable AUR_PUSH set to `true`. Neither exists until Raed has approved the first AUR publication (Wave 4), so until
+# repository variable AUR_PUSH set to `true`. Neither exists until the first AUR publication is approved, so until
 # then this workflow only produces the artifact. A rehearsal's `dryrun-` tag never pushes, whatever exists.
 #
 # It starts three ways: a release published by hand (the `release` event; a release published by upstream-watch's own token does not
 # fire it, so upstream-watch calls this workflow itself), a call from upstream-watch.yml, and workflow_dispatch with a tag.
 #
-# Setting the push up (Wave 4, Raed): create the AUR SSH key, store the private key as the secret AUR_SSH_KEY, put the AUR host key's
+# Setting the push up (once the first AUR publication is approved): create the AUR SSH key, store the private key as the secret AUR_SSH_KEY, put the AUR host key's
 # fingerprint (from the Arch wiki, `SHA256:...`) in the variable AUR_HOST_KEY_SHA256, and finally set AUR_PUSH to `true`.
 on:
   release:

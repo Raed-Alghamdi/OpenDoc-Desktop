@@ -89,7 +89,11 @@ test('media edit finds the item from the path of its image, meta.json or folder'
   await assert.rejects(runMediaCli(['edit', 'documents/proof/index.tsx', '--title', 'X', '--json'], f.root), /not inside a document's media folder/);
   await assert.rejects(runMediaCli(['edit', 'documents/proof/media', '--title', 'X', '--json'], f.root), /not inside a document's media folder/);
   await assert.rejects(runMediaCli(['edit', 'documents/proof/media/missing/image.png', '--title', 'X', '--json'], f.root), /Media item not found/);
-  await assert.rejects(runMediaCli(['edit', '/etc/hostname', '--title', 'X', '--json'], f.root), /not inside a document's media folder/);
+  // A real file outside the workspace (a system file such as /etc/hostname is not on every platform).
+  const outside = await mkdtemp(resolve(tmpdir(), 'opendoc-outside-'));
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  await writeFile(resolve(outside, 'image.png'), 'not a media item');
+  await assert.rejects(runMediaCli(['edit', resolve(outside, 'image.png'), '--title', 'X', '--json'], f.root), /not inside a document's media folder/);
 });
 
 test('media edit refuses what the app refuses, and changes nothing', async t => {

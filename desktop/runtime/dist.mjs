@@ -3,6 +3,7 @@
 //
 // Usage: node desktop/runtime/dist.mjs [--stub] [electron-builder arguments...]
 //   Everything after the options goes to electron-builder (for example `--linux pacman deb --publish never`). `--publish` defaults to never.
+//   OPENDOC_DESKTOP_TEST_BUILD=1 in the environment makes a test build (writes opendocTestBuild: true into the app's package.json).
 //   --stub   builds with tests/smoke/fixtures/electron-builder.stub.yml, a throwaway main process, for checking the packaging
 //            before the shell lands (it extends electron-builder.yml and changes only the entry file).
 // Run it after `node runtime/build.mjs`: the runtime folder for this machine must exist.
@@ -11,6 +12,7 @@ import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { addBuildFields } from './release-metadata.mjs';
+import { testBuildArguments, testBuildField, testBuildVariable } from './test-build.mjs';
 
 const desktop = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const runtime = path.join(desktop, 'build', 'runtime', `${process.platform}-${process.arch}`);
@@ -26,6 +28,12 @@ const stub = args.includes('--stub');
 const forwarded = args.filter((arg) => arg !== '--stub');
 if (!forwarded.some((arg) => arg === '--publish' || arg === '-p' || arg.startsWith('--publish='))) forwarded.push('--publish', 'never');
 if (stub) forwarded.push('--config', 'tests/smoke/fixtures/electron-builder.stub.yml');
+// OPENDOC_DESKTOP_TEST_BUILD=1 makes a test build: the field below goes into the app's package.json (see test-build.mjs). Never for a release.
+const testBuild = testBuildArguments();
+if (testBuild.length) {
+  forwarded.push(...testBuild);
+  console.log(`${testBuildVariable}=1: making a TEST BUILD (${testBuildField}: true in the app's package.json). Do not publish it.`);
+}
 
 // The build number goes in as text: electron-builder's fpm step splits it as a string.
 const build = String(info.build);

@@ -2,7 +2,10 @@
 // Checks the unpacked apps in desktop/dist (the folders electron-builder builds the installers from): the agent integrations
 // with their dot folders, through the source check script, and on macOS the design pack document type in Info.plist.
 //
-// Usage: node desktop/tests/packaging/check-packaged.mjs [--dist <folder>] [--require <linux|mac>...]
+// With --release it also reads package.json from inside each app.asar and fails when the app is a test build (the field
+// opendocTestBuild, runtime/test-build.mjs): a release must never carry it.
+//
+// Usage: node desktop/tests/packaging/check-packaged.mjs [--dist <folder>] [--require <linux|mac>...] [--release]
 // Looks for dist/linux-unpacked and for every .app folder under dist/mac*. Without --require it checks what it finds and fails when
 // it finds nothing; with --require each named platform must be there.
 import assert from 'node:assert/strict';
@@ -10,9 +13,11 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { readAsarFile, testBuildMark } from './app-archive.mjs';
 import { builderConfig, desktop, documentTypeProblems, readPlist } from './builder-support.mjs';
+import { testBuildField } from '../../runtime/test-build.mjs';
 
-const { values } = parseArgs({ options: { dist: { type: 'string' }, require: { type: 'string', multiple: true, default: [] } }, strict: true });
+const { values } = parseArgs({ options: { dist: { type: 'string' }, require: { type: 'string', multiple: true, default: [] }, release: { type: 'boolean', default: false } }, strict: true });
 const dist = path.resolve(values.dist ?? path.join(desktop, 'dist'));
 const appId = builderConfig().appId;
 
@@ -37,6 +42,16 @@ function checkHelper(resources) {
   return 'present, executable, the repository\'s text';
 }
 
+// A release app is not a test build. app.asar is read in place; package.json is the file the running app reads its own mark from.
+function checkNotTestBuild(resources) {
+  const file = path.join(resources, 'app.asar');
+  assert.ok(existsSync(file), `missing ${file}`);
+  const packageJson = readAsarFile(readFileSync(file), 'package.json');
+  assert.ok(packageJson, 'app.asar has no package.json');
+  assert.ok(!testBuildMark(packageJson.toString('utf8')).present, `this is a test build (${testBuildField} is in the app's package.json); a release must not carry it`);
+  return `no ${testBuildField}`;
+}
+
 const results = [];
 const check = (label, run) => {
   try { results.push(`ok    ${label}: ${run()}`); } catch (error) { results.push(`FAIL  ${label}: ${error.message}`); process.exitCode = 1; }
@@ -48,12 +63,14 @@ if (entries.includes('linux-unpacked')) {
   found.add('linux');
   check('linux-unpacked integrations', () => checkIntegrations(path.join(dist, 'linux-unpacked', 'resources')));
   check('linux-unpacked update helper', () => checkHelper(path.join(dist, 'linux-unpacked', 'resources')));
+  if (values.release) check('linux-unpacked is not a test build', () => checkNotTestBuild(path.join(dist, 'linux-unpacked', 'resources')));
 }
 for (const folder of entries.filter((name) => /^mac/.test(name))) {
   for (const app of readdirSync(path.join(dist, folder)).filter((name) => name.endsWith('.app'))) {
     found.add('mac');
     const contents = path.join(dist, folder, app, 'Contents');
     check(`${folder}/${app} integrations`, () => checkIntegrations(path.join(contents, 'Resources')));
+    if (values.release) check(`${folder}/${app} is not a test build`, () => checkNotTestBuild(path.join(contents, 'Resources')));
     check(`${folder}/${app} has no update helper`, () => {
       assert.ok(!existsSync(path.join(contents, 'Resources', 'updater')), 'a Mac app must not carry the Linux update helper');
       return 'none';

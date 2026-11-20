@@ -117,3 +117,22 @@ npx opendoc comments list <doc> --deleted
 Read `.opendoc/current.json` immediately before working from a selection. `selection` contains its exact quote and logical range; `selectionCurrent` says whether it matches the current ready revision. `selectedText` identifies its slot and writable source when known. `manualEdit` reports editing activity, the pending edit count, whether a draft is being previewed, the latest saved group, and render status without exposing draft text. Pending comments include `anchorStatus` and their currently resolved selection when available.
 
 Treat this as observed context. The user's request authorizes the work. Preserve local corrections, source identities, reference records, and comment history. If the current source has moved on, resolve the intended target before changing it. Do not infer that an agent is running merely because the app is connected.
+
+## One comment on several components
+
+Hold Shift, Ctrl, or Cmd while clicking to add a component to the selection or take it out, or Shift-drag a box to select every component it touches. From the keyboard, Shift+Enter or Shift+Space adds or removes the focused component. A plain click replaces the selection and Escape clears it. A plain drag across words still selects a phrase, and the first component is then the only one that can hold it: components added afterwards count whole, once each. With two or more selected the bar reads "N selected", **Comment** becomes "Comment on N components", and Edit and History step aside because they act on one component. A tap on a touch screen selects one component.
+
+One comment then covers all of them. Its row in the **Comments** tab reads "N places", with a button per place in page order that jumps to it, a marker sits on every place, and a place whose component has left the document is listed as unavailable. Resolve, edit, delete, and restore act on the whole comment, never on one place.
+
+```sh
+npx opendoc comments add <doc> <block-id> "Make these agree." --also <block-id> --also <block-id>
+npx opendoc comments add <doc> <block-id> "Shorten this." --phrase "exact words" --also <block-id> --also-phrase "other words"
+```
+
+`--also` adds another whole component; repeat it for each, one block once. `--also-phrase` (and `--also-target`) directly after an `--also` anchors that place to words, as `--phrase` does for the first. While the browser edition's service is running, `--also-phrase` is refused and only whole components can be added: run `npx opendoc stop` first. With the desktop app open or nothing running it works.
+
+A comment on one place is stored exactly as before. A comment on two or more keeps `blockId`, `quote`, and `anchor` for its first place and adds `targets`, the list of every place as `{ blockId, quote, anchor? }`, the first included. `comments list --anchors` adds `anchorStatus` and `targetAvailable` to each entry of `targets`, and the comment's own `anchorStatus` is the worst of them: `missing` there can mean one place of three, so read `targets` before concluding anything about the others.
+
+In `.opendoc/current.json`, `selections` lists every selected place (one entry for one, `[]` for none), `selection` is `selections[0]`, and `blockId` is the active block, which can be any of them. `selection`, `selectionCurrent`, and `selectedText` describe the first place only; `selectedBlock` and `source` describe the active block. Check every other entry against current source and compare its `renderHash` and `revision` with the file's before relying on it. Each pending comment with `targets` repeats them with its own `anchorStatus` and `targetAvailable` per place. `npx opendoc context --json` prints the same record, and its plain text names only the active block, not the list.
+
+An agent applies such a comment to every place, judges each place by its own status, and resolves the comment only when all of them are done. A place whose block was deleted or whose phrase is gone is reported by name and leaves the comment open; it is never skipped silently and never replaced by another block.

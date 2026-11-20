@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Fork only: upstream-watch.yml calls this on the merge it prepared. `ref` is that commit; empty (every other trigger) means the
+  # workflow's own commit, as before.
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -29,6 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.ref }}
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:

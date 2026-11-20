@@ -1,0 +1,104 @@
+name: AUR bump
+
+# Keeps the AUR package opendoc-desktop-bin in step with a published release (plan 3.7, E13). From the release's pacman file and its
+# update metadata it makes the new PKGBUILD and .SRCINFO (pkgver = OpenDoc version, pkgrel = build number, the real SHA-256 in place
+# of SKIP) and uploads them as an artifact. It pushes them to the AUR only when BOTH exist: the repository secret AUR_SSH_KEY and the
+# repository variable AUR_PUSH set to `true`. Neither exists until the first AUR publication is approved, so until
+# then this workflow only produces the artifact. A rehearsal's `dryrun-` tag never pushes, whatever exists.
+#
+# It starts three ways: a release published by hand (the `release` event; a release published by upstream-watch's own token does not
+# fire it, so upstream-watch calls this workflow itself), a call from upstream-watch.yml, and workflow_dispatch with a tag.
+#
+# Setting the push up (once the first AUR publication is approved): create the AUR SSH key, store the private key as the secret AUR_SSH_KEY, put the AUR host key's
+# fingerprint (from the Arch wiki, `SHA256:...`) in the variable AUR_HOST_KEY_SHA256, and finally set AUR_PUSH to `true`.
+on:
+  release:
+    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag, desktop-v<version>-<build>
+        type: string
+        required: true
+    secrets:
+      AUR_SSH_KEY:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag, desktop-v<version>-<build> (a rehearsal's dryrun- tag only makes the artifact)
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aur-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    # A pre-release is not for the AUR; a manual run or a call names its tag, which the script checks.
+    if: github.event_name != 'release' || (startsWith(github.event.release.tag_name, 'desktop-v') && !github.event.release.prerelease)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+      AUR_KEY_PRESENT: ${{ secrets.AUR_SSH_KEY != '' }}
+      AUR_PUSH: ${{ vars.AUR_PUSH }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Download the pacman file and the update metadata
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.pacman' --pattern 'latest-linux.yml' --dir "$RUNNER_TEMP/assets"
+      # Checks the file against latest-linux.yml (size and SHA-512) before its SHA-256 goes into the PKGBUILD.
+      - name: Make the PKGBUILD and .SRCINFO
+        id: generate
+        run: node desktop/release/aur-package.mjs generate --tag "$TAG" --assets "$RUNNER_TEMP/assets" --template desktop/aur --out "$RUNNER_TEMP/aur"
+      - name: Say whether the AUR push is on
+        id: gate
+        run: node desktop/release/aur-package.mjs gate --key "$AUR_KEY_PRESENT" --variable "$AUR_PUSH" --tag "$TAG"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aur-package-${{ env.TAG }}
+          path: |
+            ${{ runner.temp }}/aur/PKGBUILD
+            ${{ runner.temp }}/aur/.SRCINFO
+            ${{ runner.temp }}/aur/opendoc-desktop-bin.install
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+      - name: Summary
+        env:
+          PUSH: ${{ steps.gate.outputs.push }}
+        run: |
+          {
+            echo "### AUR bump for $TAG"
+            echo
+            echo "- pkgver/pkgrel and the SHA-256: $(grep -E '^(pkgver|pkgrel|sha256sums)=' "$RUNNER_TEMP/aur/PKGBUILD" | tr '\n' ' ')"
+            echo "- push to the AUR: $PUSH (needs the secret AUR_SSH_KEY and the variable AUR_PUSH=true)"
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Only here does the key exist: it is passed to this step alone. The host key must match the fingerprint in AUR_HOST_KEY_SHA256.
+      - name: Prepare SSH for the AUR
+        if: steps.gate.outputs.push == 'true'
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+          AUR_HOST_KEY_SHA256: ${{ vars.AUR_HOST_KEY_SHA256 }}
+        run: |
+          set -euo pipefail
+          test -n "$AUR_HOST_KEY_SHA256" || { echo "Set the variable AUR_HOST_KEY_SHA256 (the AUR host key's fingerprint) first." >&2; exit 1; }
+          install -d -m 700 ~/.ssh
+          (umask 077; printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur)
+          ssh-keyscan -t ed25519 aur.archlinux.org > ~/.ssh/aur_host 2>/dev/null
+          found=$(ssh-keygen -lf ~/.ssh/aur_host | awk '{print $2}')
+          test "$found" = "$AUR_HOST_KEY_SHA256" || { echo "The AUR host key is $found, not $AUR_HOST_KEY_SHA256." >&2; exit 1; }
+          cp ~/.ssh/aur_host ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: Push to the AUR
+        if: steps.gate.outputs.push == 'true'
+        run: node desktop/release/aur-package.mjs push --dir "$RUNNER_TEMP/aur" --remote ssh://aur@aur.archlinux.org/opendoc-desktop-bin.git --tag "$TAG"

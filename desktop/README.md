@@ -2,9 +2,9 @@
 
 A self-contained desktop app for [OpenDoc](https://github.com/RyanYahya/OpenDoc) on Linux and macOS, built with Electron. It carries its own runtime, so users install no Node or npm, and it installs the `opendoc` command for agents.
 
-This package is private to the repository: OpenDoc's npm packages do not include `desktop/`. Build and release instructions arrive with the app itself.
+This package is private to the repository: OpenDoc's npm packages do not include `desktop/`.
 
-How the app works, what it reads and writes, and how it is hardened: [docs/DESKTOP.md](../docs/DESKTOP.md).
+What the app does, how to install and remove it, what it reads and writes, and how it is hardened: [docs/DESKTOP.md](../docs/DESKTOP.md). This page is for people who build, test and release it.
 
 ## Layout
 
@@ -14,11 +14,159 @@ How the app works, what it reads and writes, and how it is hardened: [docs/DESKT
 - `src/renderer/`: the app's own pages (workspace picker, crash screen, upgrade progress and result, the backups list).
 - `src/main/updater/`: the in-app updater (install type, build-aware comparison, feed address rules, schedule, package and macOS installs). How it behaves: [docs/DESKTOP.md](../docs/DESKTOP.md#updates).
 - `resources/cli/`: the `opendoc` command for agents: `opendoc` (installed as `/usr/bin/opendoc` by the Linux packages) and `opendoc-appimage.sh` (the template the app fills in and writes to `~/.local/bin/opendoc` for an AppImage).
-- `tests/shell/`: the shell tests. Run them with `node tests/shell/run.mjs`; they open Electron windows only on a virtual display (Xvfb), never on your screen. `--unit` runs the unit tests without Electron.
+- `runtime/`: the scripts that build the runtime and the installers (see "Build").
+- `integrations/`: the plugin and skill files for AI apps ([its README](integrations/README.md)).
+- `aur/`: the `opendoc-desktop-bin` package for the Arch User Repository (`PKGBUILD` and its install script).
+- `scripts/update-feed-server.py`: a local update feed for tests.
+- `tests/shell/`, `tests/packaging/`, `tests/smoke/`: the tests (see "Tests").
+
+## Build
+
+Everything runs from the repository root. Node 24 (the version in `.node-version`) and pnpm are needed. The first step installs the dependencies, including Electron and electron-builder:
+
+```sh
+pnpm install --frozen-lockfile
+```
+
+Build on the platform you build for. The runtime holds native pieces for one platform and architecture, and electron-builder takes the runtime of the machine it runs on. So a macOS build must run on a Mac (CI uses one macOS runner per architecture), and the Linux installers are made on Linux (x86_64 only for now).
+
+### 1. The runtime
+
+```sh
+nice -n 19 ionice -c 3 node desktop/runtime/build.mjs --build 1
+```
+
+`pnpm --filter ./desktop run runtime` runs the same script (write `run`: pnpm has a command of its own called `runtime`). The script:
+
+1. packs this repository's OpenDoc (`pnpm package:pack --edition normal`);
+2. installs that tarball with `npm ci --ignore-scripts` into `desktop/build/runtime/<platform>-<arch>/` (not committed; it needs the npm registry for the dependencies);
+3. checks the three native pieces (canvas, resvg, esbuild) and keeps esbuild's executable bit;
+4. removes only what nothing loads at run time (source maps and npm's hidden lock file);
+5. writes `build-info.json` (`{ build, commit, builtAt }`) and makes the folder read-only.
+
+Options:
+
+- `--build <n>`: the build number, a positive whole number. Without it the script reads `OPENDOC_DESKTOP_BUILD`, then uses 1.
+- `--skip-pack`: reuse the tarball already in `output/packages/` instead of packing again.
+
+The folder holds `package.json`, `package-lock.json`, `build-info.json` and `node_modules/` (about 185 MB). To rebuild, run the command again: it makes the old folder writable first. To run the shell from this runtime, set `OPENDOC_DESKTOP_RUNTIME` to it (see [Run it from a checkout](../docs/DESKTOP.md#run-it-from-a-checkout)).
+
+### 2. The installers
+
+```sh
+nice -n 19 ionice -c 3 node desktop/runtime/dist.mjs --linux pacman deb rpm AppImage --publish never
+```
+
+`pnpm --filter ./desktop run dist --linux deb --publish never` runs the same script. `dist.mjs`:
+
+- reads the build number from the runtime's `build-info.json`, so build the runtime first;
+- passes it to electron-builder (`-c.buildNumber`, `-c.mac.bundleVersion`);
+- afterwards adds the top-level `build:` and `commit:` lines to every `latest*.yml` in `desktop/dist/`, which the updater needs.
+
+Everything after the script name goes to electron-builder, and `--publish never` is added if you leave `--publish` out. The config is `desktop/electron-builder.yml`, one file for every installer.
+
+Linux, in `desktop/dist/`:
+
+| Target | File name |
+|---|---|
+| pacman | `opendoc-desktop-<version>-<build>-x64.pacman` |
+| deb | `opendoc-desktop_<version>-<build>_amd64.deb` |
+| rpm | `opendoc-desktop-<version>-<build>.x86_64.rpm` |
+| AppImage | `opendoc-desktop-x86_64.AppImage` (no version in the name, so an update replaces the file in place) |
+
+Next to them: `latest-linux.yml`, and the unpacked app in `linux-unpacked/`. The pacman and rpm targets need `bsdtar` (package `libarchive-tools` on Debian and Ubuntu) and `rpm` on the build machine. CI installs both.
+
+On macOS:
+
+```sh
+node desktop/runtime/dist.mjs --mac zip dmg --arm64 --publish never   # --x64 on an Intel Mac
+```
+
+This makes `opendoc-desktop-<version>-<build>-<arch>.zip` and `.dmg`, and `latest-mac.yml`. The app is signed ad hoc (identity `-`) and not notarized, so the first launch needs "Open Anyway" (see [docs/DESKTOP.md](../docs/DESKTOP.md#install)).
+
+Check the Linux output with:
+
+```sh
+node desktop/tests/packaging/check-artifacts.mjs [--require-rpm]
+```
+
+It expects all four installers in `desktop/dist/`. It reads the version and build number from each package's own metadata, and checks that `latest-linux.yml` lists every installer with its checksum. Where the `rpm` tool is not installed it checks the `.rpm` by file name only; `--require-rpm` makes that an error (CI uses it).
+
+### The AUR package
+
+`desktop/aur/PKGBUILD` repackages a release's pacman file (`opendoc-desktop-<pkgver>-<pkgrel>-x64.pacman`) as `opendoc-desktop-bin`: `pkgver` is the OpenDoc version and `pkgrel` the build number. It adds the empty file `resources/update-disabled`, which switches the in-app updater off, because the package manager owns updates. `bash desktop/tests/packaging/aur-local.sh <a pacman file>` builds it from a local file in a scratch folder and checks the result (it needs `makepkg`, and never installs anything). The checksum line holds `SKIP` until the release automation fills it in.
+
+## Versions and build numbers
+
+The app carries exactly OpenDoc's version (the root `package.json`), and `desktop/package.json` must say the same. Nothing in this folder bumps it. Builds of one version differ only by the build number. It becomes the Arch `pkgrel`, the Debian revision, the RPM `Release`, the macOS bundle build number and the number in the file names, and it is recorded in `build-info.json`. `desktop/runtime/ci-meta.mjs` refuses a tag whose version differs from either `package.json`.
+
+## Tags and releases
+
+A desktop release is the tag `desktop-v<version>-<build>`, for example `desktop-v0.6.1-2`. The build number counts up for each version, starting at 1. Upstream's own `v<version>` tags are mirrored as they are and never collide with these.
+
+Pushing such a tag runs `.github/workflows/desktop.yml`. It builds every installer and creates a **draft** release holding all of them and the update metadata (`latest-linux.yml` and `latest-mac.yml`). The workflow never publishes. Read the draft, then publish it in the GitHub interface, or with `gh release edit <tag> --draft=false --repo Raed-Alghamdi/OpenDoc-Desktop`. Installed apps only see a release once it is published.
+
+These wait for the maintainer to publish: the first release, every new minor version, every rebuild of the same version, and any run with a red check or a hand-merged conflict. How an upstream patch release may publish itself is in the release automation section below.
+
+## What `desktop.yml` runs
+
+It runs on a `desktop-v*` tag, on a pull request that touches `desktop/**`, `scripts/pack.mjs` or the workflow itself, and by hand (`workflow_dispatch`, with a `build` input, default 1). The token is read-only except in the release job. Jobs:
+
+- **linux** (`ubuntu-latest`):
+  1. installs `rpm`, `libarchive-tools` and `xvfb`;
+  2. works out the version and build number (`desktop/runtime/ci-meta.mjs`, which takes the build from the tag);
+  3. builds the runtime;
+  4. runs `node --test "desktop/tests/packaging/*.test.mjs"` and `node --test desktop/tests/smoke/runtime.test.mjs`;
+  5. runs the shell unit tests (`node desktop/tests/shell/run.mjs --unit`; on Ubuntu `/bin/sh` is `dash`, which the launcher and the host's watcher shell must run under);
+  6. builds pacman, deb, rpm and AppImage;
+  7. runs `check-artifacts.mjs --require-rpm` and the runtime test again inside the unpacked app;
+  8. allows the app sandbox on the runner (Ubuntu 24.04 restricts user namespaces);
+  9. runs the packaged-app smoke test (`node desktop/tests/smoke/run.mjs`, under Xvfb);
+  10. keeps the files as artifacts for 5 days.
+- **integrations** (`ubuntu-latest`): `node desktop/integrations/check.mjs`, which validates the plugin and skill files.
+- **mac** (`macos-latest` for arm64 and `macos-15-intel` for x64): builds the runtime, runs the same two test groups and the shell unit tests, builds zip and dmg, runs the smoke test in the runner's own session, and keeps the files for 5 days.
+- **release** (tags only; needs `linux` and `mac`): merges the two macOS `latest-mac.yml` files (`desktop/runtime/merge-mac-metadata.mjs`) and creates the draft release with `gh release create --draft`.
+
+## Release automation (one-time setup)
+
+<!-- E13 PLACEHOLDER: replace this paragraph with the details written by the release automation work (E13):
+     upstream-watch.yml and aur-bump.yml, the publishing gate (one repository variable, off by default), the AUR key secret and
+     the second variable, the dry-run inputs, the one-time `gh workflow enable` for the fork's scheduled workflows, the
+     60-day repository-activity rule, and how a failed run is reported. -->
+
+Not written yet: the workflows `upstream-watch.yml` and `aur-bump.yml` and their settings are being built, and this section is completed when they land.
+
+## Tests
+
+The shell tests open real Electron windows, so they run only on a virtual display, through one script. It wraps everything in `nice`, `ionice`, a hard time limit and `xvfb-run`, and removes the desktop's display and Electron variables:
+
+```sh
+node desktop/tests/shell/run.mjs --unit          # unit tests, no Electron, about half a minute
+node desktop/tests/shell/run.mjs                 # the Playwright specs (Electron under Xvfb)
+node desktop/tests/shell/run.mjs --grep NAME     # one spec or test
+```
+
+`pnpm --filter ./desktop run test:shell` and `run test:shell:unit` do the same. The first full run builds the test runtime and two template workspaces under `tmp/shell-tests/` (it needs the npm registry once). Never start Electron for this project in another way on a machine where someone is working: use the `xvfb-run -a env -u ELECTRON_FORCE_IS_PACKAGED -u ELECTRON_RUN_AS_NODE -u ELECTRON_OZONE_PLATFORM_HINT -u WAYLAND_DISPLAY <binary> --ozone-platform=x11` form inside `timeout -s KILL`. What the specs cover, and what only a person on a real display can check, is in [docs/DESKTOP.md](../docs/DESKTOP.md#tests).
+
+The packaging, runtime and plugin tests need no display:
+
+```sh
+node --test "desktop/tests/packaging/*.test.mjs"      # metadata scripts, the AUR package files
+node --test desktop/tests/smoke/runtime.test.mjs      # the runtime under Electron as Node: --version, check, export
+node desktop/integrations/check.mjs                   # the plugin and skill files
+```
+
+`pnpm --filter ./desktop run test` runs the first two. The packaged-app smoke test (library, a document's PDF, a comment, an export, `opendoc --version`, quit, nothing left running) runs against `desktop/dist` after `dist.mjs`, under Xvfb on Linux:
+
+```sh
+node desktop/tests/smoke/run.mjs
+```
+
+On Ubuntu 24.04 the unpacked app also needs `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` (CI does this on its throwaway runner; do not change it on a machine you use).
 
 ## Testing updates
 
-Nothing here talks to GitHub: every test uses a feed on 127.0.0.1.
+Nothing here talks to GitHub: every test uses a feed on 127.0.0.1. The commands in this section run from `desktop/`.
 
 - `node tests/shell/run.mjs --unit` runs the updater's unit tests (`tests/shell/unit/updater-*.test.mjs`).
 - `node tests/shell/run.mjs updater-network updater-packages updater-guard` runs the Electron specs in `tests/shell/updater/` on the virtual display. They start a development Electron through `tests/shell/updater/support/entry.mjs` (which stubs the native dialogs), set `OPENDOC_DESKTOP_UPDATE_RESOURCES` to a stand-in `resources/` folder (with `package-type`, `update-disabled` and so on) and point `updateFeed` in `config.json` at the feed. A fake `pkexec`, `dpkg` and `apt-get` record what the deb install runs.

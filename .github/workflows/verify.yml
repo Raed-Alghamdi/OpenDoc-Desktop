@@ -17,9 +17,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Fork only, remove before upstreaming: GitHub often has no Apple Silicon runner for this fork,
+        # so an Intel Mac job runs too. A pull request merges when Ubuntu and either Mac job pass.
+        os: [ubuntu-latest, macos-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # The Intel Mac runs about twice as slowly as Ubuntu (about 27 minutes for this job), so it gets more time.
+    timeout-minutes: ${{ matrix.os == 'macos-15-intel' && 45 || 25 }}
     env:
       # Core verification never launches the desktop app, so skip Electron's binary download.
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'

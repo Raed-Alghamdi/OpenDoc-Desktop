@@ -1,0 +1,8 @@
+# Throwaway entry for packaging checks before the shell exists (node runtime/dist.mjs --stub). It changes only what the app runs;
+# every other setting, the runtime and the fuses come from the real config. Never used for a release. The parent path is relative to desktop/.
+extends: electron-builder.yml
+files:
+  - package.json
+  - tests/smoke/fixtures/stub-main.mjs
+extraMetadata:
+  main: tests/smoke/fixtures/stub-main.mjs

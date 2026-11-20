@@ -11,6 +11,14 @@ export function componentCommentDraftKey(selection: DocumentSelection | null) {
   return selection ? JSON.stringify(['component', selection.blockId, selection.targetId ?? null]) : '';
 }
 
+/**
+ * A comment on several components has its own draft, whichever order they were chosen in.
+ * `firstKey` is the first selection's key, which may be a phrase; the others are whole components.
+ */
+export function multiCommentDraftKey(firstKey: string, others: readonly DocumentSelection[]) {
+  return firstKey && others.length ? JSON.stringify(['components', firstKey, ...others.map(item => item.blockId).sort()]) : '';
+}
+
 export type CommentDrafts = Readonly<Record<string, string>>;
 type DraftStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 

@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { externalEnv } from './external-env';
 
 export const canCopyFile = process.platform === 'darwin';
 
@@ -15,7 +16,7 @@ function run(argv) {
   if (!board.writeObjects($.NSArray.arrayWithObject(url)) || ObjC.unwrap(board.stringForType('public.file-url')) !== ObjC.unwrap(url.absoluteString)) throw new Error('The clipboard could not accept this file.');
 }`;
   try {
-    await promisify(execFile)('/usr/bin/osascript', ['-l', 'JavaScript', '-e', script, path, ...(pasteboardName ? [pasteboardName] : [])], { timeout: 10_000 });
+    await promisify(execFile)('/usr/bin/osascript', ['-l', 'JavaScript', '-e', script, path, ...(pasteboardName ? [pasteboardName] : [])], { timeout: 10_000, env: externalEnv() });
   } catch {
     throw new Error('The file could not be copied to the clipboard. Try again or use Download a copy.');
   }

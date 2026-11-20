@@ -100,3 +100,17 @@
   .inspection-hover-frame { transition: opacity 150ms cubic-bezier(0.23, 1, 0.32, 1); }
   .inspection-hover-frame[data-morph="true"] > .block-label { transition: transform 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 }
+
+.selection-bar .selection-count { padding: 0 10px 0 8px; font-size: var(--label-size); font-weight: 600; color: var(--accent-ink); white-space: nowrap; }
+
+/* Shift-drag box selection. The box lives inside .sheets so it scrolls with the pages. */
+.sheets { position: relative; }
+.marquee-box { position: absolute; z-index: 6; pointer-events: none; box-sizing: border-box; border: 1px solid var(--inspection-line); border-radius: 2px; background: var(--inspection-selected); }
+.marquee-box[hidden] { display: none; }
+.reader-scroll.marquee-active, .reader-scroll.marquee-active * { cursor: crosshair !important; user-select: none; -webkit-user-select: none; }
+@media (forced-colors: active) {
+  .marquee-box { border: 2px solid Highlight; background: transparent; }
+}
+
+/* The composer names the components a comment covers, in page order. */
+.text-edit-panel .comment-places-summary { margin: 0 0 8px 3px; color: var(--muted); font-size: var(--caption-size); line-height: var(--caption-leading); overflow-wrap: anywhere; }

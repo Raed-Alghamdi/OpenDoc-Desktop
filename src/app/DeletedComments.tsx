@@ -5,6 +5,7 @@ import { api } from './api';
 import { Button } from './ui';
 import { Icon } from './ui/Icon';
 import { CommentTime } from './CommentTime';
+import { commentBlockIds } from './commentPlaces';
 import './deleted-comments.css';
 
 const deletedAt = (comment: Comment) => [...comment.history].reverse().find(event => event.action === 'deleted')?.at ?? comment.updatedAt;
@@ -32,7 +33,8 @@ export function DeletedComments({ documentId, blockId, connected, refreshKey, on
       .catch(() => { /* The main comment list reports connection problems. */ });
     return () => controller.abort();
   }, [documentId, refreshKey]);
-  const visible = rows.filter(comment => !blockId || comment.blockId === blockId);
+  // A comment on several places belongs to each of them.
+  const visible = rows.filter(comment => !blockId || commentBlockIds(comment).includes(blockId));
   if (!visible.length) return null;
   async function restore(comment: Comment) {
     if (restoring || !connected) return;
@@ -50,7 +52,7 @@ export function DeletedComments({ documentId, blockId, connected, refreshKey, on
     {open && <ul id="deleted-comments-list" className="deleted-comments-list">
       {visible.map(comment => <li key={comment.id}>
         <div className="deleted-comment-body">
-          <span className="comment-location">Deleted <CommentTime value={deletedAt(comment)} /></span>
+          <span className="comment-location">Deleted <CommentTime value={deletedAt(comment)} />{comment.targets && comment.targets.length > 1 && <><span aria-hidden="true">·</span><span>{comment.targets.length} places</span></>}</span>
           <span className="comment-text" dir="auto" lang={textLang(comment.text)}>{comment.text}</span>
         </div>
         <Button className="deleted-comment-restore" disabled={!connected || !!restoring} onClick={() => void restore(comment)}>{restoring === comment.id ? 'Restoring…' : 'Restore'}</Button>

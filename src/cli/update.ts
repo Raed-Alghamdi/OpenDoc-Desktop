@@ -2,7 +2,8 @@ import { execFile } from 'node:child_process';
 import { copyFile, link, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { withWorkspaceLock } from './lock.js';
-import { dependencyPin, isStableVersion, packageIdentity, packageMetadata, readWorkspaceMarker, workspaceIdentity, type PackageIdentity } from './workspace.js';
+import { desktopRecordAdvice, InvalidOwnerRecord, OwnerShuttingDown, workspaceOwner } from './owner.js';
+import { dependencyPin, isManagedHere, isStableVersion, packageIdentity, packageMetadata, readWorkspaceMarker, workspaceIdentity, type PackageIdentity } from './workspace.js';
 
 interface Version { major: number; minor: number; patch: number }
 interface UpdateOptions { check?: boolean; version?: string }
@@ -70,33 +71,17 @@ async function assertRegularFile(path: string) {
 const stopInstruction = 'Stop OpenDoc with Ctrl+C in its terminal, run the update again, then restart with npx opendoc start.';
 
 async function assertServerStopped(root: string) {
-  const bytes = await optionalBytes(join(root, '.opendoc/server.json'));
-  if (!bytes) return;
-  let session: { origin?: unknown; token?: unknown; pid?: unknown };
-  try { session = JSON.parse(bytes.toString('utf8')); }
-  catch { throw new Error(`The local OpenDoc session record is invalid. ${stopInstruction}`); }
-  const origin = session?.origin;
-  if (typeof origin !== 'string' || !/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)
-    || Number(origin.slice(origin.lastIndexOf(':') + 1)) < 1 || Number(origin.slice(origin.lastIndexOf(':') + 1)) > 65535
-    || typeof session.token !== 'string' || !session.token
-    || typeof session.pid !== 'number' || !Number.isSafeInteger(session.pid) || session.pid < 1 || session.pid > 2 ** 31 - 1) {
-    throw new Error(`The local OpenDoc session record is invalid. ${stopInstruction}`);
-  }
-  let response: Response;
-  try { response = await fetch(`${origin}/api/session`, { signal: AbortSignal.timeout(1500), redirect: 'error' }); }
+  let owner;
+  try { owner = await workspaceOwner(root); }
   catch (error) {
-    if ((error as { cause?: { code?: string } }).cause?.code === 'ECONNREFUSED') {
-      // Shutdown closes the listener before draining pending document writes.
-      try { process.kill(session.pid, 0); }
-      catch (pidError) { if ((pidError as NodeJS.ErrnoException).code === 'ESRCH') return; }
-      throw new Error(`The recorded OpenDoc process is still running or finishing shutdown. Wait for its terminal process to exit completely before updating. ${stopInstruction}`);
-    }
-    throw new Error(`Could not confirm that the local OpenDoc server has stopped. ${stopInstruction}`);
+    // Shutdown closes the listener before draining pending document writes.
+    if (error instanceof OwnerShuttingDown) throw new Error(`The recorded OpenDoc process is still running or finishing shutdown. Wait for its terminal process to exit completely before updating. ${stopInstruction}`);
+    // The app's own record says what to do about it; any other failure is a service that cannot be confirmed stopped.
+    if (error instanceof InvalidOwnerRecord) throw new Error([error.message, error.advice].filter(Boolean).join(' '));
+    throw new Error(`OpenDoc could not confirm that its local server has stopped. Check .opendoc/server.json. ${stopInstruction}`);
   }
-  let live: { token?: unknown } | null = null;
-  try { live = await response.json() as { token?: unknown }; } catch { /* Never print the session response or its token. */ }
-  if (response.ok && live?.token === session.token) throw new Error(`OpenDoc is still running. ${stopInstruction}`);
-  throw new Error(`Could not verify the local OpenDoc session. ${stopInstruction}`);
+  if (owner.mode === 'desktop') throw new Error(`This workspace is open in opendoc-desktop. Update the app instead. ${desktopRecordAdvice}`);
+  if (owner.mode === 'service') throw new Error(`OpenDoc is still running. ${stopInstruction}`);
 }
 
 async function verifyCandidate(stage: string, target: PackageIdentity) {
@@ -242,6 +227,8 @@ async function activate(root: string, stage: string, dependencies: UpdateDepende
 export async function updateWorkspace(root: string, options: UpdateOptions = {}, dependencies: UpdateDependencies = {}): Promise<UpdateResult> {
   root = resolve(root);
   const marker = await readWorkspaceMarker(root);
+  // The app's runtime is the app's to update. A `managed` flag that came with git to a device without the app does not count.
+  if (await isManagedHere(root)) throw new Error('This workspace is managed by the OpenDoc desktop app. Update the app instead.');
   if (options.version !== undefined && !versionParts(options.version)) throw new Error('--version requires an exact stable version such as 0.3.1; ranges, tags, and prereleases are not supported.');
   const manifestPath = join(root, 'package.json'), lockPath = join(root, 'package-lock.json');
   await assertRegularFile(manifestPath);
@@ -344,7 +331,8 @@ export async function runUpdate(args: string[], root: string): Promise<void> {
     if (!json) throw error;
     const message = error instanceof Error ? error.message : 'Update failed.';
     console.error(message);
-    console.log(JSON.stringify({ status: 'error', error: message }));
-    if (!process.exitCode) process.exitCode = 1;
+    const { code, exitCode } = (await import('./errors')).failureOf(error);
+    console.log(JSON.stringify({ status: 'error', ok: false, error: message, code }));
+    if (!process.exitCode) process.exitCode = exitCode;
   }
 }

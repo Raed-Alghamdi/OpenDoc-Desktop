@@ -1,0 +1,306 @@
+name: Upstream watch
+
+# Watches OpenDoc upstream and turns a new release into a new app build (plan 3.7, D15, D16). Run it by hand (workflow_dispatch);
+# the daily schedule is committed commented out and stays off until the first release has gone out by hand (contracts, "Update rules").
+#
+# What a run does, in order (the decisions are in desktop/release/*.mjs, with tests in desktop/tests/packaging/):
+#   prepare  fetches upstream's main and mirrors it to the `main` branch (a plain copy, never forced). When upstream's version differs,
+#            it merges upstream (a merge, never a rebase) into a CANDIDATE branch cut from the target branch (`roadmap`), moves the
+#            desktop app's version up to match, and pushes that branch. A conflict is aborted and reported; nothing else is pushed.
+#   verify   the same commands as verify.yml, on the candidate.
+#   desktop  desktop.yml on the candidate: every installer, the smoke tests and a DRAFT release desktop-v<version>-<build>.
+#   finish   decides (desktop/release/decide.mjs). Only when verify and desktop are green does the merge move into the target branch,
+#            by fast-forward. It publishes the draft only if all of these hold: the repository variable DESKTOP_AUTO_PUBLISH is `true`,
+#            it is an upstream patch release, the merge was clean, every check is green, and an earlier release of the same x.y line has
+#            gone out. A new minor, a rebuild, a hand-merged conflict, a red check and a conflict never publish. A published release
+#            then calls aur-bump.yml. Whatever happens that needs Raed, an issue in this repository says so (and mentions the owner),
+#            and a run that stopped is also red, so GitHub's failure mail reaches the same person.
+#
+# Rehearsal: a run is a rehearsal when `target_branch` is not `roadmap` or `upstream_ref` names a branch of this repository that stands
+# in for upstream. A rehearsal mirrors to its own `watch-rehearsal/` branch, never writes `main`, tags and titles everything `dryrun-`
+# or `[rehearsal]`, and publishes only as a pre-release. Make the fake upstream with desktop/release/fake-upstream.mjs.
+#
+# A push made with the workflow's token starts no other workflow, so this one calls the checks itself. If upstream ever changes a file
+# under .github/workflows/, GitHub refuses the token's push (it has no `workflows` permission): the run stops and says so, and the
+# integrator merges that release by hand and runs this workflow with mode "hand-merged".
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: Branch that receives the merge (roadmap; use a test branch for a rehearsal)
+        default: roadmap
+      upstream_ref:
+        description: Rehearsal only. A branch of this repository that stands in for upstream's main (empty means the real upstream)
+        default: ''
+      mode:
+        description: auto (look at upstream), rebuild (the next build of the branch's own version) or hand-merged (build a branch whose conflict was resolved by hand)
+        type: choice
+        options: [auto, rebuild, hand-merged]
+        default: auto
+      retry:
+        description: Run again although an issue for this upstream version is still open
+        type: boolean
+        default: false
+      assume_minor_published:
+        description: Rehearsal only. Pretend an earlier release of this x.y line has gone out (a real one has to have)
+        type: boolean
+        default: false
+  # The daily check stays off until the first release has gone out by hand. To switch it on: remove the two leading "# " below, push to
+  # roadmap, then run `gh workflow enable upstream-watch.yml --repo <owner>/OpenDoc-Desktop` once (a fork's scheduled workflows start
+  # disabled). GitHub also pauses a schedule after 60 days without repository activity: re-enable it the same way. The odd minute
+  # is on purpose (the hour's start is busy and runs get dropped). Notifications go to whoever last changed the cron line.
+  # schedule:
+  #   - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://github.com/RyanYahya/OpenDoc.git
+  UPSTREAM_BRANCH: main
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: read
+    outputs:
+      action: ${{ steps.prepare.outputs.action }}
+      kind: ${{ steps.prepare.outputs.kind }}
+      version: ${{ steps.prepare.outputs.version }}
+      build: ${{ steps.prepare.outputs.build }}
+      tag: ${{ steps.prepare.outputs.tag }}
+      rehearsal: ${{ steps.prepare.outputs.rehearsal }}
+      candidate_sha: ${{ steps.prepare.outputs.candidate_sha }}
+      candidate_branch: ${{ steps.prepare.outputs.candidate_branch }}
+      upstream_sha: ${{ steps.prepare.outputs.upstream_sha }}
+      minor_published: ${{ steps.prepare.outputs.minor_published }}
+      stop: ${{ steps.prepare.outputs.stop }}
+      reason: ${{ steps.prepare.outputs.reason }}
+      detail: ${{ steps.prepare.outputs.detail }}
+    steps:
+      # The checkout keeps its credential: this job pushes the mirror and the candidate branch.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.target_branch || 'roadmap' }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      # The published releases and tags decide the build number; open issues say whether an earlier run is still waiting for Raed.
+      - name: List the releases and the open issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          { gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName,isDraft --jq '.[] | select(.isDraft | not) | .tagName'; git tag --list 'desktop-v*'; } | sort -u > "$RUNNER_TEMP/tags.txt"
+          gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json number,title > "$RUNNER_TEMP/issues.json"
+          echo "Published releases and tags:"
+          cat "$RUNNER_TEMP/tags.txt"
+      - name: Fetch upstream, mirror it and prepare the merge
+        id: prepare
+        env:
+          TARGET_BRANCH: ${{ inputs.target_branch || 'roadmap' }}
+          UPSTREAM_REF: ${{ inputs.upstream_ref }}
+          MODE: ${{ inputs.mode || 'auto' }}
+          RETRY: ${{ inputs.retry }}
+          ASSUME_MINOR_PUBLISHED: ${{ inputs.assume_minor_published }}
+        run: |
+          node desktop/release/prepare.mjs --target "$TARGET_BRANCH" --upstream-url "$UPSTREAM_URL" --upstream-branch "$UPSTREAM_BRANCH" \
+            --upstream-ref "$UPSTREAM_REF" --mode "$MODE" --run-id "$GITHUB_RUN_ID" \
+            --tags "$RUNNER_TEMP/tags.txt" --issues "$RUNNER_TEMP/issues.json" \
+            --retry "${RETRY:-false}" --assume-minor-published "${ASSUME_MINOR_PUBLISHED:-false}"
+      # Upstream's tags are mirrored as they are (contracts, "Tag names"). Never forced, and never allowed to fail the run.
+      - name: Mirror upstream's tags
+        if: steps.prepare.outputs.rehearsal == 'false' && inputs.mode != 'rebuild' && inputs.mode != 'hand-merged'
+        continue-on-error: true
+        run: |
+          git fetch --quiet --no-tags "$UPSTREAM_URL" 'refs/tags/v*:refs/tags/v*'
+          git push --quiet origin 'refs/tags/v*:refs/tags/v*'
+      - name: Summary
+        env:
+          ACTION: ${{ steps.prepare.outputs.action }}
+          KIND: ${{ steps.prepare.outputs.kind }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+          BUILD: ${{ steps.prepare.outputs.build }}
+          REASON: ${{ steps.prepare.outputs.reason }}
+          DETAIL: ${{ steps.prepare.outputs.detail }}
+        run: |
+          {
+            echo "### Upstream watch: prepare"
+            echo
+            echo "- action: \`$ACTION\` ($KIND $VERSION, build $BUILD)"
+            if [ -n "$REASON" ]; then echo "- $REASON"; fi
+            if [ -n "$DETAIL" ]; then echo "- $DETAIL"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # What verify.yml runs, on the merged candidate. verify.yml itself checks out the commit this workflow started on (the old tip of the
+  # target branch), so calling it would test the wrong code; these are its commands. Keep the two in step (the matrix and the steps).
+  verify:
+    needs: prepare
+    if: needs.prepare.outputs.action == 'check'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.os == 'macos-15-intel' && 45 || 25 }}
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: pnpm/action-setup@v6
+        with:
+          cache: true
+      - run: pnpm install --frozen-lockfile
+      - name: Verify source, build, and tests
+        run: pnpm verify
+      - run: pnpm package:pack --skip-build
+      - name: Accept the installed release and updates
+        run: |
+          opendoc_version=$(node -p 'require("./package.json").version')
+          node scripts/accept-package.mjs "output/packages/ryanyahya-opendoc-${opendoc_version}.tgz"
+          node scripts/accept-update.mjs "output/packages/ryanyahya-opendoc-${opendoc_version}.tgz"
+          node scripts/accept-package.mjs "output/packages/ryanyahya-opendoc-headless-${opendoc_version}.tgz"
+          node scripts/accept-update.mjs "output/packages/ryanyahya-opendoc-headless-${opendoc_version}.tgz"
+
+  # Every installer, the smoke tests on all three runners, and a draft release. It never publishes (see desktop.yml).
+  desktop:
+    needs: prepare
+    if: needs.prepare.outputs.action == 'check'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/desktop.yml
+    with:
+      ref: ${{ needs.prepare.outputs.candidate_sha }}
+      build: ${{ needs.prepare.outputs.build }}
+      release_tag: ${{ needs.prepare.outputs.tag }}
+      prerelease: ${{ needs.prepare.outputs.rehearsal == 'true' }}
+
+  finish:
+    needs: [prepare, verify, desktop]
+    if: always() && needs.prepare.result == 'success' && (needs.prepare.outputs.action == 'check' || needs.prepare.outputs.action == 'stopped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+    outputs:
+      published: ${{ steps.report.outputs.published }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_BRANCH: ${{ inputs.target_branch || 'roadmap' }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      CANDIDATE_BRANCH: ${{ needs.prepare.outputs.candidate_branch }}
+      CANDIDATE_SHA: ${{ needs.prepare.outputs.candidate_sha }}
+      REHEARSAL: ${{ needs.prepare.outputs.rehearsal }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Decide
+        id: decide
+        env:
+          KIND: ${{ needs.prepare.outputs.kind }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BUILD: ${{ needs.prepare.outputs.build }}
+          GATE: ${{ vars.DESKTOP_AUTO_PUBLISH }}
+          VERIFY: ${{ needs.verify.result }}
+          DESKTOP: ${{ needs.desktop.result }}
+          MINOR_PUBLISHED: ${{ needs.prepare.outputs.minor_published }}
+        run: |
+          node desktop/release/decide.mjs decide --kind "$KIND" --version "$VERSION" --build "${BUILD:-0}" --gate "$GATE" \
+            --verify "$VERIFY" --desktop "$DESKTOP" --minor-published "${MINOR_PUBLISHED:-false}" --rehearsal "$REHEARSAL" \
+            --out "$RUNNER_TEMP/decision.json"
+      # Only a green run moves the merge into the target branch, and only by fast-forward: if the branch moved meanwhile, this fails
+      # and the publication is held back.
+      - name: Move the merge into the target branch
+        id: promote
+        if: steps.decide.outputs.promote == 'true'
+        continue-on-error: true
+        run: |
+          git fetch --quiet origin "refs/heads/$CANDIDATE_BRANCH"
+          test "$(git rev-parse FETCH_HEAD)" = "$CANDIDATE_SHA"
+          git push origin "$CANDIDATE_SHA:refs/heads/$TARGET_BRANCH"
+      - name: Write the release notes
+        if: steps.decide.outputs.release != 'none'
+        env:
+          UPSTREAM_SHA: ${{ needs.prepare.outputs.upstream_sha }}
+        run: |
+          node desktop/release/decide.mjs notes --decision "$RUNNER_TEMP/decision.json" --out "$RUNNER_TEMP/release-notes.md" \
+            --commit "$CANDIDATE_SHA" --upstream-sha "$UPSTREAM_SHA"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/release-notes.md"
+      - name: Publish the release
+        id: publish
+        if: steps.decide.outputs.publish == 'true' && steps.promote.outcome == 'success'
+        continue-on-error: true
+        run: |
+          if [ "$REHEARSAL" = true ]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          else
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          fi
+      - name: Write the report
+        id: report
+        env:
+          PROMOTE: ${{ steps.promote.outcome }}
+          PUBLISH: ${{ steps.publish.outcome }}
+          OWNER: ${{ github.repository_owner }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DETAIL: ${{ needs.prepare.outputs.reason }} ${{ needs.prepare.outputs.detail }}
+        run: |
+          detail=()
+          if [ -n "${DETAIL//[[:space:]]/}" ]; then detail=(--detail "$DETAIL"); fi
+          node desktop/release/decide.mjs report --decision "$RUNNER_TEMP/decision.json" --promotion "$PROMOTE" --publication "$PUBLISH" \
+            --out-dir "$RUNNER_TEMP/report" --owner "$OWNER" --run-url "$RUN_URL" --target "$TARGET_BRANCH" \
+            --candidate-branch "$CANDIDATE_BRANCH" "${detail[@]}"
+          cat "$RUNNER_TEMP/report/issue.md" >> "$GITHUB_STEP_SUMMARY"
+      # The candidate branch has done its job once the target branch has it. A red or stopped run leaves it for the integrator.
+      - name: Delete the candidate branch
+        if: steps.promote.outcome == 'success'
+        continue-on-error: true
+        run: git push --quiet origin --delete "$CANDIDATE_BRANCH"
+      # One issue per outcome that needs Raed: a draft waiting, a stop, a red check, and a notice of what published itself. A second
+      # run with the same title adds a comment instead of a second issue.
+      - name: Open the issue
+        env:
+          TITLE: ${{ steps.report.outputs.title }}
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json number,title --jq 'map(select(.title == env.TITLE)) | .[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/report/issue.md"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$RUNNER_TEMP/report/issue.md"
+          fi
+      - name: Fail the run when it stopped
+        if: steps.report.outputs.fail == 'true'
+        run: |
+          echo "This run stopped or a check was red; nothing was published. The issue has the details." >&2
+          exit 1
+
+  # A release that published itself updates the AUR package. A rehearsal does not (run aur-bump.yml by hand on its pre-release instead).
+  aur:
+    needs: [prepare, finish]
+    if: needs.finish.outputs.published == 'true' && needs.prepare.outputs.rehearsal != 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/aur-bump.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit

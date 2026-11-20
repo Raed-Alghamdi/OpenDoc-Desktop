@@ -97,10 +97,14 @@ const which = (name) => {
 };
 const ar = which('ar');
 const bsdtar = which('bsdtar');
-const skip = !ar || !bsdtar ? 'ar and bsdtar are needed' : false;
+// The deb stand-in is made and read back on Linux only, where release artifacts are read (desktop.yml's release job). macOS's own
+// ar writes the archive differently, so there the test would check the Mac's tools, not the script (as in check-artifacts.test.mjs).
+const withDeb = process.platform === 'linux';
+const skip = !bsdtar ? 'bsdtar is needed' : withDeb && !ar ? 'ar is needed on Linux' : false;
+const kinds = ['pacman', ...(withDeb ? ['deb'] : []), 'zip', 'AppImage'];
 const script = path.join(desktop, 'tests', 'packaging', 'check-release.mjs');
 
-/** A folder of fake artifacts, each with `asar` as its app archive: deb, pacman, a Mac zip, an AppImage stand-in and a dmg. */
+/** A folder of fake artifacts, each with `asar` as its app archive: pacman, a deb (Linux only), a Mac zip, an AppImage stand-in and a dmg. */
 function artifacts(scratch, asar) {
   const folder = path.join(scratch, 'release');
   mkdirSync(folder, { recursive: true });
@@ -109,12 +113,14 @@ function artifacts(scratch, asar) {
   mkdirSync(path.join(linux, 'opt', 'opendoc-desktop', 'resources'), { recursive: true });
   copyFileSync(asar, path.join(linux, 'opt', 'opendoc-desktop', 'resources', 'app.asar'));
   pack(path.join(folder, 'opendoc-desktop-0.6.1-3-x64.pacman'), linux, 'opt');
-  mkdirSync(path.join(scratch, 'deb-control'));
-  writeFileSync(path.join(scratch, 'deb-control', 'control'), 'Package: x\n');
-  writeFileSync(path.join(scratch, 'debian-binary'), '2.0\n');
-  pack(path.join(scratch, 'control.tar'), path.join(scratch, 'deb-control'), '.');
-  pack(path.join(scratch, 'data.tar'), linux, '.');
-  assert.equal(spawnSync(ar, ['rc', path.join(folder, 'opendoc-desktop_0.6.1-3_amd64.deb'), 'debian-binary', 'control.tar', 'data.tar'], { cwd: scratch }).status, 0);
+  if (withDeb) {
+    mkdirSync(path.join(scratch, 'deb-control'));
+    writeFileSync(path.join(scratch, 'deb-control', 'control'), 'Package: x\n');
+    writeFileSync(path.join(scratch, 'debian-binary'), '2.0\n');
+    pack(path.join(scratch, 'control.tar'), path.join(scratch, 'deb-control'), '.');
+    pack(path.join(scratch, 'data.tar'), linux, '.');
+    assert.equal(spawnSync(ar, ['rc', path.join(folder, 'opendoc-desktop_0.6.1-3_amd64.deb'), 'debian-binary', 'control.tar', 'data.tar'], { cwd: scratch }).status, 0);
+  }
   const mac = path.join(scratch, 'mac-root', 'opendoc-desktop.app', 'Contents', 'Resources');
   mkdirSync(mac, { recursive: true });
   copyFileSync(asar, path.join(mac, 'app.asar'));
@@ -130,7 +136,7 @@ function artifacts(scratch, asar) {
 function check(scratch, ...targets) {
   const tools = path.join(scratch, 'tools');
   mkdirSync(tools, { recursive: true });
-  for (const [name, target] of [['ar', ar], ['bsdtar', bsdtar]]) try { symlinkSync(target, path.join(tools, name)); } catch { /* there */ }
+  for (const [name, target] of [['ar', ar], ['bsdtar', bsdtar]]) if (target) try { symlinkSync(target, path.join(tools, name)); } catch { /* there */ }
   const result = spawnSync(process.execPath, [script, ...targets], { encoding: 'utf8', env: { PATH: tools, HOME: scratch } });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
@@ -141,7 +147,7 @@ test('check-release.mjs passes a folder of release artifacts and lists what it r
     const folder = artifacts(scratch, await makeAsar(scratch, 'release', {}));
     const result = check(scratch, folder);
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    for (const kind of ['pacman', 'deb', 'zip', 'AppImage']) assert.match(result.stdout, new RegExp(`^ok {4}\\S+ \\(${kind}\\): no ${testBuildField}`, 'm'), kind);
+    for (const kind of kinds) assert.match(result.stdout, new RegExp(`^ok {4}\\S+ \\(${kind}\\): no ${testBuildField}`, 'm'), kind);
     assert.match(result.stdout, /^skip {2}\S+\.dmg \(dmg\)/m);
     assert.doesNotMatch(result.stdout, /latest-linux/);
   } finally { rmSync(scratch, { recursive: true, force: true }); }
@@ -154,7 +160,7 @@ test('check-release.mjs fails every artifact whose app archive has the field, wh
       const folder = artifacts(scratch, await makeAsar(scratch, 'test', { mark }));
       const result = check(scratch, folder);
       assert.equal(result.status, 1, result.stdout);
-      for (const kind of ['pacman', 'deb', 'zip', 'AppImage']) assert.match(result.stdout, new RegExp(`^FAIL {2}\\S+ \\(${kind}\\): this is a test build`, 'm'), `${kind} ${mark}`);
+      for (const kind of kinds) assert.match(result.stdout, new RegExp(`^FAIL {2}\\S+ \\(${kind}\\): this is a test build`, 'm'), `${kind} ${mark}`);
       // Handed to the single file, the same.
       assert.equal(check(scratch, path.join(folder, 'opendoc-desktop-0.6.1-3-x64.pacman')).status, 1);
     } finally { rmSync(scratch, { recursive: true, force: true }); }
@@ -174,7 +180,7 @@ test('check-release.mjs: one test build among good artifacts fails the run, and 
     const mixed = check(scratch, good);
     assert.equal(mixed.status, 1);
     assert.match(mixed.stdout, /^FAIL {2}\S+\.pacman \(pacman\): this is a test build/m);
-    assert.match(mixed.stdout, /^ok {4}\S+\.deb \(deb\)/m);
+    for (const kind of kinds.filter((entry) => entry !== 'pacman')) assert.match(mixed.stdout, new RegExp(`^ok {4}\\S+ \\(${kind}\\)`, 'm'), kind);
 
     // A package that is not an archive, an app.asar that is not an asar, and a folder with nothing in it.
     const broken = path.join(scratch, 'broken');

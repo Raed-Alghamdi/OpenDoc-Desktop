@@ -53,6 +53,54 @@ if [ ! -f "$RT/node_modules/opendoc/bin/opendoc.mjs" ] || ! cmp -s "$res/build-i
   fi
 fi
 
+# The workspaces' node_modules go through runtime/current (the app points it at the build it runs). After an update that was swapped
+# in at quit, this copy can be newer than the one `current` names, and until the app is opened again the CLI (this copy) and the
+# workspace's opendoc import (the old copy) would disagree. So point `current` at this copy when it is newer, with a temporary link
+# and an atomic rename (what the app does), and never at an older copy. Version first, then build: the app's own rule. Nothing is
+# removed here; the app prunes old copies, and only when no process uses them.
+version_order() { # prints lt, eq or gt for versions $1 and $2: numeric parts in order, and a pre-release below its release
+  local a=$1 b=$2 ca cb ra rb pa pb
+  ca=${a%%[-+]*}; cb=${b%%[-+]*}
+  if [ "$ca" != "$cb" ]; then
+    if [ "$(printf '%s\n%s\n' "$ca" "$cb" | sort -V | head -n1)" = "$ca" ]; then echo lt; else echo gt; fi
+    return
+  fi
+  ra=${a#"$ca"}; rb=${b#"$cb"}
+  pa=; pb=
+  case $ra in -*) pa=${ra#-}; pa=${pa%%+*} ;; esac
+  case $rb in -*) pb=${rb#-}; pb=${pb%%+*} ;; esac
+  if [ "$pa" = "$pb" ]; then echo eq
+  elif [ -z "$pa" ]; then echo gt
+  elif [ -z "$pb" ]; then echo lt
+  elif [ "$(printf '%s\n%s\n' "$pa" "$pb" | sort -V | head -n1)" = "$pa" ]; then echo lt
+  else echo gt; fi
+}
+cur="$DATA/runtime/current"
+if [ -L "$cur" ] || [ ! -e "$cur" ]; then # a real folder named current is not ours to replace
+  switch=
+  if [ "$(readlink "$cur" 2>/dev/null)" = "$ver-$bld" ]; then
+    :
+  elif [ ! -f "$cur/build-info.json" ] || [ ! -f "$cur/node_modules/opendoc/bin/opendoc.mjs" ]; then
+    switch=1 # nothing there, or a link to nothing usable
+  else
+    cver=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$cur/package.json" 2>/dev/null | head -n1)
+    cbld=$(sed -n 's/.*"build": *\([0-9]*\).*/\1/p' "$cur/build-info.json" | head -n1)
+    if [ -z "$cver" ] || [ -z "$cbld" ]; then
+      switch=1
+    else
+      case $(version_order "$ver" "$cver") in
+        gt) switch=1 ;;
+        eq) [ "$bld" -gt "$cbld" ] && switch=1 ;;
+      esac
+    fi
+  fi
+  if [ -n "$switch" ]; then
+    link="$DATA/runtime/.current.$$.tmp"
+    rm -f "$link"
+    if ln -s "$ver-$bld" "$link" 2>/dev/null && mv -fT "$link" "$cur" 2>/dev/null; then :; else rm -f "$link"; fi
+  fi
+fi
+
 # Run the CLI in the background so a signal sent to this script reaches it (stdin stays connected).
 ELECTRON_RUN_AS_NODE=1 "$MNT/opendoc-desktop" "$RT/node_modules/opendoc/bin/opendoc.mjs" "$@" <&0 &
 child=$!

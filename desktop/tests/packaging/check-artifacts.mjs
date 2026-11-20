@@ -143,6 +143,41 @@ const inPackage = (kind, file, inner) => {
   }
   return spawnSync('bsdtar', ['-xOf', file, inner], { encoding: 'utf8', maxBuffer: 64 << 20 });
 };
+// One member's line from the archive's verbose listing: the mode and the owner, which `check` needs for the update helper.
+const memberLine = (kind, file, inner) => {
+  let listing;
+  if (kind === 'deb') listing = spawnSync('bsdtar', ['-tvf', '-'], { input: spawnSync('ar', ['p', file, debMember(file, 'data.tar')], { maxBuffer: 1 << 30 }).stdout, encoding: 'utf8', maxBuffer: 64 << 20 }).stdout;
+  else if (kind === 'rpm') listing = spawnSync('bsdtar', ['-tvf', '-'], { input: spawnSync('rpm2cpio', [file], { maxBuffer: 1 << 30 }).stdout, encoding: 'utf8', maxBuffer: 64 << 20 }).stdout;
+  else listing = spawnSync('bsdtar', ['-tvf', file], { encoding: 'utf8', maxBuffer: 64 << 20 }).stdout;
+  const line = listing.split('\n').find((entry) => entry.endsWith(` ${inner}`) || entry.endsWith(` ./${inner}`));
+  const match = line?.match(/^(\S+)\s+\d+\s+(\S+)\s+(\S+)\s+\d+ /);
+  return match ? { mode: match[1], owner: match[2], group: match[3] } : null;
+};
+
+// The password prompt for an update (deb, rpm and pacman): a polkit action that names a root-owned helper, both installed by the
+// package. The policy's exec path must be the helper's installed path, or polkit shows the command line instead of the message.
+const policyRelative = 'usr/share/polkit-1/actions/io.github.ryanyahya.opendocdesktop.install-update.policy';
+const helperRelative = 'opt/opendoc-desktop/resources/updater/install-update';
+const policySource = readFileSync(path.join(desktop, 'resources', 'polkit', path.basename(policyRelative)), 'utf8');
+const helperSource = readFileSync(path.join(desktop, 'resources', 'updater', 'install-update'), 'utf8');
+for (const [kind, extension] of [['deb', '.deb'], ['pacman', '.pacman'], ['rpm', '.rpm']]) {
+  check(`${kind} update prompt`, () => {
+    const name = files.find((entry) => entry.endsWith(extension));
+    if (!name && kind === 'rpm' && !values['require-rpm']) return 'no .rpm in dist (not required without --require-rpm)';
+    if (!name) throw new Error(`no ${extension} in dist`);
+    const file = path.join(dist, name);
+    assert.equal(inPackage(kind, file, policyRelative).stdout, policySource, 'the installed polkit policy differs from resources/polkit');
+    const execPath = policySource.match(/<annotate key="org\.freedesktop\.policykit\.exec\.path">([^<]*)</)[1];
+    assert.equal(execPath, `/${helperRelative}`, 'the policy must name the helper\'s installed path');
+    assert.equal(inPackage(kind, file, helperRelative).stdout, helperSource, 'the installed helper differs from resources/updater/install-update');
+    const policy = memberLine(kind, file, policyRelative);
+    assert.ok(policy && /^-rw-r--r--$/.test(policy.mode) && /^(0|root)$/.test(policy.owner), `the policy must be a root-owned 0644 file (found ${JSON.stringify(policy)})`);
+    const helper = memberLine(kind, file, helperRelative);
+    assert.ok(helper && helper.mode === '-rwxr-xr-x' && /^(0|root)$/.test(helper.owner) && /^(0|root)$/.test(helper.group), `the helper must be a root-owned 0755 file (found ${JSON.stringify(helper)})`);
+    return `action ${execPath} (policy 0644, helper 0755, both root-owned)`;
+  });
+}
+
 for (const [kind, extension] of [['deb', '.deb'], ['pacman', '.pacman'], ['rpm', '.rpm']]) {
   check(`${kind} update files`, () => {
     const name = files.find((entry) => entry.endsWith(extension));

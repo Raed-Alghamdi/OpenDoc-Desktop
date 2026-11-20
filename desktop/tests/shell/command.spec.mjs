@@ -177,7 +177,10 @@ test.describe.serial('the AppImage command', () => {
     expect(result, result.stderr).toMatchObject({ code: 0 });
     expect(result.stdout.trim()).toBe(await runtimeVersion());
     const copies = await readdir(runtimeCopy());
-    expect(copies.filter(name => !name.startsWith('.'))).toEqual([`${await runtimeVersion()}-${await runtimeBuild()}`]);
+    const copyName = `${await runtimeVersion()}-${await runtimeBuild()}`;
+    expect(copies.filter(name => !name.startsWith('.') && name !== 'current')).toEqual([copyName]);
+    // The command also points runtime/current at that copy, which is where the workspaces' node_modules go through.
+    expect(await readlink(join(runtimeCopy(), 'current'))).toBe(copyName);
     await waitFor(async () => !(await mountAlive()), { timeout: 5000, what: 'the mount helper to stop' });
     expect(existsSync(wire.note)).toBe(false);
   });

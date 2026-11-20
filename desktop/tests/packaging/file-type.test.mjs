@@ -112,10 +112,11 @@ test('check-packaged.mjs accepts the unpacked apps it should and names what is w
       mkdirSync(resources, { recursive: true });
       cpSync(path.join(desktop, 'integrations'), path.join(resources, 'integrations'), { recursive: true });
     }
+    cpSync(path.join(desktop, 'resources', 'updater'), path.join(scratch, 'dist', 'linux-unpacked', 'resources', 'updater'), { recursive: true });
     writeFileSync(path.join(scratch, 'dist', 'mac-arm64', 'opendoc-desktop.app', 'Contents', 'Info.plist'), plist(goodTypes));
     const good = run('--require', 'linux', '--require', 'mac');
     assert.equal(good.status, 0, good.stdout + good.stderr);
-    assert.equal(good.stdout.match(/^ok /gm).length, 3);
+    assert.equal(good.stdout.match(/^ok /gm).length, 5);
 
     // A file filter that drops dot folders.
     rmSync(path.join(scratch, 'dist', 'linux-unpacked', 'resources', 'integrations', 'codex', '.agents'), { recursive: true });

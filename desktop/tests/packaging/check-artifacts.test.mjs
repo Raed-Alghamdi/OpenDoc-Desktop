@@ -15,6 +15,9 @@ const script = path.join(desktop, 'tests', 'packaging', 'check-artifacts.mjs');
 const build = '7';
 const commit = 'abcdef0123456789abcdef0123456789abcdef01';
 const mimeSource = readFileSync(path.join(desktop, 'resources', 'mime', 'opendoc-desktop.xml'), 'utf8');
+const policyName = 'io.github.ryanyahya.opendocdesktop.install-update.policy';
+const policySource = readFileSync(path.join(desktop, 'resources', 'polkit', policyName), 'utf8');
+const helperSource = readFileSync(path.join(desktop, 'resources', 'updater', 'install-update'), 'utf8');
 
 const which = (name) => {
   for (const folder of (process.env.PATH ?? '').split(path.delimiter)) {
@@ -27,7 +30,7 @@ const ar = which('ar');
 const bsdtar = which('bsdtar');
 
 // The files a package carries that the script reads, as a folder tree.
-function stage(root, kind, { mime = true, integrations = true } = {}) {
+function stage(root, kind, { mime = true, integrations = true, policy = policySource, helperMode = 0o755 } = {}) {
   const write = (file, text) => { mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); writeFileSync(path.join(root, file), text); };
   write('usr/share/icons/hicolor/scalable/apps/opendoc-desktop.svg', '<svg/>');
   write('usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg', '<svg/>');
@@ -35,12 +38,16 @@ function stage(root, kind, { mime = true, integrations = true } = {}) {
   write('opt/opendoc-desktop/resources/app-update.yml', 'provider: github\nowner: someone\nrepo: something\n');
   write('usr/share/applications/opendoc-desktop.desktop', '[Desktop Entry]\nName=opendoc-desktop\nExec=/opt/opendoc-desktop/opendoc-desktop %U\nMimeType=application/x-opendoc-pack;\n');
   if (mime) write('usr/share/mime/packages/opendoc-desktop.xml', mimeSource);
+  write(`usr/share/polkit-1/actions/${policyName}`, policy);
+  write('opt/opendoc-desktop/resources/updater/install-update', helperSource);
+  chmodSync(path.join(root, 'opt/opendoc-desktop/resources/updater/install-update'), helperMode);
+  chmodSync(path.join(root, `usr/share/polkit-1/actions/${policyName}`), 0o644);
   if (integrations) {
     write('opt/opendoc-desktop/resources/integrations/claude/.claude-plugin/marketplace.json', '{}');
     write('opt/opendoc-desktop/resources/integrations/codex/.agents/plugins/marketplace.json', '{}');
   }
 }
-const pack = (archive, folder, ...members) => { const result = spawnSync(bsdtar, ['-cf', archive, '-C', folder, ...members], { encoding: 'utf8' }); assert.equal(result.status, 0, result.stderr); };
+const pack = (archive, folder, ...members) => { const result = spawnSync(bsdtar, ['-cf', archive, '--uid', '0', '--gid', '0', '--uname', 'root', '--gname', 'root', '-C', folder, ...members], { encoding: 'utf8' }); assert.equal(result.status, 0, result.stderr); };
 
 function makeDist(scratch, options = {}) {
   const dist = path.join(scratch, 'dist');
@@ -116,6 +123,9 @@ test('a dist with no .rpm passes without --require-rpm and every installer that 
     assert.match(result.stdout, /^ok {4}rpm update files: no \.rpm/m);
     assert.match(result.stdout, /^ok {4}rpm file type: no \.rpm/m);
     assert.match(result.stdout, /^ok {4}deb file type: application\/x-opendoc-pack/m);
+    assert.match(result.stdout, /^ok {4}deb update prompt: action \/opt\/opendoc-desktop\/resources\/updater\/install-update/m);
+    assert.match(result.stdout, /^ok {4}pacman update prompt: /m);
+    assert.match(result.stdout, /^ok {4}rpm update prompt: no \.rpm/m);
     assert.match(result.stdout, /^ok {4}pacman file type: application\/x-opendoc-pack/m);
     assert.match(result.stdout, /^ok {4}AppImage update files: .*MimeType/m);
     assert.match(result.stdout, /^ok {4}latest-linux\.yml: .*3 files/m);
@@ -126,7 +136,7 @@ test('--require-rpm turns a missing .rpm back into a failure, in every check tha
   withDist({}, (scratch) => {
     const result = run(scratch, '--require-rpm');
     assert.equal(result.status, 1);
-    for (const label of ['rpm', 'rpm update files', 'rpm file type', 'latest-linux.yml']) assert.match(result.stdout, new RegExp(`^FAIL {2}${label}: `, 'm'), label);
+    for (const label of ['rpm', 'rpm update files', 'rpm file type', 'rpm update prompt', 'latest-linux.yml']) assert.match(result.stdout, new RegExp(`^FAIL {2}${label}: `, 'm'), label);
     assert.match(result.stdout, /^ok {4}deb: /m);
   });
 });
@@ -154,5 +164,32 @@ test('a package without the shared-mime entry or the integrations fails, naming 
     assert.equal(result.status, 1);
     assert.match(result.stdout, /^FAIL {2}deb: missing resources\/integrations\/claude\/\.claude-plugin\/marketplace\.json/m);
     assert.match(result.stdout, /^FAIL {2}pacman: missing resources\/integrations\//m);
+  });
+});
+
+test('a package whose update prompt is wrong fails: a policy that differs, a helper that is not 0755, or one owned by a user', { skip }, () => {
+  withDist({ policy: policySource.replace('install-update</annotate>', 'other-helper</annotate>') }, (scratch) => {
+    const result = run(scratch);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /^FAIL {2}deb update prompt: the installed polkit policy differs/m);
+    assert.match(result.stdout, /^FAIL {2}pacman update prompt: /m);
+  });
+  withDist({ helperMode: 0o775 }, (scratch) => {
+    const result = run(scratch);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /^FAIL {2}deb update prompt: the helper must be a root-owned 0755 file/m);
+  });
+  withDist({}, (scratch) => {
+    // The same dist, but a deb built by the current user: the owner is not root.
+    const root = path.join(scratch, 'deb-root');
+    const data = path.join(scratch, 'data.tar');
+    const result = spawnSync(bsdtar, ['-cf', data, '-C', root, '.'], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const deb = path.join(makeDist.last.dist, `opendoc-desktop_${version}-${build}_amd64.deb`);
+    rmSync(deb);
+    assert.equal(spawnSync(ar, ['rc', deb, 'debian-binary', 'control.tar', 'data.tar'], { cwd: scratch, encoding: 'utf8' }).status, 0);
+    const checked = run(scratch);
+    if (process.getuid?.() === 0) return; // as root the files are root-owned anyway
+    assert.match(checked.stdout, /^FAIL {2}deb update prompt: the (policy|helper) must be a root-owned/m);
   });
 });

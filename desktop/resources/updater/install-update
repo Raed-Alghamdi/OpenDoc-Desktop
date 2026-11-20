@@ -1,0 +1,59 @@
+#!/bin/sh
+# Installs a downloaded opendoc-desktop update (a deb, rpm or pacman file) as root. The app starts it through pkexec, and the
+# polkit action io.github.ryanyahya.opendocdesktop.install-update (resources/polkit) names this exact file, so the password prompt
+# shows a sentence instead of a script. The package that holds this file installs it root-owned, mode 0755, and nothing else may
+# change it.
+#
+# Usage: install-update <file> <sha512-hex> <deb|rpm|pacman>
+#
+# The downloaded file lies in the user's cache folder and is not trusted where it lies: it is copied into a root-owned folder,
+# its SHA-512 (from the release metadata) is checked on the copy, and the copy is installed. Every argument is checked first.
+#
+# Exit codes: 0 installed; 64 bad arguments; 70 the copy does not match the checksum; 1 any other failure, including a missing
+# install tool (the install tool's own 126 and 127 become 1 so they are never taken for pkexec's "prompt dismissed").
+#
+# pkexec runs this with a minimal environment and PATH=/usr/sbin:/usr/bin:/sbin:/bin (pkexec(1)), so PATH is not set here.
+set -u
+
+usage() { echo "opendoc-desktop: $1" >&2; exit 64; }
+
+[ "$#" -eq 3 ] || usage 'usage: install-update <file> <sha512-hex> <deb|rpm|pacman>'
+file=$1
+sum=$2
+ext=$3
+
+case $ext in deb | rpm | pacman) ;; *) usage 'the package type must be deb, rpm or pacman' ;; esac
+case $sum in *[!0-9a-f]*) usage 'the checksum must be 128 lowercase hex digits' ;; esac
+[ "${#sum}" -eq 128 ] || usage 'the checksum must be 128 lowercase hex digits'
+case $file in /*) ;; *) usage 'the file must be an absolute path' ;; esac
+case $file in *"
+"*) usage 'the file name must not contain a line break' ;; esac
+case $file in *".$ext") ;; *) usage "the file name must end in .$ext" ;; esac
+[ -f "$file" ] && [ ! -L "$file" ] || usage 'the file must be a regular file (not a link)'
+
+tmp=$(mktemp -d) || exit 1
+trap 'rm -rf "$tmp"' EXIT
+pkg="$tmp/update.$ext"
+cp -- "$file" "$pkg" || exit 1
+printf '%s  %s\n' "$sum" "$pkg" | sha512sum -c - >/dev/null 2>&1 || { echo 'opendoc-desktop: the update file does not match its checksum' >&2; exit 70; }
+
+# The same tools in the same order as the app's fallback (updater/privileged-install.mjs keeps the two texts equal; a test checks it).
+(
+  case $ext in
+    deb)
+      dpkg -i "$pkg" || apt-get install -f -y
+      ;;
+    rpm)
+      if command -v zypper >/dev/null 2>&1; then zypper --non-interactive --no-refresh install --allow-unsigned-rpm -f "$pkg"
+      elif command -v dnf >/dev/null 2>&1; then dnf install --nogpgcheck -y "$pkg"
+      elif command -v yum >/dev/null 2>&1; then yum install --nogpgcheck -y "$pkg"
+      else rpm -Uvh --replacepkgs --replacefiles --nodeps "$pkg"; fi
+      ;;
+    pacman)
+      pacman -U --noconfirm "$pkg"
+      ;;
+  esac
+)
+status=$?
+if [ "$status" -eq 126 ] || [ "$status" -eq 127 ]; then status=1; fi
+exit $status

@@ -24,8 +24,10 @@ noextract=("${_asset}")
 sha256sums=('SKIP')
 
 package() {
-  # The release's package already has the app, the .desktop file and the icons. Drop its own metadata and install script.
-  bsdtar -xpf "${srcdir}/${_asset}" -C "${pkgdir}" --exclude='.PKGINFO' --exclude='.MTREE' --exclude='.INSTALL' --exclude='.BUILDINFO'
+  # The release's package already has the app, the .desktop file and the icons. Drop its own metadata and install script, and the
+  # update helper with its polkit action: the in-app updater is off here (update-disabled below), so nothing would ever run them.
+  bsdtar -xpf "${srcdir}/${_asset}" -C "${pkgdir}" --exclude='.PKGINFO' --exclude='.MTREE' --exclude='.INSTALL' --exclude='.BUILDINFO' \
+    --exclude='usr/share/polkit-1' --exclude='opt/opendoc-desktop/resources/updater'
 
   install -d "${pkgdir}/usr/bin"
   ln -s /opt/opendoc-desktop/opendoc-desktop "${pkgdir}/usr/bin/opendoc-desktop"

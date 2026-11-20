@@ -185,6 +185,24 @@ test('AppImage: downloads in the background and says nothing; the swap is for th
   assert.equal(updater.quitInstalls, 1);
 });
 
+test('AppImage: a waiting download is never cleared, and the launch after the swap clears what it left (update-info.json)', async () => {
+  const { controller, updater } = await setup({ type: 'appimage', script: { check: downloadedUpdate() } });
+  await controller.start();
+  await settle();
+  await controller.idle();
+  updater.script.check = { isUpdateAvailable: false };
+  await controller.checkNow();
+  assert.equal(updater.cleared, undefined, 'the swap at quit still needs the file');
+  assert.equal(await controller.installOnQuit(), true);
+
+  // The next launch runs the new build: its check finds nothing newer and empties pending/.
+  const next = await setup({ type: 'appimage', script: { check: { isUpdateAvailable: false } } });
+  await next.controller.start();
+  await settle();
+  assert.equal(next.updater.cleared, 1);
+  assert.ok(next.log.some(line => /the downloaded update was removed: nothing newer is left/.test(line)));
+});
+
 test('AppImage: nothing is swapped at quit when nothing was downloaded, or when the switch is off', async () => {
   const none = await setup({ type: 'appimage', script: { check: { isUpdateAvailable: false } } });
   await none.controller.start();

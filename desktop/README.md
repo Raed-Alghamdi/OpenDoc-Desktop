@@ -100,7 +100,7 @@ node desktop/tests/packaging/check-artifacts.mjs [--require-rpm]
 
 It expects the installers in `desktop/dist/`. Without `--require-rpm`, a missing `.rpm` is not an error (an `rpm` file that is listed must exist); with it, a missing one is. CI uses it. It reads the version and build number from each package's own metadata, and checks that `latest-linux.yml` lists every installer with its checksum. Where the `rpm` tool is not installed it checks the `.rpm` by file name only; `--require-rpm` makes that an error. It also checks that each package carries the integration files (with their dot folders), the shared-mime file for `.opendoc.zip` and the `.desktop` file's `MimeType` line.
 
-Check an unpacked app (`linux-unpacked`, or a macOS `.app`) with `node desktop/tests/packaging/check-packaged.mjs --require linux` (or `--require mac`): the integration files are there, the source `check.mjs` passes against the packaged copy, and on macOS the Info.plist's document type for `.opendoc.zip` is right.
+Check an unpacked app (`linux-unpacked`, or a macOS `.app`) with `node desktop/tests/packaging/check-packaged.mjs --require linux` (or `--require mac`): the integration files are there, the source `check.mjs` passes against the packaged copy, and on macOS the Info.plist's document type for `.opendoc.zip` is right. With `--release` it also fails if the app's `package.json` inside `app.asar` has the `opendocTestBuild` field that `OPENDOC_DESKTOP_TEST_BUILD=1 node desktop/runtime/dist.mjs ...` writes; `node desktop/tests/packaging/check-release.mjs <installer or folder>...` makes the same check on the deb, rpm, pacman, AppImage and macOS zip files themselves (the dmg cannot be read on Linux; its app is in the zip). CI runs both before anything is uploaded, and the release job runs the second on every file it is about to attach, so a release never carries a test build.
 
 ### The AUR package
 
@@ -129,13 +129,13 @@ It runs on a `desktop-v*` tag, on a pull request that touches `desktop/**`, `scr
   4. runs `node --test "desktop/tests/packaging/*.test.mjs"` and `node --test desktop/tests/smoke/runtime.test.mjs`;
   5. runs the shell unit tests (`node desktop/tests/shell/run.mjs --unit`; on Ubuntu `/bin/sh` is `dash`, which the launcher and the host's watcher shell must run under);
   6. builds pacman, deb, rpm and AppImage;
-  7. runs `check-packaged.mjs --require linux` on the unpacked app, then `check-artifacts.mjs --require-rpm` and the runtime test again inside it;
+  7. runs `check-packaged.mjs --require linux --release` on the unpacked app, then `check-artifacts.mjs --require-rpm`, `check-release.mjs desktop/dist` (no installer is a test build) and the runtime test again inside it;
   8. allows the app sandbox on the runner (Ubuntu 24.04 restricts user namespaces);
   9. runs the packaged-app smoke test (`node desktop/tests/smoke/run.mjs`, under Xvfb);
   10. keeps the files as artifacts for 5 days.
 - **integrations** (`ubuntu-latest`): `node desktop/integrations/check.mjs`, which validates the plugin and skill files.
-- **mac** (`macos-latest`, Apple Silicon): builds the runtime, runs the same two test groups and the shell unit tests, builds zip and dmg, runs `check-packaged.mjs --require mac`, runs the smoke test in the runner's own session, and keeps the files for 5 days.
-- **release** (tags only; needs `linux` and `mac`): uses the Apple Silicon build's `latest-mac.yml` as it is (there is nothing to merge) and creates the draft release with `gh release create --draft`.
+- **mac** (`macos-latest`, Apple Silicon): builds the runtime, runs the same two test groups and the shell unit tests, builds zip and dmg, runs `check-packaged.mjs --require mac --release` and `check-release.mjs desktop/dist`, runs the smoke test in the runner's own session, and keeps the files for 5 days.
+- **release** (tags only; needs `linux` and `mac`): uses the Apple Silicon build's `latest-mac.yml` as it is (there is nothing to merge), runs `check-release.mjs release` on every downloaded file (it fails if any is a test build), and creates the draft release with `gh release create --draft`.
 
 ## Release automation (one-time setup)
 

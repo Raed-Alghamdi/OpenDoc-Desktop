@@ -15,6 +15,7 @@ const fromBuilder = (name) => {
 };
 
 export const builderConfig = () => fromBuilder('js-yaml').load(readFileSync(path.join(desktop, 'electron-builder.yml'), 'utf8'));
+export const asarModule = () => fromBuilder('@electron/asar');
 export const readPlist = (file) => fromBuilder('plist').parse(readFileSync(file, 'utf8'));
 
 export const PACK_EXTENSION = 'opendoc.zip';

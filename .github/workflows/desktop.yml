@@ -81,12 +81,16 @@ jobs:
         run: node desktop/tests/shell/run.mjs --unit
       - name: Build the installers
         run: node desktop/runtime/dist.mjs ${{ steps.meta.outputs.stub }} --linux pacman deb rpm AppImage --publish never
-      # The unpacked app: the agent integrations with their dot folders, through the source check script.
+      # The unpacked app: the agent integrations with their dot folders, through the source check script. --release also fails a
+      # test build (OPENDOC_DESKTOP_TEST_BUILD=1 puts opendocTestBuild in the app's package.json); this job never makes one.
       - name: Check the unpacked app
-        run: node desktop/tests/packaging/check-packaged.mjs --require linux
+        run: node desktop/tests/packaging/check-packaged.mjs --require linux --release
       # Each installer: version, build number, update files, the integrations and the design pack file type.
       - name: Check the installers
         run: node desktop/tests/packaging/check-artifacts.mjs --require-rpm
+      # Every installer's app.asar (deb, rpm, pacman, AppImage) must be free of the test build mark, before anything is uploaded.
+      - name: Check that no installer is a test build
+        run: node desktop/tests/packaging/check-release.mjs desktop/dist
       - name: Test the runtime inside the unpacked app
         env:
           OPENDOC_RUNTIME: ${{ github.workspace }}/desktop/dist/linux-unpacked/resources/runtime
@@ -167,7 +171,10 @@ jobs:
       # The unpacked app: the agent integrations with their dot folders and the design pack document type, which must not claim
       # plain ZIP files.
       - name: Check the unpacked app
-        run: node desktop/tests/packaging/check-packaged.mjs --require mac
+        run: node desktop/tests/packaging/check-packaged.mjs --require mac --release
+      # The zip's app.asar must be free of the test build mark, before anything is uploaded (the dmg holds the same app).
+      - name: Check that no installer is a test build
+        run: node desktop/tests/packaging/check-release.mjs desktop/dist
       # The packaged app (production fuses) in the runner's own session: library, PDF, comment, export, `opendoc --version`, quit.
       - name: Smoke test the packaged app
         run: node desktop/tests/smoke/run.mjs
@@ -198,12 +205,21 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      # rpm for rpm2cpio and libarchive-tools for bsdtar, which the check below reads the packages with.
+      - run: sudo apt-get update && sudo apt-get install -y rpm libarchive-tools
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: release
       # One macOS build, so its update metadata is the release's (the updater reads release/latest-mac.yml).
       - name: Place the macOS update metadata
         run: mv release/desktop-mac-arm64/latest-mac.yml release/latest-mac.yml
+      # Nothing is published with the test build mark: it makes the app honour test switches and a plain-http update feed. This reads
+      # the app archive of every file about to be attached, and fails the job (and so the release) if one has the mark.
+      - name: Check that no release file is a test build
+        run: node desktop/tests/packaging/check-release.mjs release
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}

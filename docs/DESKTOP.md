@@ -1,6 +1,6 @@
 # opendoc-desktop
 
-opendoc-desktop is a desktop app for [OpenDoc](https://github.com/RyanYahya/OpenDoc) on Linux and macOS, built with Electron on top of the original OpenDoc project. It opens one workspace at a time in a window and carries its own runtime, so users install no Node or npm. The package lives in [`desktop/`](../desktop/README.md) (build and release instructions are there); OpenDoc's npm packages do not include it.
+opendoc-desktop is a desktop app for [OpenDoc](https://github.com/RyanYahya/OpenDoc) on Linux and on macOS with Apple Silicon, built with Electron on top of the original OpenDoc project. It opens one workspace at a time in a window and carries its own runtime, so users install no Node or npm. The package lives in [`desktop/`](../desktop/README.md) (build and release instructions are there); OpenDoc's npm packages do not include it.
 
 This page starts with what a user needs: how to [install](#install) the app, what happens at the [first run](#first-run), how it [updates](#updates-by-install-type), which workspaces it [opens](#which-workspaces-open), the [`opendoc` command](#the-opendoc-command), how to [connect AI apps](#ai-apps) and how to [uninstall](#uninstall) it completely. After those, the page describes how the shell works, for developers: the Electron main process, the files it reads and writes, its hardening and its tests.
 
@@ -18,8 +18,7 @@ Releases are on the repository's releases page, `https://github.com/Raed-Alghamd
 | Debian, Ubuntu (x86_64) | `opendoc-desktop_<version>-<build>_amd64.deb` |
 | Fedora, openSUSE (x86_64) | `opendoc-desktop-<version>-<build>.x86_64.rpm` |
 | Arch Linux (x86_64) | the AUR package `opendoc-desktop-bin` (below), or `opendoc-desktop-<version>-<build>-x64.pacman` |
-| macOS, Apple Silicon | `opendoc-desktop-<version>-<build>-arm64.dmg` (or `.zip`) |
-| macOS, Intel | `opendoc-desktop-<version>-<build>-x64.dmg` (or `.zip`) |
+| macOS, Apple Silicon (M1 or newer; there is no Intel Mac build) | `opendoc-desktop-<version>-<build>-arm64.dmg` (or `.zip`) |
 
 Every release also holds `latest-linux.yml` and `latest-mac.yml`: the update information the app reads. You never need them.
 
@@ -77,7 +76,7 @@ That install updates itself through the app (see below), unlike the AUR package.
 
 ### macOS
 
-Open the `.dmg` and drag opendoc-desktop to the Applications folder (or unzip the `.zip` and move the app there). Do not run it from the disk image or from the Downloads folder: macOS then runs it from a temporary read-only copy, which cannot update itself and cannot install the `opendoc` command.
+The app needs a Mac with Apple Silicon (M1 or newer). Open the `.dmg` and drag opendoc-desktop to the Applications folder (or unzip the `.zip` and move the app there). Do not run it from the disk image or from the Downloads folder: macOS then runs it from a temporary read-only copy, which cannot update itself and cannot install the `opendoc` command.
 
 The app is signed ad hoc and is not notarized (there is no Apple developer account behind it), so macOS blocks the first launch. To open it anyway:
 
@@ -152,19 +151,28 @@ Agents run `opendoc`, not `npx opendoc`, so the app puts a command on the user's
 
 Coding agents (Claude Code, Codex and others) drive OpenDoc through the `opendoc` command. To let an agent find your workspace from any folder, each app gets one small "router skill": it reads `defaultWorkspace` from the app's `config.json` (`${XDG_CONFIG_HOME:-$HOME/.config}/opendoc-desktop/config.json` on Linux, `~/Library/Application Support/opendoc-desktop/config.json` on macOS), asks you when there is none, then runs `opendoc --workspace <that folder>` and follows that workspace's own `AGENTS.md` and skills. It copies nothing from the workspace. The files are in [`desktop/integrations/`](../desktop/integrations/README.md): a Claude Code plugin and a Codex plugin (marketplace `opendoc`, plugin `opendoc`), and a plain copy of the skill for apps without plugins.
 
-<!-- I3 PLACEHOLDER: describe the app's "Connect your AI apps" screen here (detection of Claude Code, Codex, Antigravity, Cursor and
-     Copilot CLI; Connect and Disconnect; what each step shows; where the app's record of what it did is kept). Until it exists,
-     the by-hand route below is the only one, and the uninstall section's AI list names the places by hand. -->
+**The easy way: the "Connect your AI apps" screen.** It looks for the apps on your computer, installs OpenDoc's files into the ones you choose, and shows exactly what it did.
 
-The app's "Connect your AI apps" screen does not exist yet. For now you register the files by hand, with each app's own commands. The installers do not carry the `desktop/integrations/` folder yet, so take it from a checkout of this repository.
+- **When it appears.** Once, after the first workspace opens (the app records that it has been shown as `aiAppsOffered` in `config.json`, whatever you chose, so closing it or pressing **Skip** counts too), and at any time from **Connect AI Apps…**: in the app menu on macOS, in the Help menu elsewhere.
+- **What it shows.** One row for each of Claude Code, Codex, Antigravity, Cursor and Copilot CLI: found or not found, with the reason in a sentence (for example, "There is no codex command on the search path"), and whether OpenDoc is connected in it now. A spinner shows while it looks (a second or two). Apps it can connect have a tick box, and nothing is ticked at the start. Nothing is changed until you press **Connect**, and every result is shown.
+- **What Connect does** for each ticked app, through the app's own commands:
+  - Claude Code and Codex: registers a marketplace called `opendoc` from a copy of the files kept in the app's data folder, and installs the plugin `opendoc@opendoc`.
+  - Antigravity: `agy plugin install` of the same plugin.
+  - Cursor and Copilot CLI: copies the one skill file into the one folder each reads. It never runs either program.
+  - It then asks the app whether OpenDoc is really there, and undoes everything it added if not.
+- **The result.** Each app gets a line: connected, blocked, or did not work. For a result that is not connected, the screen shows the app's own words from the step that failed (an organisation's policy can block plugins; the message is the vendor's, unchanged). Under **Details** it lists every step with the exact command that ran and its output.
+- **Disconnect** is the undo, in the row of each connected app. It uses the same commands and the record of what was added, and it leaves alone anything it did not add: a file you changed is kept and reported, and an OpenDoc that was already installed some other way is shown as "Already set up elsewhere" and never touched. **Forget** appears for an app that has been uninstalled since: it drops the app's record without running anything. A connect that was cut short shows as "Needs attention", and Disconnect cleans it up.
+- **Which settings folder.** Claude Code and Codex may keep their settings somewhere other than the default (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). The app asks your login shell for them first, then uses its own environment, then the default folder, and uses the same folder when it disconnects.
+- **What the app keeps.** `integrations.json` and the folder `integrations/` in the app's data folder (`~/.local/share/opendoc-desktop` on Linux, `~/Library/Application Support/opendoc-desktop` on macOS). They go away with the last Disconnect.
+- **Staying current.** At launch the app checks whether its own integration files changed (an app update brings new ones) and brings what is connected up to date. Claude Code reads the files in place; Codex and Antigravity are installed again; Cursor and Copilot CLI get the file again. It says nothing when it works or when nothing is connected. If it fails for an app that is still connected, a message says so and offers the screen; a row that still has older files shows "Update available" with an **Update** button.
 
-Before you start, check that `opendoc --version` works in a terminal (see [The `opendoc` command](#the-opendoc-command)) and that you have opened a workspace in the app once, so there is a default.
+**By hand.** The screen runs the commands below, so you can do the same yourself (for a script, or for an app the screen cannot see). Before you start, check that `opendoc --version` works in a terminal (see [The `opendoc` command](#the-opendoc-command)) and that you have opened a workspace in the app once, so there is a default.
 
-**1. Put a stable copy where the apps can keep reading it.** Claude Code reads a plugin from the folder you register, in place, so that folder must not be inside an app bundle or an AppImage mount, which move or vanish.
+**1. Put a stable copy where the apps can keep reading it.** Claude Code reads a plugin from the folder you register, in place, so that folder must not be inside an app bundle or an AppImage mount, which move or vanish. The files come with the app: `/opt/opendoc-desktop/resources/integrations` for the deb, rpm and pacman packages, `/Applications/opendoc-desktop.app/Contents/Resources/integrations` on macOS, and `desktop/integrations/` in a checkout of this repository. (An AppImage keeps them inside its image: use the screen, or a checkout.)
 
 ```sh
 mkdir -p ~/.local/share/opendoc-desktop/integrations
-cp -r desktop/integrations/. ~/.local/share/opendoc-desktop/integrations/
+cp -r /opt/opendoc-desktop/resources/integrations/. ~/.local/share/opendoc-desktop/integrations/
 ```
 
 On macOS the folder is `~/Library/Application Support/opendoc-desktop/integrations` instead. Below, `<copy>` stands for that folder.
@@ -192,29 +200,44 @@ mkdir -p ~/.copilot/skills/opendoc && cp <copy>/skills/opendoc/SKILL.md ~/.copil
 
 Never copy the skill into `~/.agents/skills`, `~/.claude/skills` or `~/.codex/skills`: several apps read those folders, so an app could load the skill twice.
 
-**3. Check it.** From a folder that is not the workspace, ask the agent: "Make a one-page PDF with OpenDoc: a short memo titled Test." It should read the config, run commands that start with `opendoc` (never `npx`), read the workspace's `AGENTS.md`, and say where the PDF is. If there is no default workspace it should ask you for one and stop.
+**3. Check it** (this applies to the screen too). From a folder that is not the workspace, ask the agent: "Make a one-page PDF with OpenDoc: a short memo titled Test." It should read the config, run commands that start with `opendoc` (never `npx`), read the workspace's `AGENTS.md`, and say where the PDF is. If there is no default workspace it should ask you for one and stop.
 
-**Refreshing after an app update.** The copy in step 1 does not follow the app. Run the `cp` line of step 1 again (it is safe to repeat). Claude Code reads it in place, so it picks the new files up at its next start. Codex and Antigravity copy the plugin when you add it, so run `codex plugin add opendoc@opendoc` or `agy plugin install <copy>/codex/opendoc` again.
+**Refreshing by hand after an app update:** run the `cp` line of step 1 again, then `codex plugin add opendoc@opendoc` and `agy plugin install <copy>/codex/opendoc` again; Claude Code picks the new files up at its next start.
 
-**Undo by hand**, for the apps you registered (in this order, the copy last):
+**Undo by hand**, for the apps you registered (in this order, the copy last). Connected with the screen, press Disconnect instead:
 
 ```sh
 claude plugin uninstall opendoc@opendoc
 claude plugin marketplace remove opendoc
 codex plugin remove opendoc@opendoc
 codex plugin marketplace remove opendoc
-rm -rf ~/.gemini/config/plugins/opendoc          # Antigravity's copy of the plugin
+agy plugin uninstall opendoc                    # Antigravity's copy of the plugin
 rm -rf ~/.cursor/skills/opendoc ~/.copilot/skills/opendoc
-rm -rf ~/.local/share/opendoc-desktop/integrations
+rm -rf ~/.local/share/opendoc-desktop/integrations ~/.local/share/opendoc-desktop/integrations.json
 ```
 
 Claude Code's `marketplace remove` also uninstalls its plugins, so the second line alone would do for it.
+
+## Design packs
+
+A design pack is a `.opendoc.zip` file with themes and templates that one workspace exports and another imports (see [PACKS.md](PACKS.md)). The app opens one in the **Import** dialog, at the review step: the pack's name, what is in it, and what would change. Nothing is installed until you tick the trust box and press **Install**.
+
+Ways to open a pack in the app:
+
+- **Double-click** it in the file manager (Linux; works from the deb, rpm and Arch packages). They register the pack file type with the system, so the file manager offers opendoc-desktop; the path reaches the app as a launch argument, or goes to the app that is already running (a second launch hands the file over and exits). The file manager may pass a path or a `file://` address (the `.desktop` file's `Exec` uses `%U`); the app accepts both. The AppImage carries the same `.desktop` entry but cannot install the shared-mime type, so a double-click goes to the archive manager unless a desktop integrator for AppImages registers it, or you add the type yourself: copy `opendoc-desktop.xml` (in a checkout, `desktop/resources/mime/`) to `~/.local/share/mime/packages/` and run `update-mime-database ~/.local/share/mime`. Otherwise use File > Import, drop the file on the window, or Open With (choosing the AppImage), which work with every install.
+- **macOS:** the app declares a document type for `.opendoc.zip` and never claims plain `.zip` files, which stay with Archive Utility. macOS matches a file by its last extension only, so Finder may still open a `.opendoc.zip` with Archive Utility. If it does, use one of the others until a check on a Mac says otherwise: right-click the file, **Open With**, opendoc-desktop (or **Other…**), or the two below.
+- **File > Import Design Pack…** asks for a file (filtered to `.opendoc.zip`; macOS can only filter on `.zip`). It is available while a workspace is open.
+- **Drop** the file on the window.
+
+The app reads a pack file itself and hands the page its name and bytes, at most 64 MiB; a larger file gets a message from the app and is not opened. A pack opened while no workspace is open waits until one is: the workspace picker says so, and the first workspace that opens receives it. The Import dialog reviews one pack at a time, so a pack opened while another is still waiting replaces it.
+
+**Show in folder.** After you export a pack, the result offers **Show in folder** (in the app only; the browser edition shows the path with a copy button). The app reveals a file only when it is a file inside the open workspace's `output/packs/` folder once every link in its path is resolved. Anything else (a path with `..`, a link that leads out, another folder or another workspace) is refused and logged, and nothing opens.
 
 ## Uninstall
 
 Removing the app's package leaves your workspaces, their backups and the app's own settings in place on purpose. This section lists exactly what stays, and how to remove each item. Do the steps in this order.
 
-**1. Undo the AI integration first**, while the app and the `opendoc` command still exist: the "Undo by hand" list in [AI apps](#ai-apps), for the apps you registered. If you never registered any, skip this step.
+**1. Undo the AI integration first**, while the app and the `opendoc` command still exist: open **Connect AI Apps…** and press **Disconnect** for each connected app, or use the "Undo by hand" list in [AI apps](#ai-apps). If you never connected any, skip this step.
 
 **2. Quit the app** (File > Quit). A quit removes `.opendoc/desktop.json` from the open workspace; no process of the app is left running.
 
@@ -235,7 +258,7 @@ Removing the app's package leaves your workspaces, their backups and the app's o
 |---|---|---|
 | The app's settings and logs: `config.json` (default workspace, recent workspaces, update switches, notices), `window-state.json`, `logs/` (`workspace-<id>.log`, `updater.log`), and the engine's own files for the app (`Partitions/`, `Crashpad/`, caches) | `${XDG_CONFIG_HOME:-$HOME/.config}/opendoc-desktop/`; `~/Library/Application Support/opendoc-desktop/` | `rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/opendoc-desktop"` |
 | The runtime copy an AppImage made (about 185 MB per build, `runtime/<version>-<build>/`, and the link `runtime/current` that workspaces point at). Packages and macOS make none. | `${XDG_DATA_HOME:-$HOME/.local/share}/opendoc-desktop/runtime/` | `rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/opendoc-desktop/runtime"` |
-| The stable copy of the plugin files, if you made one (AI apps, step 1) | `.../opendoc-desktop/integrations/` in the data folder | `rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/opendoc-desktop/integrations"` |
+| The stable copy of the plugin files and the app's record of what it connected, if you connected an AI app (Disconnect removes both) | `.../opendoc-desktop/integrations/` and `integrations.json` in the data folder | `rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/opendoc-desktop/integrations" "${XDG_DATA_HOME:-$HOME/.local/share}/opendoc-desktop/integrations.json"` |
 | **Workspace backups**, one folder per upgrade or restore: `backups/<workspace>-<date and time>/` (a `workspace/` copy and `backup.json`). These are your files: look before you delete. | `.../opendoc-desktop/backups/` in the data folder | `ls "${XDG_DATA_HOME:-$HOME/.local/share}/opendoc-desktop/backups"`, then `rm -rf` the ones you do not need, or the whole folder |
 | The data folder itself, once it is empty | `${XDG_DATA_HOME:-$HOME/.local/share}/opendoc-desktop/` | `rmdir "${XDG_DATA_HOME:-$HOME/.local/share}/opendoc-desktop"` |
 | Downloaded updates (the installer the updater fetched, under `pending/`). Only an app that updates itself has this. | `${XDG_CACHE_HOME:-$HOME/.cache}/opendoc-desktop-updater/`; `~/Library/Caches/opendoc-desktop-updater/` | `rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/opendoc-desktop-updater"` |
@@ -294,7 +317,7 @@ cd desktop
 env -u ELECTRON_FORCE_IS_PACKAGED -u ELECTRON_RUN_AS_NODE node_modules/.bin/electron src/main/index.mjs
 ```
 
-`pnpm start` (`electron .`) in `desktop/` does the same. Environment variables that tests and development builds read: `OPENDOC_DESKTOP_RUNTIME` (runtime folder) and `OPENDOC_DESKTOP_HEALTH_MS` (how often the service is checked, default 5000).
+`pnpm start` (`electron .`) in `desktop/` does the same. Environment variables that tests and development builds read: `OPENDOC_DESKTOP_RUNTIME` (runtime folder), `OPENDOC_DESKTOP_HEALTH_MS` (how often the service is checked, default 5000) and `OPENDOC_DESKTOP_INTEGRATIONS_OPTIONS` (a JSON file of options for the AI apps module: its home, environment, PATH folders and integration files; read only by an app that is not packaged, so a variable in an installed app's environment changes nothing, and it keeps the login shell unread so a test never sees the real Claude Code or Codex settings).
 
 ## What the main process does
 
@@ -362,11 +385,11 @@ The pin only ever moves up: `writePin` reads the file again and refuses to lower
 - `config.json` in the profile folder (`~/.config/opendoc-desktop/` on Linux, `~/Library/Application Support/opendoc-desktop/` on macOS): `defaultWorkspace`, `recentWorkspaces` (at most 10, newest first), and the keys of other parts of the app. Written atomically with mode 0600; unknown keys are kept. Opening a workspace makes it the default, because the router skill and the agents use the default.
 - `window-state.json` beside it: size, position and maximised state of the workspace window. A saved position off every connected display is dropped.
 - `logs/workspace-<id>.log` beside it: what the service printed, and when the app started and restarted it. The crash screen and the Help menu link to it.
-- The data folder (`$XDG_DATA_HOME/opendoc-desktop`, else `~/.local/share/opendoc-desktop`; on macOS the same folder as the profile, `~/Library/Application Support/opendoc-desktop`): `backups/` (one folder per upgrade or restore), `runtime/` (an AppImage's runtime copies and the `current` link; none elsewhere) and `integrations/` (the stable copy of the plugin files). `workspace/paths.mjs` decides the location.
+- The data folder (`$XDG_DATA_HOME/opendoc-desktop`, else `~/.local/share/opendoc-desktop`; on macOS the same folder as the profile, `~/Library/Application Support/opendoc-desktop`): `backups/` (one folder per upgrade or restore), `runtime/` (an AppImage's runtime copies and the `current` link; none elsewhere) `integrations/` (the stable copy of the plugin files) and `integrations.json` (the record of what the AI apps screen connected; see [AI apps](#ai-apps)). `workspace/paths.mjs` decides the location.
 - The update cache, which electron-updater makes (`$XDG_CACHE_HOME/opendoc-desktop-updater`, else `~/.cache/opendoc-desktop-updater`; `~/Library/Caches/opendoc-desktop-updater` on macOS): the downloaded installer, under `pending/`. The name comes from `updaterCacheDirName` in the packaged `resources/app-update.yml`.
 - The `opendoc` command for an AppImage or a Mac: `~/.local/bin/opendoc`, or on a Mac `/usr/local/bin/opendoc` (see "The `opendoc` command").
 - Per workspace: `.opendoc/desktop.json` (`{ pid, startedAt, version, build }`, plus `readOnly: { reason, message }` while it is open read-only) while it is open.
-- `config.json` also holds `upgradeWithoutAsking` (a boolean, false until the user ticks "Upgrade my workspaces without asking from now on") and `commandLineNotices` (`{ path, foreign }`): which one-time notices about the `opendoc` command were shown (see "The `opendoc` command").
+- `config.json` also holds `aiAppsOffered` (a boolean, written `true` when the first-run "Connect your AI apps" screen has been shown, Skip included; absent until then), `upgradeWithoutAsking` (a boolean, false until the user ticks "Upgrade my workspaces without asking from now on") and `commandLineNotices` (`{ path, foreign }`): which one-time notices about the `opendoc` command were shown (see "The `opendoc` command").
 
 ## Hardening
 
@@ -386,12 +409,12 @@ The pin only ever moves up: `writePin` reads the file again and refuses to lower
 
 - Closing the window (or quitting) while the page holds an unsaved text draft (a `sessionStorage` key starting `opendoc:text-draft:`) asks Leave or Stay (decision D-d). Stay keeps the window, the service and the draft.
 - The page's own `beforeunload` prompt (registered only when a draft could not be stored) is answered with the same question. Without an answer, Electron would ignore every close and quit.
-- "Show in folder" is the service's own route: the host starts the file manager (`xdg-open`; `open -R` on macOS). The service removes `ELECTRON_RUN_AS_NODE` from the environment of programs it starts for the user (`externalEnv()`, `src/server/external-env.ts`); `workspace-flow.spec.mjs` checks that a stub `xdg-open` does not see it.
+- "Show in folder" for a document export is the service's own route: the host starts the file manager (`xdg-open`; `open -R` on macOS). The service removes `ELECTRON_RUN_AS_NODE` from the environment of programs it starts for the user (`externalEnv()`, `src/server/external-env.ts`); `workspace-flow.spec.mjs` checks that a stub `xdg-open` does not see it.
 - The window title is the page title followed by `opendoc-desktop`.
 
 ## Menus
 
-File: Open Workspace, New Workspace (a new or empty folder, made with the CLI's `init`), Open Recent, Reveal Workspace, Workspace Backups…, Show Log, Quit. Edit: the standard roles (macOS needs them for copy and paste). View: zoom and full screen only, with no reload and no developer tools. Window. Help: a link to the original project; About opendoc-desktop shows the version, the build number and commit, and credits the original OpenDoc project with its link. Where the install updates itself, the Help menu (the app menu on macOS) also has "Check for Updates…", the checkbox "Check for Updates Automatically", and "Restart to Update" while a downloaded update is waiting.
+File: Open Workspace, New Workspace (a new or empty folder, made with the CLI's `init`), Open Recent, Import Design Pack… (a `.opendoc.zip`, while a workspace is open), Reveal Workspace, Workspace Backups…, Show Log, Quit. Edit: the standard roles (macOS needs them for copy and paste). View: zoom and full screen only, with no reload and no developer tools. Window. Help: a link to the original project; About opendoc-desktop shows the version, the build number and commit, and credits the original OpenDoc project with its link. Where the install updates itself, the Help menu (the app menu on macOS) also has "Check for Updates…", the checkbox "Check for Updates Automatically", and "Restart to Update" while a downloaded update is waiting. "Connect AI Apps…" (see [AI apps](#ai-apps)) is the last item of the Help menu, and on macOS sits in the app menu after "Install Command-Line Tool…".
 
 ## Updates
 
@@ -444,6 +467,8 @@ Not covered by the tests (they need a person on a real display): native Wayland 
 
 The agent command has its own spec, `command.spec.mjs`, run against a linux-unpacked layout (this worktree's Electron renamed `opendoc-desktop`, the test runtime in `resources/runtime`, the launchers in `resources/cli`). Point `OPENDOC_SHELL_TEST_UNPACKED` at a real `linux-unpacked` folder to test a real build instead (it is copied, never changed). Every command test uses a scratch `HOME`, and a tripwire `node`, `npm` and `npx` first on the PATH proves that no system Node is used.
 
+The AI apps screen has `unit/ai-apps.test.mjs` (the module's options, the rows, Connect, Disconnect, Forget, blocked, failed and absent apps, the refresh at launch and the first-run flag, all with fake `claude`, `codex` and `agy` commands in a scratch home) and `ai-apps.spec.mjs` (the screen in the app: first run, Skip, the menu item, Connect and Disconnect, a blocked result). Every one of those runs keeps the module away from the real home, config folders and login shell (`support/integrations.mjs`); the tests' own `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are scratch folders too. Opening a pack has `unit/pack-import.test.mjs` (arguments, the 64 MiB limit, the queue, and every refusal of Show in folder) and `pack-import.spec.mjs` (a launch argument, a second launch, `open-file`, the File menu, a pack that waits for a workspace, Show in folder).
+
 The updater has its own unit tests and Electron specs, a local feed server and a hand-run AppImage update (build 1 to build 2); `desktop/README.md` ("Testing updates") says how to run them. They use loopback feeds only, never GitHub. The macOS swap is covered only by tests of its decisions, because it needs a Mac.
 
 ## The service host and the bridge
@@ -456,8 +481,10 @@ The updater has its own unit tests and Electron specs, a local feed server and a
 
 - `window.opendocDesktop.onChange(listener)`: called with no arguments whenever the service reports a change.
 - `window.opendocDesktop.onHostState(listener)`: called with `{ state }`: `'restarting'` (the host exited or stopped answering; requests fail meanwhile), `'running'` (it is back; the page refetches), or `'failed'` (the shell gave up and is about to show its crash screen).
+- `window.opendocDesktop.onImportPack(listener)`: called with `{ name, bytes }` (a `Uint8Array`) when the user opens a design pack from outside the page: a launch argument, a second launch, macOS `open-file`, or File > Import Design Pack…. The main process reads the file (at most 64 MiB), keeps it until the workspace page has loaded, and sends it to that frame; the preload keeps the newest pack until the page has a listener, so one that arrives before the page subscribes is not lost, and it goes to the first listener once. A page that does not use it (the browser edition) never sees one.
+- `window.opendocDesktop.showInFolder(path)`: asks the main process to reveal a pack the page saved. It resolves with nothing whatever the answer; the main process checks the caller (the open workspace's top frame) and reveals only a file that, with every link resolved, lies inside the open workspace's `output/packs/` (`revealablePackPath` in `pack-import.mjs`).
 
-Both return a function that stops listening. `src/app/main.tsx` uses `onChange` instead of its WebSocket when the bridge exists.
+The subscriptions return a function that stops listening. `src/app/main.tsx` uses `onChange` instead of its WebSocket when the bridge exists.
 
 **Never left behind.** Three guards, because a host can die of the app's death in three different states. (1) `watchdog.mjs` is loaded first (`--import data:...`, from text, so nothing is read from `app.asar`), before tsx and the service: if the channel is already closed it ends at once, and when the channel closes it kills the host's process group. (2) The same file starts a worker thread that polls the parent id every 300 ms and kills the group when it changes, which works while the host's main thread is stuck in a synchronous loop (where 'disconnect' never runs). (3) The main process starts a small shell sentinel (`/bin/sh`, in its own session; the script is `sentinelScript` in `transport.mjs`, written for every POSIX shell in the one form they all accept, `kill -0 "-$2"` and `kill -KILL "-$2"`: dash, the `/bin/sh` of Debian and Ubuntu, rejects `kill -0 -- -PID` and `kill -s 0 -PID`, and busybox sh rejects any `--`; `unit/sentinel.test.mjs` runs the script under each shell the machine has, which in CI includes dash and busybox on Ubuntu) that checks every second that the app and the host's group are still there and kills the group when the app is gone first; it covers a host that is stopped (SIGSTOP), runs nothing, and the render workers it started, and it exits as soon as the group is gone. The group is signalled only from the sentinel's check and once, from the host's exit event, never later: a group number cannot be given to anything else while any of its members lives. A start in progress is cancelled by an abort signal (the app is quitting, or the supervisor was stopped), which kills the host. Windows has no process groups: the channel and the parent id check remain.
 

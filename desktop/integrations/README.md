@@ -1,6 +1,6 @@
 # Agent integrations
 
-Files that let a coding agent find the user's OpenDoc workspace from any folder and drive it with the `opendoc` command. The desktop app installs them into the agent apps it detects (the integration module) and can undo that.
+Files that let a coding agent find the user's OpenDoc workspace from any folder and drive it with the `opendoc` command. The desktop app installs them into the agent apps it detects (the integration module) and can undo that. Its "Connect your AI apps" window lists the apps at once (nothing on the list runs a vendor command), opens a page for each app that checks that app only and connects it per settings folder, and has an "Other app" page that shows `skills/opendoc` and the `opendoc` command for any other agent. The calls behind it (`overview`, `checkApp`, `connect`, `disconnect`, `status`, `refresh`) are described at the top of `desktop/src/main/integrations/index.mjs`.
 
 ```
 integrations/
@@ -37,6 +37,8 @@ agy plugin validate --strict desktop/integrations/codex/opendoc      # Antigravi
 ```
 
 Run vendor commands with a scratch `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `HOME`, never a real configuration folder.
+
+Claude Code can keep its settings in several folders (the `claude` command in a terminal uses `~/.claude` unless `CLAUDE_CONFIG_DIR` is set; the Claude desktop app uses a folder of its own, such as `~/.claude-Work`). A plugin is installed per folder, so run the three Claude Code commands below once for each folder you use, with `CLAUDE_CONFIG_DIR=<folder>` set for that run. The app's window does this for each folder you tick.
 
 ## Register from the stable copy
 

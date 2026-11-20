@@ -751,7 +751,14 @@ export class DesktopShell {
     handle('backup-delete', name => this.#deleteBackup(name));
     handle('pending-pack', () => this.pendingPack ? { name: this.pendingPack.name } : null);
     const aiAppsWindow = () => this.aiAppsWindow && !this.aiAppsWindow.isDestroyed() ? this.aiAppsWindow : null;
-    handle('ai-apps-info', () => this.aiApps.info(), aiAppsWindow);
+    handle('ai-apps-overview', options => this.aiApps.overview({ fresh: options?.fresh === true }), aiAppsWindow);
+    handle('ai-apps-app', (id, options) => this.aiApps.app(id, { fresh: options?.fresh === true }), aiAppsWindow);
+    handle('ai-apps-copy', async kind => {
+      const text = await this.aiApps.copyText(kind);
+      if (!text) return { ok: false, message: 'There is nothing to copy.' };
+      clipboard.writeText(text);
+      return { ok: true };
+    }, aiAppsWindow);
     handle('ai-apps-connect', ids => this.aiApps.connect(ids), aiAppsWindow);
     handle('ai-apps-disconnect', (ids, options) => this.aiApps.disconnect(ids, { forget: options?.forget === true }), aiAppsWindow);
     // Skip and Close both end here; the first-run flag is already set (it is set when the screen is shown).

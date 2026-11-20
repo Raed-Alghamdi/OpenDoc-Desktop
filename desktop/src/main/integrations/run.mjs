@@ -10,10 +10,12 @@ export const outputLimit = 16 * 1024;
 const escapeSequences = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 const tidy = text => text.replace(escapeSequences, '').replace(/\r\n?/g, '\n').trim();
 
+/** A word as it would be typed in a shell: quoted when it has anything but plain characters. Only for display. */
+export const shellQuote = value => (/^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`);
+
 /** `claude plugin list --json`, as it would be typed (arguments with spaces are quoted). Only for display. */
 export function displayCommand(file, args) {
-  const quote = value => (/^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`);
-  return [basename(file), ...args].map(quote).join(' ');
+  return [basename(file), ...args].map(shellQuote).join(' ');
 }
 
 /** Run `file` with `args` (no shell), never through a terminal, with no input, a time limit and capped output.

@@ -1,6 +1,6 @@
 // Helpers for the integrations tests: scratch folders, and fake vendor commands (`claude`, `codex`, `agy`) that behave like the
 // real ones did when checked by hand and keep their state in the config folder they are given. They log every call to $FAKE_LOG so a test can
-// say what was run, with which config folder, and that detection ran nothing. $FAKE_MODE switches in a failure.
+// say what was run, with which config folder, and that detection ran nothing. $FAKE_MODE switches in a failure, $FAKE_DELAY_MS makes every call slow.
 import { execFileSync } from 'node:child_process';
 import * as sync from 'node:fs';
 import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
@@ -107,6 +107,8 @@ export function runFake(name) {
   const mode = process.env.FAKE_MODE ?? '';
   sync.appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ tool: name, args, cwd: process.cwd(), cwdMode: sync.statSync('.').mode & 0o777, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR ?? null, CODEX_HOME: process.env.CODEX_HOME ?? null, HOME: process.env.HOME ?? null, XDG: [process.env.XDG_CONFIG_HOME, process.env.XDG_DATA_HOME, process.env.XDG_CACHE_HOME].map(value => value ?? null), ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE ?? null, mode })}\n`);
   if (mode === 'slow') setTimeout(() => {}, 60_000);
+  // FAKE_DELAY_MS: every call takes that long before it answers (the vendors' own commands take about half a second each).
+  else if (Number(process.env.FAKE_DELAY_MS) > 0) setTimeout(() => ({ claude: fakeClaude, codex: fakeCodex, agy: fakeAgy })[name](args, mode), Number(process.env.FAKE_DELAY_MS));
   else ({ claude: fakeClaude, codex: fakeCodex, agy: fakeAgy })[name](args, mode);
 }
 

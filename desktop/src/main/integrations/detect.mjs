@@ -8,6 +8,7 @@ import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { expandHome, isDirectory } from './files.mjs';
 import { isRunnable } from './run.mjs';
+import { discoverTargets } from './targets.mjs';
 
 const isRunnableFile = async path => {
   try { return (await stat(path)).isFile() && (await isRunnable(path)); } catch { return false; }
@@ -107,7 +108,8 @@ export function configFolder(app, { variables, home }) {
   return configured ? expandHome(configured, home) : join(home, ...app.defaultConfigFolder);
 }
 
-/** One app's detection result: plain data for the screen. */
+/** One app's detection result: plain data for the screen. `configFolder` is the one the app's variable names (or the default); `targets`
+ *  lists every folder OpenDoc can be connected in (one for most apps, see targets.mjs). */
 export async function detectApp(app, { pathDirectories, env, home, variables }) {
   const resolved = await resolveCommand(app.command, { pathDirectories, env, home });
   const config = configFolder(app, { variables, home });
@@ -115,7 +117,8 @@ export async function detectApp(app, { pathDirectories, env, home, variables }) 
   const result = {
     id: app.id, name: app.name, kind: app.kind, command: app.command,
     present: false, canConnect: false, reason: '',
-    executable: resolved.executable, viaShim: resolved.viaShim,
+    executable: resolved.executable, viaShim: resolved.viaShim, installer: resolved.installer, website: app.website ?? null,
+    targets: await discoverTargets(app, { home, variables }),
     configFolder: config, configFolderExists: configExists,
     configVariable: app.configVariable, configFolderSource: app.configVariable && variables[app.configVariable] ? variables[app.configVariable].source : 'default',
   };

@@ -66,3 +66,7 @@ export function forgetWorkspace(config, path) {
 /** The checkbox "Upgrade my workspaces without asking from now on" (contracts: `upgradeWithoutAsking`, a boolean). */
 export const upgradesWithoutAsking = async config => (await config.read()).upgradeWithoutAsking === true;
 export const setUpgradeWithoutAsking = (config, value) => config.update({ upgradeWithoutAsking: Boolean(value) });
+
+/** The first-run "Connect your AI apps" screen (contracts: `aiAppsOffered`, a boolean). Absent means it has not been shown. */
+export const aiAppsOffered = async config => (await config.read()).aiAppsOffered === true;
+export const markAiAppsOffered = config => config.update({ aiAppsOffered: true });

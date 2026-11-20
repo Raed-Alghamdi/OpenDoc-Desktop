@@ -49,18 +49,23 @@ export function newHome(name = 'home') {
 /** Where the app keeps its data (backups, the AppImage's runtime copy) for a launch with this HOME. */
 export const dataFolder = home => join(home, '.local', 'share', 'opendoc-desktop');
 
-/** A fresh profile folder (Electron's userData, which also holds config.json). */
-export async function newProfile(name = 'profile', config) {
+/**
+ * A fresh profile folder (Electron's userData, which also holds config.json). The config says the first-run "Connect your AI apps"
+ * screen was already offered, so it does not open a second window in every test; `{ offerAiApps: true }` leaves that key out.
+ */
+export async function newProfile(name = 'profile', config, { offerAiApps = false } = {}) {
   const folder = join(workDir, `${name}-${++counter}`);
   await mkdir(folder, { recursive: true });
-  if (config) await writeFile(join(folder, 'config.json'), JSON.stringify(config));
+  const written = { ...(offerAiApps ? {} : { aiAppsOffered: true }), ...config };
+  if (Object.keys(written).length) await writeFile(join(folder, 'config.json'), JSON.stringify(written));
   return folder;
 }
 
 export const readConfig = async profile => JSON.parse(await readFile(join(profile, 'config.json'), 'utf8'));
 
-export function appArguments(profile, extra = []) {
-  return ['--ozone-platform=x11', `--user-data-dir=${profile}`, ...extra, mainEntry];
+/** `extra` goes before the entry script (Electron's own switches); `after` goes after it (the app's arguments, such as a pack to open). */
+export function appArguments(profile, extra = [], after = []) {
+  return ['--ozone-platform=x11', `--user-data-dir=${profile}`, ...extra, mainEntry, ...after];
 }
 
 function builtTarball() {
@@ -74,6 +79,10 @@ export function appEnvironment(extra = {}) {
     XDG_CONFIG_HOME: join(home, '.config'),
     XDG_DATA_HOME: join(home, '.local', 'share'),
     XDG_CACHE_HOME: join(home, '.cache'),
+    // The agent apps' config folders are scratch too: this session's own CLAUDE_CONFIG_DIR points at a real one, and the AI apps
+    // module reads these variables. (Tests that connect an app also keep the module away from the login shell: support/integrations.mjs.)
+    CLAUDE_CONFIG_DIR: join(home, '.claude'),
+    CODEX_HOME: join(home, '.codex'),
     npm_config_cache: npmCache,
     OPENDOC_DESKTOP_RUNTIME: runtimeDir,
     // `opendoc init` installs the package from the tarball the global setup built, so no test needs the network.
@@ -84,9 +93,9 @@ export function appEnvironment(extra = {}) {
 }
 
 /** Start the app with Playwright and wait for its first window. */
-export async function launchApp({ profile, env, args } = {}) {
+export async function launchApp({ profile, env, args, appArgs } = {}) {
   const environment = appEnvironment(env);
-  const app = await _electron.launch({ executablePath: electronExecutable, args: appArguments(profile, args), env: environment, timeout: 90_000 });
+  const app = await _electron.launch({ executablePath: electronExecutable, args: appArguments(profile, args, appArgs), env: environment, timeout: 90_000 });
   app.home = environment.HOME;
   app.profile = profile;
   app.dataFolder = dataFolder(environment.HOME);
@@ -102,8 +111,8 @@ export async function launchApp({ profile, env, args } = {}) {
 }
 
 /** Start the app without Playwright (for a second launch, or to kill the main process by hand). */
-export function spawnApp({ profile, env, args } = {}) {
-  return spawn(electronExecutable, appArguments(profile, args), { env: appEnvironment(env), stdio: ['ignore', 'pipe', 'pipe'] });
+export function spawnApp({ profile, env, args, appArgs } = {}) {
+  return spawn(electronExecutable, appArguments(profile, args, appArgs), { env: appEnvironment(env), stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 /**

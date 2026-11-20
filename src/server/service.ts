@@ -86,6 +86,8 @@ const readOnlyWrites: [method: string, path: RegExp][] = [
   ['POST', /^\/api\/documents\/[^/]+\/exports?$/],
   // Pack export writes output/packs and inspect stages under .opendoc/pack-uploads; neither installs anything. Only install is refused.
   ['POST', /^\/api\/packs\/(?:export|inspect)$/],
+  // Discarding a staged pack deletes only the app's own upload under .opendoc/pack-uploads, so Cancel frees its slot here too.
+  ['DELETE', /^\/api\/packs\/staged\/[^/]+$/],
   ['DELETE', /^\/api\/exports\/[a-f0-9-]+$/],
   ['POST', /^\/api\/exports\/[a-f0-9-]+\/(?:reveal|copy|restore)$/],
 ];

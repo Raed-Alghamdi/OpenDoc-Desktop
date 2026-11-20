@@ -1,7 +1,7 @@
 name: Upstream watch
 
-# Watches OpenDoc upstream and turns a new release into a new app build (plan 3.7, D15, D16). Run it by hand (workflow_dispatch);
-# the daily schedule is committed commented out and stays off until the first release has gone out by hand (contracts, "Update rules").
+# Watches OpenDoc upstream and turns a new release into a new app build. Run it by hand (workflow_dispatch);
+# the daily schedule is committed commented out and stays off until the first release has gone out by hand.
 #
 # What a run does, in order (the decisions are in desktop/release/*.mjs, with tests in desktop/tests/packaging/):
 #   prepare  fetches upstream's main and mirrors it to the `main` branch (a plain copy, never forced). When upstream's version differs,
@@ -22,7 +22,7 @@ name: Upstream watch
 #
 # A push made with the workflow's token starts no other workflow, so this one calls the checks itself. If upstream ever changes a file
 # under .github/workflows/, GitHub refuses the token's push (it has no `workflows` permission): the run stops and says so, and the
-# integrator merges that release by hand and runs this workflow with mode "hand-merged".
+# maintainer merges that release by hand and runs this workflow with mode "hand-merged".
 on:
   workflow_dispatch:
     inputs:
@@ -116,7 +116,7 @@ jobs:
             --upstream-ref "$UPSTREAM_REF" --mode "$MODE" --run-id "$GITHUB_RUN_ID" \
             --tags "$RUNNER_TEMP/tags.txt" --issues "$RUNNER_TEMP/issues.json" \
             --retry "${RETRY:-false}" --assume-minor-published "${ASSUME_MINOR_PUBLISHED:-false}"
-      # Upstream's tags are mirrored as they are (contracts, "Tag names"). Never forced, and never allowed to fail the run.
+      # Upstream's tags are mirrored as they are. Never forced, and never allowed to fail the run.
       - name: Mirror upstream's tags
         if: steps.prepare.outputs.rehearsal == 'false' && inputs.mode != 'rebuild' && inputs.mode != 'hand-merged'
         continue-on-error: true
@@ -244,7 +244,7 @@ jobs:
             --out-dir "$RUNNER_TEMP/report" --owner "$OWNER" --run-url "$RUN_URL" --target "$TARGET_BRANCH" \
             --candidate-branch "$CANDIDATE_BRANCH" "${detail[@]}"
           cat "$RUNNER_TEMP/report/issue.md" >> "$GITHUB_STEP_SUMMARY"
-      # The candidate branch has done its job once the target branch has it. A red or stopped run leaves it for the integrator.
+      # The candidate branch has done its job once the target branch has it. A red or stopped run leaves it for a maintainer.
       - name: Delete the candidate branch
         if: steps.promote.outcome == 'success'
         continue-on-error: true

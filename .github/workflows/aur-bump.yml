@@ -1,6 +1,6 @@
 name: AUR bump
 
-# Keeps the AUR package opendoc-desktop-bin in step with a published release (plan 3.7, E13). From the release's pacman file and its
+# Keeps the AUR package opendoc-desktop-bin in step with a published release. From the release's pacman file and its
 # update metadata it makes the new PKGBUILD and .SRCINFO (pkgver = OpenDoc version, pkgrel = build number, the real SHA-256 in place
 # of SKIP) and uploads them as an artifact. It pushes them to the AUR only when BOTH exist: the repository secret AUR_SSH_KEY and the
 # repository variable AUR_PUSH set to `true`. Neither exists until the first AUR publication is approved, so until

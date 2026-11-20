@@ -1,7 +1,7 @@
 // Opening a design pack from outside the page (plan E9, shell side) under Electron on the virtual display: a path in the launch
 // arguments and in a second launch, macOS's open-file (also before any workspace is open), File > Import Design Pack…, the 64 MiB
 // limit, and the refusals of Show in folder. The page here is the workspace page as the service serves it, with a listener the test
-// adds; what the Import dialog does with the pack is the page's own (src/app/PackDialogs.tsx).
+// adds from the first moment of the page; what the Import dialog does with the pack is the page's own (src/app/PackDialogs.tsx).
 import { expect, test } from '@playwright/test';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, symlink, truncate, writeFile } from 'node:fs/promises';
@@ -36,14 +36,23 @@ async function makePack(name, size = 300_000) {
   return { path, bytes, hash: sha(bytes) };
 }
 
-/** Listen the way the Import dialog does, and keep what arrives in window.__packs (name, size, hash, whether the bytes are a Uint8Array). */
-const listen = page => page.evaluate(() => {
+/** The page-side listener: it keeps what arrives in window.__packs (name, size, hash, whether the bytes are a Uint8Array). */
+function startListening() {
+  if (window.__packs) return;
   window.__packs = [];
   window.__stop = window.opendocDesktop.onImportPack(async file => {
     const digest = await crypto.subtle.digest('SHA-256', file.bytes);
     window.__packs.push({ name: file.name, size: file.bytes.length, bytes: file.bytes instanceof Uint8Array, hash: [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('') });
   });
-});
+}
+/**
+ * Listen the way the Import dialog does, from the first moment of every workspace page (right after the preload, before any of the
+ * page's own scripts). A workspace page that has the real Import dialog (src/app/main.tsx mounts it) subscribes too, and the first
+ * subscriber takes a pack that arrived before any, so a test that subscribed "in time" would race with it. The late-subscriber case
+ * is pack-import-e2e.spec.mjs: there the real dialog is the late subscriber of a pack from the command line.
+ */
+const listenFromStart = app => app.context().addInitScript(`if (location.protocol === 'app:' && location.host === 'opendoc') (${startListening})();`);
+const listen = page => page.evaluate(startListening);
 const received = page => page.evaluate(() => window.__packs);
 const workspacePage = app => app.windows().find(page => isWorkspaceUrl(page.url()));
 
@@ -55,6 +64,7 @@ test.describe.serial('a pack named on the command line, in a second launch, by o
     profile = await newProfile('pack-open-profile', { defaultWorkspace: workspace });
     first = await makePack('civic-1.0.0.opendoc.zip');
     app = await launchApp({ profile, appArgs: [first.path] });
+    await listenFromStart(app);
     await stubNative(app, {});
     await waitFor(() => workspacePage(app), { timeout: 120_000, what: 'the workspace page' });
     page = workspacePage(app);
@@ -63,7 +73,7 @@ test.describe.serial('a pack named on the command line, in a second launch, by o
 
   test.afterAll(async () => { await app?.close().catch(() => {}); });
 
-  test('a .opendoc.zip in the launch arguments reaches the page that subscribes late, whole and with its name', async () => {
+  test('a .opendoc.zip in the launch arguments reaches the page, whole and with its name', async () => {
     await listen(page);
     await waitFor(async () => (await received(page)).length === 1, { what: 'the pack' });
     expect(await received(page)).toEqual([{ name: 'civic-1.0.0.opendoc.zip', size: first.bytes.length, bytes: true, hash: first.hash }]);
@@ -148,6 +158,7 @@ test('a pack opened while no workspace is open waits, the picker says so, and th
   const profile = await newProfile('pack-wait-profile');
   const pack = await makePack('waiting.opendoc.zip', 150_000);
   const app = await launchApp({ profile, appArgs: [pack.path] });
+  await listenFromStart(app);
   try {
     await stubNative(app, { openDialog: { canceled: false, filePaths: [workspace] } });
     const picker = await app.firstWindow();
@@ -169,6 +180,7 @@ test('open-file that arrives before the workspace window exists is held until th
   const profile = await newProfile('pack-early-profile', { defaultWorkspace: workspace });
   const pack = await makePack('early.opendoc.zip', 80_000);
   const app = await launchApp({ profile });
+  await listenFromStart(app);
   try {
     // The workspace is still opening (its service host is starting) when the event comes.
     await openFile(app, pack.path);

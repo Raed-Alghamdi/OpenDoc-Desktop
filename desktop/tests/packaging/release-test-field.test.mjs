@@ -121,7 +121,7 @@ function artifacts(scratch, asar) {
   pack(path.join(folder, 'opendoc-desktop-0.6.1-3-arm64.zip'), path.join(scratch, 'mac-root'), 'opendoc-desktop.app');
   const appImage = path.join(folder, 'opendoc-desktop-x86_64.AppImage');
   writeFileSync(appImage, `#!${process.execPath}\nconst fs = require('fs');\nif (process.argv[2] !== '--appimage-extract') process.exit(1);\nfs.mkdirSync('squashfs-root/resources', { recursive: true });\nfs.copyFileSync(${JSON.stringify(asar)}, 'squashfs-root/resources/app.asar');\n`);
-  chmodSync(appImage, 0o755);
+  chmodSync(appImage, 0o644); // not executable: actions/download-artifact drops the mode bits, and the release job reads such files
   writeFileSync(path.join(folder, 'opendoc-desktop-0.6.1-3-arm64.dmg'), 'not a real dmg');
   writeFileSync(path.join(folder, 'latest-linux.yml'), 'version: 0.6.1\n');
   return folder;

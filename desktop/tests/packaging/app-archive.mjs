@@ -2,7 +2,7 @@
 // An installer holds app.asar; app.asar is Electron's archive format (a header with the file table, then the files). Only what is
 // needed is read: no extraction of the whole app, and nothing is run except the AppImage runtime's own extract flag.
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { testBuildField } from '../../runtime/test-build.mjs';
@@ -52,8 +52,12 @@ const inZip = (file) => {
 const inAppImage = (file) => {
   const scratch = mkdtempSync(path.join(os.tmpdir(), 'opendoc-appasar-'));
   try {
-    // The AppImage runtime's own extract flag: it unpacks files and starts nothing.
-    run(path.resolve(file), ['--appimage-extract', 'resources/app.asar'], { cwd: scratch, timeout: 120_000 });
+    // The AppImage runtime's own extract flag: it unpacks files and starts nothing. It runs from an executable copy, because a file
+    // from actions/download-artifact has lost its mode bits (the release job reads downloaded files).
+    const copy = path.join(scratch, 'artifact.AppImage');
+    copyFileSync(file, copy);
+    chmodSync(copy, 0o755);
+    run(copy, ['--appimage-extract', 'resources/app.asar'], { cwd: scratch, timeout: 120_000 });
     return readFileSync(path.join(scratch, 'squashfs-root', 'resources', 'app.asar'));
   } finally { rmSync(scratch, { recursive: true, force: true }); }
 };

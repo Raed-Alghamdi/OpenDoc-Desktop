@@ -117,13 +117,31 @@ test.describe.serial('a pack named on the command line, in a second launch, by o
     expect((await received(page))[2]).toMatchObject({ name: 'from-finder.opendoc.zip', hash: pack.hash });
   });
 
+  test('open-file takes only a .zip: any other file a program names to the app is not read and nothing reaches the page', async () => {
+    const folder = join(workDir, `packs-${++counter}`);
+    await mkdir(folder, { recursive: true });
+    const other = [join(folder, 'notes.txt'), join(folder, 'photo.png'), join(folder, 'archive.zip.txt'), join(folder, 'no-extension')];
+    for (const path of other) await writeFile(path, 'not a pack');
+    const before = (await received(page)).length;
+    const readsBefore = (await nativeCalls(app)).messages.length;
+    for (const path of [...other, folder, join(folder, 'missing.pdf'), '/etc/hostname']) await openFile(app, path);
+    await new Promise(accept => setTimeout(accept, 700));
+    expect(await received(page)).toHaveLength(before);
+    expect((await nativeCalls(app)).messages).toHaveLength(readsBefore); // and no error box either: the event is dropped where it arrives
+    // A .zip still goes through the same event (the next test counts on the packs that came before).
+    const zip = await makePack('after-others.opendoc.zip', 40_000);
+    await openFile(app, zip.path);
+    await waitFor(async () => (await received(page)).length === before + 1, { what: 'the zip after the others' });
+    expect((await received(page)).at(-1)).toMatchObject({ name: 'after-others.opendoc.zip', hash: zip.hash });
+  });
+
   test('File > Import Design Pack… asks for a .opendoc.zip and sends the chosen file', async () => {
     expect(await menuItem(app, ['File', 'Import Design Pack…'])).toEqual({ enabled: true });
     const pack = await makePack('chosen.opendoc.zip', 70_000);
     await stubNative(app, { openDialog: { canceled: false, filePaths: [pack.path] } });
     await clickItem(app, ['File', 'Import Design Pack…']);
-    await waitFor(async () => (await received(page)).length === 4, { what: 'the chosen pack' });
-    expect((await received(page))[3]).toMatchObject({ name: 'chosen.opendoc.zip', hash: pack.hash });
+    await waitFor(async () => (await received(page)).length === 5, { what: 'the chosen pack' });
+    expect((await received(page))[4]).toMatchObject({ name: 'chosen.opendoc.zip', hash: pack.hash });
     const [dialogOptions] = (await nativeCalls(app)).opens;
     expect(dialogOptions.title).toBe('Import a design pack');
     expect(dialogOptions.properties).toEqual(['openFile']);
@@ -132,7 +150,7 @@ test.describe.serial('a pack named on the command line, in a second launch, by o
     await stubNative(app, { openDialog: { canceled: true, filePaths: [] } });
     await clickItem(app, ['File', 'Import Design Pack…']);
     await new Promise(accept => setTimeout(accept, 500));
-    expect(await received(page)).toHaveLength(4);
+    expect(await received(page)).toHaveLength(5);
   });
 
   test('a pack over 64 MiB is refused with the app\'s own message and nothing reaches the page; a file that is gone says so', async () => {
@@ -149,7 +167,7 @@ test.describe.serial('a pack named on the command line, in a second launch, by o
     await waitFor(async () => (await nativeCalls(app)).messages.length === 2, { what: 'the second message' });
     expect((await nativeCalls(app)).messages[1].message).toContain('gone.opendoc.zip could not be opened. It was not found.');
     await new Promise(accept => setTimeout(accept, 500));
-    expect(await received(page)).toHaveLength(4);
+    expect(await received(page)).toHaveLength(5);
   });
 });
 

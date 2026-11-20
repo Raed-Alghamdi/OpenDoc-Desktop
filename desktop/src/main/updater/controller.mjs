@@ -315,7 +315,7 @@ export class UpdateController {
     switch (result.status) {
       case 'downloaded':
         if (installsOnQuit) {
-          if (manual) await this.#say('info', 'An update is ready', `${describeInfo(result.info)} has been downloaded. It is installed when you quit opendoc-desktop, and the next start runs it.`);
+          if (manual) await this.#say('info', 'An update is ready', `${describeInfo(result.info)} has been downloaded. It is installed when you quit opendoc-desktop, and the next start runs it.${this.#feedNote()}`);
         } else await this.#offerRestart(result.info);
         break;
       case 'available': {
@@ -353,6 +353,11 @@ export class UpdateController {
     if (answer.response === 0) this.openExternal(releasePageUrl(this.repository, info.version, parseBuild(info.build) ?? 1));
   }
 
+  /** What the install prompts add when the update comes from an address that is not the built-in one: where it comes from. */
+  #feedNote() {
+    return this.feedLabel ? `\n\nThis update comes from ${this.feedLabel}, the update address set in config.json. Install it only if you set that address.` : '';
+  }
+
   async #offerRestart(info) {
     if (this.offering) return;
     this.offering = true;
@@ -362,7 +367,7 @@ export class UpdateController {
         type: 'info',
         title,
         message: `A new version is ready: ${describeInfo(info)}`,
-        detail: `It has been downloaded and checked. opendoc-desktop restarts to install it.${mac ? '' : ' Your system asks for your password, because the app is installed for all users.'}${this.feedLabel ? `\n\nThis update comes from ${this.feedLabel}, the update address set in config.json. Install it only if you set that address.` : ''}`,
+        detail: `It has been downloaded and checked. opendoc-desktop restarts to install it.${mac ? '' : ' Your system asks for your password, because the app is installed for all users.'}${this.#feedNote()}`,
         buttons: ['Restart to Update', 'Later'],
         defaultId: 0,
         cancelId: 1,

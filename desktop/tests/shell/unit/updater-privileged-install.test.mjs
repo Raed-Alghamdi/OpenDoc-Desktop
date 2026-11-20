@@ -34,16 +34,6 @@ test('the pkexec command line: one call, no internal agent, the file, its hex ch
   assert.throws(() => installScript('snap'), /No installer/);
 });
 
-test('a feed that is not the built-in address is named in the script\'s own name, which the password prompt shows', async () => {
-  const { file, sha512 } = await packageFile();
-  const plain = pkexecArguments({ type: 'deb', file, sha512 });
-  assert.equal(plain[4], 'opendoc-desktop-update');
-  const named = pkexecArguments({ type: 'deb', file, sha512, feedLabel: 'https://updates.example.org:8443' });
-  assert.equal(named[4], 'opendoc-desktop-update from https://updates.example.org:8443');
-  assert.deepEqual(named.slice(5), [file, sha512Hex(sha512), 'deb'], 'the file, checksum and extension stay where the script reads them');
-  assert.equal(pkexecArguments({ type: 'deb', file, sha512, feedLabel: 'https://a.example\n; rm -rf /' })[4], 'opendoc-desktop-update from https://a.example;rm-rf/', 'no spaces or control characters from the label');
-});
-
 test('the install step of each type', () => {
   assert.match(installScript('deb'), /dpkg -i "\$pkg" \|\| apt-get install -f -y/);
   assert.match(installScript('pacman'), /pacman -U --noconfirm "\$pkg"/);

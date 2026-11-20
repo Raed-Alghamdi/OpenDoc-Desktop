@@ -50,19 +50,13 @@ export function sha512Hex(base64) {
   return bytes.length === 64 && bytes.toString('base64') === base64 ? bytes.toString('hex') : null;
 }
 
-/**
- * The arguments for pkexec. --disable-internal-agent: without a graphical agent pkexec fails instead of asking in a terminal.
- * polkit's prompt shows the command line, so a feed that is not the built-in address is named in the script's own name ($0).
- */
-export function pkexecArguments({ type, file, sha512, feedLabel = null }) {
+/** The arguments for pkexec. --disable-internal-agent: without a graphical agent pkexec fails instead of asking in a terminal. */
+export function pkexecArguments({ type, file, sha512 }) {
   const hex = sha512Hex(sha512);
   if (!hex) throw new Error('The release has no usable SHA-512 for this file.');
   if (!isAbsolute(file)) throw new Error('The downloaded file has no absolute path.');
-  return ['--disable-internal-agent', '/bin/sh', '-c', installScript(type), scriptName(feedLabel), file, hex, extname(basename(file)).slice(1) || type];
+  return ['--disable-internal-agent', '/bin/sh', '-c', installScript(type), 'opendoc-desktop-update', file, hex, extname(basename(file)).slice(1) || type];
 }
-
-/** `opendoc-desktop-update`, or with the feed's words: `opendoc-desktop-update from https://updates.example.org`. */
-export const scriptName = feedLabel => (feedLabel ? `opendoc-desktop-update from ${String(feedLabel).replace(/[^\x21-\x7e]/g, '').slice(0, 200)}` : 'opendoc-desktop-update');
 
 /** Turn pkexec's exit into what the app does next: installed, cancelled (keep the download, offer again) or failed. */
 export function classifyExit(code, stderr = '') {
@@ -86,9 +80,9 @@ export const safePath = value => String(value ?? '').split(delimiter).filter(ent
  * Resolves { outcome: 'installed' | 'cancelled' | 'failed', reason?, message?, code }.
  * `spawn` and `env` are for tests (a fake pkexec first on PATH).
  */
-export function installPackage({ type, file, sha512, feedLabel = null, spawn = nodeSpawn, env = process.env, log = () => {} }) {
+export function installPackage({ type, file, sha512, spawn = nodeSpawn, env = process.env, log = () => {} }) {
   let args;
-  try { args = pkexecArguments({ type, file, sha512, feedLabel }); }
+  try { args = pkexecArguments({ type, file, sha512 }); }
   catch (error) { return Promise.resolve({ outcome: 'failed', reason: 'input', message: error.message, code: null }); }
   return new Promise(resolve => {
     let child;

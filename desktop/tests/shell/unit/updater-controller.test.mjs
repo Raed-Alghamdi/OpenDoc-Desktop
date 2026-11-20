@@ -138,6 +138,21 @@ test('an https address is allowed in an installed app, and the restart prompt na
   assert.match(github.shown.find(options => /ready/.test(options.message)).detail, /comes from https:\/\/github\.com\/Someone\/Fork/);
 });
 
+test('the AppImage notice that an update is ready also names a feed that is not the built-in address', async () => {
+  const custom = await setup({ type: 'appimage', allowLoopbackFeed: false, config: { updateFeed: 'https://updates.example.org/opendoc/' }, script: { check: downloadedUpdate('0.6.1', 2) } });
+  await custom.controller.start();
+  await settle();
+  await custom.controller.idle();
+  await custom.controller.checkNow();
+  assert.match(custom.shown.find(options => options.message === 'An update is ready').detail, /comes from https:\/\/updates\.example\.org, the update address set in config\.json/);
+  const plain = await setup({ type: 'appimage', script: { check: downloadedUpdate('0.6.1', 2) } });
+  await plain.controller.start();
+  await settle();
+  await plain.controller.idle();
+  await plain.controller.checkNow();
+  assert.doesNotMatch(plain.shown.find(options => options.message === 'An update is ready').detail, /comes from/);
+});
+
 test('the built-in address (none set, or the packaged repository named in config.json) shows no feed in the prompt', async () => {
   const none = await setup({ script: { check: downloadedUpdate('0.6.1', 2) }, answers: 1 });
   await none.controller.start();

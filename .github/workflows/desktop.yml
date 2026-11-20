@@ -1,6 +1,6 @@
 name: Desktop
 
-# Builds the opendoc-desktop installers: pacman, deb, rpm and AppImage on Linux; zip and dmg for Apple Silicon and Intel Macs.
+# Builds the opendoc-desktop installers: pacman, deb, rpm and AppImage on Linux; zip and dmg for Apple Silicon Macs (Intel Macs are not built).
 # A `desktop-v<version>-<build>` tag (for example desktop-v0.6.1-2) also creates a DRAFT release holding every file; publishing it
 # stays a manual step. Other runs build and keep the files as artifacts for 5 days, and publish nothing.
 # upstream-watch.yml calls this workflow (workflow_call) for the merge it prepared: `ref` is the commit to build, `build` its build
@@ -81,6 +81,10 @@ jobs:
         run: node desktop/tests/shell/run.mjs --unit
       - name: Build the installers
         run: node desktop/runtime/dist.mjs ${{ steps.meta.outputs.stub }} --linux pacman deb rpm AppImage --publish never
+      # The unpacked app: the agent integrations with their dot folders, through the source check script (I2).
+      - name: Check the unpacked app
+        run: node desktop/tests/packaging/check-packaged.mjs --require linux
+      # Each installer: version, build number, update files, the integrations and the design pack file type (E9).
       - name: Check the installers
         run: node desktop/tests/packaging/check-artifacts.mjs --require-rpm
       - name: Test the runtime inside the unpacked app
@@ -110,8 +114,8 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
-  # The agent plugin files (desktop/integrations/, stream I). Needs Node 24 only: no install. The check script arrives with that
-  # stream's branch; the step does nothing until the file exists, so remove the guard once it has merged.
+  # The agent plugin files (desktop/integrations/, stream I). Needs Node 24 only: no install. The pull_request path filter above
+  # (desktop/**) covers the folder; the installer jobs check the packaged copy as well.
   integrations:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -124,23 +128,10 @@ jobs:
         with:
           node-version-file: .node-version
       - name: Check the plugin files
-        run: |
-          if [ -f desktop/integrations/check.mjs ]; then
-            node desktop/integrations/check.mjs
-          else
-            echo "desktop/integrations/check.mjs is not here yet; skipped."
-          fi
+        run: node desktop/integrations/check.mjs
 
   mac:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-latest
-            arch: arm64
-          - runner: macos-15-intel
-            arch: x64
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
@@ -172,7 +163,11 @@ jobs:
         run: node desktop/tests/shell/run.mjs --unit
       # Ad-hoc signed (identity "-", no notarization), as the config says; the first open on a Mac needs "Open Anyway" (plan 3.5).
       - name: Build zip and dmg
-        run: node desktop/runtime/dist.mjs ${{ steps.meta.outputs.stub }} --mac zip dmg --${{ matrix.arch }} --publish never
+        run: node desktop/runtime/dist.mjs ${{ steps.meta.outputs.stub }} --mac zip dmg --arm64 --publish never
+      # The unpacked app: the agent integrations with their dot folders (I2) and the design pack document type, which must not claim
+      # plain ZIP files (E9).
+      - name: Check the unpacked app
+        run: node desktop/tests/packaging/check-packaged.mjs --require mac
       # The packaged app (production fuses) in the runner's own session: library, PDF, comment, export, `opendoc --version`, quit.
       - name: Smoke test the packaged app
         run: node desktop/tests/smoke/run.mjs
@@ -180,7 +175,7 @@ jobs:
         run: ls -l desktop/dist | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         with:
-          name: desktop-mac-${{ matrix.arch }}
+          name: desktop-mac-arm64
           path: |
             desktop/dist/*.zip
             desktop/dist/*.dmg
@@ -206,10 +201,9 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: release
-      - name: Merge the macOS update metadata
-        run: |
-          node desktop/runtime/merge-mac-metadata.mjs release/latest-mac.yml release/desktop-mac-arm64/latest-mac.yml release/desktop-mac-x64/latest-mac.yml
-          rm release/desktop-mac-arm64/latest-mac.yml release/desktop-mac-x64/latest-mac.yml
+      # One macOS build, so its update metadata is the release's (the updater reads release/latest-mac.yml).
+      - name: Place the macOS update metadata
+        run: mv release/desktop-mac-arm64/latest-mac.yml release/latest-mac.yml
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}

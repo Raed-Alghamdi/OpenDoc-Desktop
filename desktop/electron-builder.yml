@@ -37,6 +37,10 @@ extraResources:
   - from: resources/cli
     to: cli
     filter: ["opendoc-appimage.sh"]
+  # The agent integrations (I2): the module copies this folder to the user's data folder and registers that copy.
+  - from: integrations
+    to: integrations
+    filter: ["**/*"]
 # Electron fuses (plan 3.5). runAsNode stays on: the shim, the service host and render children need it.
 electronFuses:
   runAsNode: true
@@ -53,6 +57,9 @@ linux:
   icon: resources/icons/linux
   category: Office
   synopsis: OpenDoc on the desktop
+  # The .desktop file's MimeType line (E9). The type itself is defined by resources/mime/opendoc-desktop.xml, which the three fpm
+  # targets below install; an AppImage cannot install it (docs/DESKTOP.md says what that means).
+  mimeTypes: [application/x-opendoc-pack]
   description: A self-contained desktop app for OpenDoc, built on the original OpenDoc project.
   maintainer: opendoc-desktop contributors <Raed-Alghamdi@users.noreply.github.com>
   vendor: opendoc-desktop contributors
@@ -73,6 +80,7 @@ deb:
     - resources/icons/opendoc-desktop.svg=/usr/share/icons/hicolor/scalable/apps/opendoc-desktop.svg
     - resources/icons/opendoc-desktop-symbolic.svg=/usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg
     - resources/cli/opendoc=/usr/bin/opendoc
+    - resources/mime/opendoc-desktop.xml=/usr/share/mime/packages/opendoc-desktop.xml
 pacman:
   # electron-builder's default list pulls http-parser and libappindicator-gtk3, which a bundled Electron does not need.
   depends: [gtk3, nss, libnotify, libxss, xdg-utils, at-spi2-core]
@@ -81,12 +89,14 @@ pacman:
     - resources/icons/opendoc-desktop.svg=/usr/share/icons/hicolor/scalable/apps/opendoc-desktop.svg
     - resources/icons/opendoc-desktop-symbolic.svg=/usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg
     - resources/cli/opendoc=/usr/bin/opendoc
+    - resources/mime/opendoc-desktop.xml=/usr/share/mime/packages/opendoc-desktop.xml
 rpm:
   artifactName: ${name}-${version}-${buildNumber}.${arch}.${ext}
   fpm:
     - resources/icons/opendoc-desktop.svg=/usr/share/icons/hicolor/scalable/apps/opendoc-desktop.svg
     - resources/icons/opendoc-desktop-symbolic.svg=/usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg
     - resources/cli/opendoc=/usr/bin/opendoc
+    - resources/mime/opendoc-desktop.xml=/usr/share/mime/packages/opendoc-desktop.xml
 appImage:
   # No version in the name (D-g): electron-updater then replaces the file in place, so launchers and the opendoc shim keep working.
   artifactName: ${productName}-${arch}.${ext}
@@ -99,6 +109,23 @@ mac:
   identity: "-"
   notarize: false
   hardenedRuntime: true
+  # E9: a document type for design packs. macOS matches a file on its last extension only, so a `name.opendoc.zip` is a plain ZIP to
+  # Launch Services and double-clicking it still goes to Archive Utility; this entry makes the app a valid target for Open With and for
+  # `open -a`, and it works by itself if a later macOS honours the double extension. It never lists `zip`, `public.zip-archive` or any
+  # system type, so ordinary ZIP files are not claimed (tests/packaging/file-type.test.mjs checks that).
+  extendInfo:
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: OpenDoc design pack
+        CFBundleTypeRole: Viewer
+        LSHandlerRank: Owner
+        LSItemContentTypes: [io.github.ryanyahya.OpenDocDesktop.pack]
+    UTExportedTypeDeclarations:
+      - UTTypeIdentifier: io.github.ryanyahya.OpenDocDesktop.pack
+        UTTypeDescription: OpenDoc design pack
+        UTTypeConformsTo: [public.zip-archive]
+        UTTypeTagSpecification:
+          public.filename-extension: [opendoc.zip]
+          public.mime-type: [application/x-opendoc-pack]
   gatekeeperAssess: false
   # runtime/dist.mjs sets the real value from the runtime's build-info.json.
   bundleVersion: "1"

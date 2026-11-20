@@ -1,7 +1,7 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { fixture, projectRoot } from './helpers';
@@ -33,6 +33,10 @@ test('export history list shows what the Previous exports dialog shows, newest f
     // A file the command-line export wrote is adopted, and says where it came from.
     await mkdir(resolve(f.root, 'output'), { recursive: true });
     await writeFile(resolve(f.root, 'output/proof.pdf'), pdf.toString() + ' from the command line');
+    // An adopted file is dated by its modification time, and the file system's clock is coarser than Date.now(), so a file
+    // written a moment after Second.pdf can carry an earlier time. Date it plainly later, as a later command-line export would be.
+    const later = new Date(Date.now() + 2_000);
+    await utimes(resolve(f.root, 'output/proof.pdf'), later, later);
 
     await runExportHistoryCli(['history', 'list', 'proof', '--json'], f.root);
     const { documentId, exports } = JSON.parse(out()[0]);

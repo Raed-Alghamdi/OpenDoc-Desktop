@@ -50,7 +50,7 @@ Use the existing image tool or a suitable chart/diagram tool to produce the visu
 npx opendoc media import my-report overview --file /path/to/image.png --title "Overview" --description "The main stages." --kind diagram
 ```
 
-Media imports copy a PNG or JPEG and refuse to overwrite an existing media folder; `--kind` defaults to `image`. Media is added by the agent from chat attachments, generated visuals, or downloaded images. The app browses these document-owned folders and edits their details; it has no media upload form. An ordinary photograph can consist of only an image and metadata. For generated work, add the prepared data and recipe before recording it. Add provenance notes when useful. Editing a title, description, or other metadata in the app never records a generated visual as reviewed.
+Media imports copy a PNG or JPEG and refuse to overwrite an existing media folder; `--kind` defaults to `image`. Media is added by the agent from chat attachments, generated visuals, or downloaded images. The app browses these document-owned folders and edits their details; it has no media upload form. An ordinary photograph can consist of only an image and metadata. For generated work, add the prepared data and recipe before recording it. Add provenance notes when useful. Editing a title, description, or other metadata in the app never records a generated visual as reviewed. Your agent can make the same edits with `npx opendoc media edit <document> <media-id> --title ... --alt ...` ([options](HEADLESS.md#edit-a-media-items-details)).
 
 After generating, review the actual image for values, labels, scales, units, and provenance. Then record the reviewed inputs:
 

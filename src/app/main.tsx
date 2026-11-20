@@ -53,6 +53,7 @@ import "./style.css";
 const AssetsBrowser = lazyView(() => import("./AssetsBrowser").then(module => module.AssetsBrowser));
 const TemplatesBrowser = lazyView(() => import("./TemplatesBrowser").then(module => module.TemplatesBrowser));
 const ThemesBrowser = lazyView(() => import("./ThemesBrowser").then(module => module.ThemesBrowser));
+const PackImportHost = lazyView(() => import("./PackDialogs").then(module => module.PackImportHost));
 const Reader = lazyView(() => import("./Reader").then(module => module.Reader));
 
 /** The view and item from the hash; library filters in its query stay with the view they belong to. */
@@ -352,6 +353,8 @@ function App() {
     }} onDeleted={() => { setManifest(previous => ({ ...previous, projects: previous.projects.filter(project => project.id !== projectDialog?.project?.id) })); go("library"); void refresh(); }} />
     <DetailsDialog target={tagTarget} manifest={tagState.manifest} connected={connected} onClose={() => setTagTarget(null)} onChange={next => { setTagState({ manifest: next }); void refresh(); }} />
     <ExportHistoryDialog document={exportDocument} connected={connected} onClose={() => setExportDocument(null)} />
+    {/* One Import dialog for every view: a pack opened from Documents, dropped on the window or delivered by the desktop app. */}
+    <LoadBoundary compact connected={connected}><Suspense fallback={null}><PackImportHost connected={connected} /></Suspense></LoadBoundary>
     <DocumentActionDialog selection={documentAction} connected={connected} onClose={() => setDocumentAction(null)} onRenamed={(id, name) => {
       setDocuments(previous => previous.map(document => document.id === id ? { ...document, name } : document)); void refresh();
     }} onDeleted={(document, restoreId) => {

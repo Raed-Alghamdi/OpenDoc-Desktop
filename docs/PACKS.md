@@ -4,6 +4,38 @@ An **OpenDoc pack** is a regular ZIP named `name.opendoc.zip`. It moves editable
 
 Ask your agent to “share this theme” or “install this design pack.” The [opendoc-share skill](../.agents/skills/opendoc-share/SKILL.md) handles selection, review, and installation. These commands are also available directly.
 
+## In the app
+
+Normal OpenDoc (in the browser, or in the desktop app) has the same two actions on screen, in the **Themes** and **Templates** galleries. Headless has no screens; use the commands below. Both routes make and read the same file, and the rules in the rest of this page apply to both.
+
+**Export a pack**
+
+1. Choose **Export pack**. A bar appears and every card gets a tick box.
+2. Tick the designs to share. The choice carries over between the two galleries, so one pack can hold themes and templates. A pack also carries what its designs depend on, as the command does.
+3. Choose **Export…**. Give the pack a name. Under **More details** you can set the version (it starts at `1.0.0`), an author, and a license, the same fields as `--pack-version`, `--author` and `--license`. There is no separate description field.
+4. Choose **Export pack**. OpenDoc checks and renders each design, which can take a minute, then shows where the file is: `output/packs/<name>-<version>.opendoc.zip` in the workspace, with a **Copy path** button. The pack's SHA-256 is shown too, to send with the file.
+
+A name becomes the pack ID by lowercasing it and joining its words with hyphens. A name with no Latin letters or digits keeps the first design's ID in the file name. Export never replaces an existing file: if the name and version are already used, change one of them.
+
+**Import a pack**
+
+1. Choose **Import pack** in either gallery, then choose the `.opendoc.zip` file. Import also works from any other screen, Documents and the reader included: drop the file anywhere on the window and the same dialog opens, already checking it.
+2. OpenDoc checks the file without running anything from it, and shows the pack's name, version, author and license, the designs inside, the sender's preview PDFs, the file list, and which files are new here.
+3. If the pack can't go in, the dialog says why and offers no Install button:
+   - a **conflict**: a file with the same path already exists here with different contents. Nothing is overwritten, ever. Ask the sender to export with different design IDs, or import into another workspace;
+   - a **version** this workspace can't take (the rules under [Format version 1](#format-version-1));
+   - a pack whose files are all here already, which has nothing to add.
+4. Otherwise, tick **I trust where this pack came from, and I want OpenDoc to run its code**. **Install pack** stays disabled until you do. Themes and templates are TypeScript, so installing runs the sender's code as described under [Inspect and install](#inspect-and-install); hashes and previews don't prove who wrote it.
+5. Choose **Install pack**. The dialog then lists what was added, with links to each design.
+
+A pack you have checked and then don't install doesn't linger. **Cancel**, **Close** (or Escape), **Choose another pack**, and choosing a new file after a check all tell OpenDoc to delete the checked copy at once, so its place is free for the next one. OpenDoc keeps at most 8 checked packs at a time and deletes any still waiting after an hour; the only way to meet that limit is to check more than 8 packs without ever answering the dialog (for example, by closing the browser tab each time). The delete touches only OpenDoc's own staging folder under `.opendoc/pack-uploads/`, never the file you chose, and it is allowed while a workspace is read-only.
+
+The new designs show in Themes and Templates at once, with no restart. Installing never changes a project default or an existing document, and a failed install removes what it added.
+
+A workspace opened read-only (the desktop app says why in its banner) can export and inspect, but not install.
+
+**Command line and app together.** `npx opendoc packs install` refuses while normal OpenDoc or the desktop app has the workspace open; use **Import pack** there instead. `packs inspect` and `packs install --dry-run` still work in that case.
+
 ## Export
 
 ```sh
@@ -44,7 +76,7 @@ Inspection verifies the archive and all file hashes without loading authored cod
 
 Installing runs the pack's theme code inside the process that does the install, not in a separate sandbox: loading a theme imports its module there, as every theme in a workspace already is. For the CLI that is the `opendoc` command itself; when a running service or the desktop app installs a pack (Import), it is the service's own process, which in the desktop app is the service host process started from the app's executable, with the workspace's files and the user's permissions. Inspection and a dry run never load a pack's code, but Import does as soon as the trust box is ticked, so tick it only for a source you trust.
 
-Stop normal OpenDoc with Ctrl-C before installation. This prevents the running catalog from discovering partially installed source. Headless has no service to stop.
+With the command line, stop normal OpenDoc with Ctrl-C before installation. This prevents the running catalog from discovering partially installed source. Headless has no service to stop. (Import in the app does this for you: it pauses the catalog while it installs.)
 
 ```sh
 npx opendoc packs install ./acme-design.opendoc.zip --trust --json
@@ -54,7 +86,7 @@ npx opendoc start  # Normal OpenDoc only
 
 Installation checks the complete plan before rendering. It stages the payload, checks asset integrity and dependency completeness, typechecks the source, renders the selected specimens, and rechecks destination conflicts before writing. Files are added exclusively; identical files are reused, and a conflicting ID or file aborts without replacing existing content. An existing theme/template ID must match the whole included design, not merely a subset. Failed publication removes the files it just added while preserving unrelated files. A process killed during publication can leave added files; no crash-atomic or automatic-upgrade guarantee is made.
 
-Installed files are ordinary editable workspace files. They appear in Themes and Templates on the next start; installation does not change project defaults or bind designs to existing documents. There is no pack auto-update, overwrite, or automatic ID-renaming mode. Resolve a conflict in the sender's source and export with distinct IDs, or install into another workspace. Do not hand-edit archive paths: theme IDs, source imports, asset bindings, and template starters must agree.
+Installed files are ordinary editable workspace files. They appear in Themes and Templates on the next start (at once, when installed with Import in the app); installation does not change project defaults or bind designs to existing documents. There is no pack auto-update, overwrite, or automatic ID-renaming mode. Resolve a conflict in the sender's source and export with distinct IDs, or install into another workspace. Do not hand-edit archive paths: theme IDs, source imports, asset bindings, and template starters must agree.
 
 ## Format version 1
 

@@ -398,6 +398,8 @@ export const covered: Record<string, string | string[]> = {
   'POST /api/documents': 'create',
   'GET /api/starters': 'create',
   'POST /api/templates/*/documents': 'create',
+  'GET /api/documents': 'documents list',
+  'GET /api/documents/*': 'documents show',
   'PATCH /api/documents/*': 'documents rename',
   'POST /api/documents/*/duplicate': 'documents duplicate',
   'DELETE /api/documents/*': 'documents delete',
@@ -423,6 +425,7 @@ export const covered: Record<string, string | string[]> = {
 
   'GET /api/materials': 'media list',
   'POST /api/materials/*/import': 'media import',
+  'PATCH /api/materials/*/meta': 'media edit',
 
   'GET /api/themes': 'themes list',
   'GET /api/themes/*/preview': 'themes preview',
@@ -478,10 +481,7 @@ export const exempt: Record<string, string> = {
   'GET /api/assets/logo/*/file': 'Bytes for the page: a logo file; `assets inspect` gives the files.',
   'GET /api/assets/font/*/file': 'Bytes for the page: a font file; `assets inspect` gives the files.',
   'GET /api/packs/staged/*/previews/*': 'Bytes for the page: a staged pack\'s preview PDF; `packs inspect` reads the pack file itself.',
-
-  'GET /api/documents': 'No CLI command yet: lists documents with their live render state; the CLI reads documents/, `projects list` and `tags find`.',
-  'GET /api/documents/*': 'No CLI command yet: one document\'s live render state; `review` and `check` render from the source.',
-  'PATCH /api/materials/*/meta': 'No CLI command yet: edits a media item\'s title, alt text and sources; `media record` only records generation inputs.',
+  'DELETE /api/packs/staged/*': 'UI-only cleanup of the app\'s own staging; the CLI has no staging.',
 
   'GET /api/documents/*/comments/*': sameAs('GET /api/documents/*/comments'),
   'GET /api/documents/*/comments/*/restore': sameAs('GET /api/documents/*/comments'),

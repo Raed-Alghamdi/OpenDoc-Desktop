@@ -1,4 +1,4 @@
-// The packaged app under test (E10): where it is, which fuses it carries, which processes belong to it, and how to start it so
+// The packaged app under test: where it is, which fuses it carries, which processes belong to it, and how to start it so
 // that Playwright can drive its window. The app is started by hand and attached to over the DevTools protocol, because the
 // shipped build has the Node inspector switched off (the EnableNodeCliInspectArguments fuse), and Playwright's `_electron.launch`
 // reaches the main process through that inspector. The page API is all these tests need.

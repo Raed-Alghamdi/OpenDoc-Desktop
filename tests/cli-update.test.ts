@@ -575,7 +575,7 @@ async function appRecord(root: string, pid: number) {
   await writeFile(join(root, '.opendoc/desktop.json'), JSON.stringify({ pid, startedAt: '2026-01-01T00:00:00.000Z', version: '0.3.1', build: 1 }));
 }
 
-test('C3: update beside the desktop app says to update the app, before staging anything', async () => {
+test('update beside the desktop app says to update the app, before staging anything', async () => {
   await fixture(async (root, container) => {
     await appRecord(root, process.pid);
     const before = await snapshot(root), executor = fakeNpm();
@@ -588,7 +588,7 @@ test('C3: update beside the desktop app says to update the app, before staging a
   });
 });
 
-test('C3: an app that opens the workspace while dependencies install blocks final activation', async () => {
+test('an app that opens the workspace while dependencies install blocks final activation', async () => {
   await fixture(async root => {
     let expected: Awaited<ReturnType<typeof snapshot>> | undefined;
     await assert.rejects(updateWorkspace(root, {}, {
@@ -598,7 +598,7 @@ test('C3: an app that opens the workspace while dependencies install blocks fina
   });
 });
 
-test('C3: a desktop record whose process is gone does not block an update', async () => {
+test('a desktop record whose process is gone does not block an update', async () => {
   await fixture(async root => {
     const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
     const pid = child.pid;
@@ -609,7 +609,7 @@ test('C3: a desktop record whose process is gone does not block an update', asyn
   });
 });
 
-test('C3: update refuses beside an unreadable desktop record, naming the file', async () => {
+test('update refuses beside an unreadable desktop record, naming the file', async () => {
   await fixture(async root => {
     await writeFile(join(root, '.opendoc/desktop.json'), 'not json');
     const before = await snapshot(root);

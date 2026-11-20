@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The decisions behind upstream-watch.yml, kept out of the workflow so each row can be tested (contracts, "Update rules"; plan 3.7, D16).
+// The decisions behind upstream-watch.yml, kept out of the workflow so each row can be tested (the update rules).
 //
 //   planWatch      does upstream's version differ from ours, and is that a patch or a minor?
 //   nextBuild      the build number for a version, counted up from the published tags
@@ -61,7 +61,7 @@ export function nextBuild(version, tags) {
 }
 
 // True when some published release already carries this version's x.y line. A patch of a minor nobody has published by hand is
-// not published automatically, or 0.7.1 would put 0.7 out without the upgrade step 0.7.0 needs (3.7).
+// not published automatically, or 0.7.1 would put 0.7 out without the upgrade step 0.7.0 needs.
 export function minorPublished(version, tags) {
   const [major, minor] = parseVersion(version);
   return tags.map(parseTag).some((tag) => {
@@ -83,7 +83,7 @@ export function findWaitingIssue(issues, version, rehearsal = false) {
 // What to do with upstream's current state.
 //   mode auto         compare versions; a patch or a minor means "merge and build"
 //   mode rebuild      build the target branch again as the next build of its version (a fix of the app itself)
-//   mode hand-merged  the integrator resolved a conflict on the target branch; build it as it stands
+//   mode hand-merged  a maintainer resolved a conflict on the target branch; build it as it stands
 export function planWatch({ mode = 'auto', targetVersion, upstreamVersion, issues = [], retry = false, rehearsal = false }) {
   if (mode === 'rebuild') return { action: 'build', kind: 'rebuild', version: targetVersion };
   if (mode === 'hand-merged') return { action: 'build', kind: 'hand-merged', version: targetVersion };
@@ -102,7 +102,7 @@ export function planWatch({ mode = 'auto', targetVersion, upstreamVersion, issue
 const isOn = (value) => String(value ?? '').trim().toLowerCase() === 'true';
 const green = (result) => result === 'success';
 
-// The gate (D16). `gate` is the repository variable's value; only the text "true" turns it on. Publishing needs all of: the gate on,
+// The gate. `gate` is the repository variable's value; only the text "true" turns it on. Publishing needs all of: the gate on,
 // an upstream patch release, a clean merge (the kind is then patch, never conflict or hand-merged), verify and the installers green,
 // and a patch of a minor that has already gone out. Everything else is a draft, or stopped when there is nothing to draft.
 export function decideRelease({ kind, version, build, gate, verify, desktop, minorPublished: minorOut = false, rehearsal = false }) {
@@ -131,7 +131,7 @@ const REASON_TEXT = {
   conflict: 'The merge of upstream into the target branch conflicted. Nothing was built or published.',
   'desktop-red': 'The installer build or the smoke test failed on at least one runner, so there is no release to draft.',
   'verify-red': 'Verify was red on at least one runner. A draft exists if the installers built, but the merge was not moved into the target branch.',
-  'new-minor': 'A new minor is never published automatically: it can change how workspaces are written (plan 3.7).',
+  'new-minor': 'A new minor is never published automatically: it can change how workspaces are written.',
   rebuild: 'A rebuild of the same version always waits for you.',
   'hand-merged': 'A merge resolved by hand always waits for you.',
   'gate-off': 'The publishing gate (the DESKTOP_AUTO_PUBLISH variable) is off.',
@@ -150,7 +150,7 @@ const KIND_TEXT = {
 // Drops empty lines at the start and doubled empty lines, so optional lines can be left out by passing ''.
 const squash = (lines) => lines.filter((line, index) => line !== '' || (index > 0 && lines[index - 1] !== '')).join('\n');
 
-// The release notes credit the original project (contracts, "App identity").
+// The release notes credit the original project.
 export function releaseNotes({ version, build, kind, upstreamSha, commit }) {
   const lines = [
     `opendoc-desktop ${version}, build ${build}: the desktop app for OpenDoc ${version}.`,

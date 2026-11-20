@@ -99,7 +99,7 @@ export function Reader({
   const { pdf, artifact, error: pdfError } = readerPreview;
   const [selection, setSelection] = useState<DocumentSelection | null>(null);
   const selected = selection?.blockId ?? null;
-  /** Components chosen after the first with Shift/Ctrl-click, the keyboard or a box; `selection` stays the first (contract C1). */
+  /** Components chosen after the first with Shift/Ctrl-click, the keyboard or a box; `selection` stays the first (several places on one comment). */
   const [additional, setAdditional] = useState<DocumentSelection[]>([]);
   const selectedCount = selection ? 1 + additional.length : 0;
   const selectionAnchor = useRef<TextAnchor | undefined>(undefined);
@@ -330,7 +330,7 @@ export function Reader({
           documentId: id,
           blockId: selected,
           page: safePage,
-          // The list (C1); `selection` stays its first entry on the server, and the two are never sent together.
+          // The list of places; `selection` stays its first entry on the server, and the two are never sent together.
           selections: selection ? [selection, ...additional] : [],
           editing: !!editor || editing.count > 0,
           pendingEdits: editing.count,
@@ -685,7 +685,7 @@ export function Reader({
       setComments(
         await api(`/api/documents/${id}/comments`, {
           method: "POST",
-          // One place sends `selection` as before; several send `selections` (contract C1), the first being the main one.
+          // One place sends `selection` as before; several send `selections`, the first being the main one.
           body: JSON.stringify({
             blockId: selected,
             text: draft,

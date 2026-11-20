@@ -1,4 +1,4 @@
-// The installer config's entries for the agent integrations (I2) and the design pack file type (E9): the extraResources entry, the
+// The installer config's entries for the agent integrations and the design pack file type: the extraResources entry, the
 // shared-mime type and the .desktop MimeType line on Linux, and the document type on macOS. Reads the config and the files it names;
 // the real packages are checked by check-artifacts.mjs and check-packaged.mjs after a build.
 import assert from 'node:assert/strict';

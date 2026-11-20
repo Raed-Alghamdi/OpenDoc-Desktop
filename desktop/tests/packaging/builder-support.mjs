@@ -1,5 +1,5 @@
 // Shared by the packaging tests and scripts: the parsed electron-builder config, an Info.plist reader, and the rule for the macOS
-// design pack document type (E9). js-yaml and plist are electron-builder's own dependencies, reached through it so the desktop
+// design pack document type. js-yaml and plist are electron-builder's own dependencies, reached through it so the desktop
 // package needs no new dependency.
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';

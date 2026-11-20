@@ -1,4 +1,4 @@
-// One electron-updater 6.8.11 class per install type (plan 3.7, S6), each with the build-aware version check, the "does this release
+// One electron-updater 6.8.11 class per install type, each with the build-aware version check, the "does this release
 // list a file for me" check, and the install step this app wants. Loads in plain Node (the unit tests build instances with a fake app
 // adapter); only a MacUpdater needs Electron's autoUpdater, in its constructor.
 import { createRequire } from 'node:module';

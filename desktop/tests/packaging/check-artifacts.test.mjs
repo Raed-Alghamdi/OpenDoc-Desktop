@@ -1,4 +1,4 @@
-// check-artifacts.mjs against a made-up dist folder: which installers it demands (E11, finding 4: no .rpm at all is fine unless
+// check-artifacts.mjs against a made-up dist folder: which installers it demands (no .rpm at all is fine unless
 // --require-rpm), and that it notices a package that lost the integrations or the design pack file type. The tools it falls back to
 // (ar and bsdtar) are the only ones on the PATH it gets, so the result is the same on every machine; without them the test skips.
 import assert from 'node:assert/strict';

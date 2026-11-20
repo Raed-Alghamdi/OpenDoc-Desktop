@@ -1,4 +1,4 @@
-// Runtime smoke test (S1's checks): the runtime folder works as a read-only runtime under the Electron binary run as Node.
+// Runtime smoke test: the runtime folder works as a read-only runtime under the Electron binary run as Node.
 // It links a scratch workspace to the runtime the way the app does, then runs `opendoc --version`, `check` and `export`.
 //
 //   node --test desktop/tests/smoke/runtime.test.mjs

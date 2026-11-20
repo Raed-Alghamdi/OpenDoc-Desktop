@@ -1,4 +1,4 @@
-// "What changed", shown once after the app starts on a newer build than the last run (plan 3.7, step 8), and the hook that tells
+// "What changed", shown once after the app starts on a newer build than the last run, and the hook that tells
 // other parts of the app that an update just happened. The last run is kept in config.json as `lastRun: { version, build }`.
 // No Electron import.
 import { parseBuild } from './build-compare.mjs';

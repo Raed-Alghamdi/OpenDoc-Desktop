@@ -1,4 +1,4 @@
-// The upgrade-step registry (plan 3.4). A release that changes how workspaces are written registers a script for the
+// The upgrade-step registry. A release that changes how workspaces are written registers a script for the
 // step to its minor; a release that does not registers "no changes needed". The registry is empty for now, and a missing
 // entry still upgrades: the checks that follow show whether any document needs attention.
 import { spawn } from 'node:child_process';

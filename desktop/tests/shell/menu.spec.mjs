@@ -1,4 +1,4 @@
-// Menus (plan E1 step 5): Open and New Workspace, Reveal Workspace, Help, the Edit roles and the About dialog.
+// Menus: Open and New Workspace, Reveal Workspace, Help, the Edit roles and the About dialog.
 import { expect, test } from '@playwright/test';
 import { realpath } from 'node:fs/promises';
 import { launchApp, nativeCalls, newProfile, newWorkspace, readConfig, setNative, stubNative } from './support/app.mjs';

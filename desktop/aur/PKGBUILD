@@ -30,7 +30,7 @@ package() {
   install -d "${pkgdir}/usr/bin"
   ln -s /opt/opendoc-desktop/opendoc-desktop "${pkgdir}/usr/bin/opendoc-desktop"
 
-  # Tells the in-app updater the package manager owns this install: no checks, no network (contracts, update rules).
+  # Tells the in-app updater the package manager owns this install: no checks, no network.
   install -m644 /dev/null "${pkgdir}/opt/opendoc-desktop/resources/update-disabled"
 
   install -d "${pkgdir}/usr/share/licenses/${pkgname}"

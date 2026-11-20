@@ -1,4 +1,4 @@
-// App smoke test (E10): the packaged build, the one users install, does the everyday flow end to end on a scratch workspace.
+// App smoke test: the packaged build, the one users install, does the everyday flow end to end on a scratch workspace.
 // It proves what the shell's own tests (which run the unpackaged app) cannot: that the service host starts when the binary
 // carries the production fuses (RunAsNode on, ASAR integrity on, only-load-from-asar on), that the bundled runtime is found
 // inside the package, and that `opendoc --version` works through the launcher. Then it quits and checks nothing is left.

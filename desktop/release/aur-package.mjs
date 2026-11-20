@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The AUR package opendoc-desktop-bin for one release (plan 3.7, E13): the PKGBUILD and .SRCINFO that follow the release's pacman file,
+// The AUR package opendoc-desktop-bin for one release: the PKGBUILD and .SRCINFO that follow the release's pacman file,
 // and the push to the AUR, which happens only when an AUR key secret exists and the AUR_PUSH variable is on.
 //
 //   generate  node desktop/release/aur-package.mjs generate --tag <desktop-vX.Y.Z-N> --assets <folder> --template <desktop/aur> --out <folder>

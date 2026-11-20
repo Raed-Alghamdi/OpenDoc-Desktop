@@ -1,4 +1,4 @@
-// The agent command (plan 3.5): the AppImage writer, the PATH check, the macOS installer and the Linux launcher.
+// The agent command: the AppImage writer, the PATH check, the macOS installer and the Linux launcher.
 // Every file goes into a temporary folder: nothing here touches a real ~/.local/bin or a real PATH folder.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

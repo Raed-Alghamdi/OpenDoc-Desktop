@@ -72,7 +72,7 @@ export interface DocumentSelection {
 }
 
 /**
- * The rules for a list of selections (C1): only the first may be a phrase, and each block
+ * The rules for a list of selections: only the first may be a phrase, and each block
  * appears once. Returns the problem in words, or undefined when the list is acceptable.
  */
 export function selectionListError(selections: DocumentSelection[]): string | undefined {

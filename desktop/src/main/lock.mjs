@@ -1,7 +1,7 @@
 // The workspace runtime lock, `.opendoc/update.lock`: the same file and format the CLI's withWorkspaceLock uses
 // (src/cli/lock.ts), so the app and the CLI exclude each other while a workspace opens, updates or installs.
 // By design a stale lock is never cleared automatically; the app offers to clear one only after confirming
-// that the recorded pid is gone (contracts.md, C3).
+// that the recorded pid is gone.
 import { randomUUID } from 'node:crypto';
 import { link, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';

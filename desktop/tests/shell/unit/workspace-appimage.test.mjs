@@ -213,7 +213,7 @@ test('runtime info is read from the runtime files; a runtime that does not say i
   assert.equal((await readRuntimeInfo(bad)).ok, false);
 });
 
-test('read-only support is read from the service source (U4 marks readOnlySupported: true)', async () => {
+test('read-only support is read from the service source (the service marks readOnlySupported: true)', async () => {
   const base = await scratch('support');
   assert.equal(await readOnlySupported(await makeRuntime(join(base, 'a'))), false);
   assert.equal(await readOnlySupported(await makeRuntime(join(base, 'b'), { readOnly: true })), true);

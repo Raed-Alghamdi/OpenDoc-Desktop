@@ -1,6 +1,6 @@
 # Agent integrations
 
-Files that let a coding agent find the user's OpenDoc workspace from any folder and drive it with the `opendoc` command. The desktop app installs them into the agent apps it detects (the integration module, plan work package I2) and can undo that.
+Files that let a coding agent find the user's OpenDoc workspace from any folder and drive it with the `opendoc` command. The desktop app installs them into the agent apps it detects (the integration module) and can undo that.
 
 ```
 integrations/
@@ -81,4 +81,4 @@ Where each place comes from (vendor documentation, read 2026-11-18):
 - **Copilot CLI:** personal skills go in `~/.copilot/skills` or `~/.agents/skills` ([Adding agent skills for GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills), [About agent skills](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills)). The pages say supported locations depend on the surface; `~/.copilot/skills` is the dedicated one. Nothing here runs `copilot`.
 - **Antigravity:** global skills are `~/.gemini/config/skills/<skill-folder>/`, and the CLI also loads plugin skills from `~/.gemini/config/plugins/<plugin-folder>/skills/` ([Skills](https://antigravity.google/docs/skills)); `agy plugin install <path>` and `agy plugin validate` are in [Plugins](https://antigravity.google/docs/plugins). Neither `~/.agents/skills` nor `~/.claude/skills` is a global location. The docs list the plugin folder only under the CLI. A user of the Antigravity App or IDE instead copies `skills/opendoc/SKILL.md` to `~/.gemini/config/skills/opendoc/SKILL.md`; never both.
 
-Two notes. Cursor and Copilot CLI use the plain copy, so for them the integration is a file copy that the app records in its manifest and removes on undo. Claude Code and Codex honour `CLAUDE_CONFIG_DIR` and `CODEX_HOME` respectively, so those are read from the user's login shell before registering (plan I2).
+Two notes. Cursor and Copilot CLI use the plain copy, so for them the integration is a file copy that the app records in its manifest and removes on undo. Claude Code and Codex honour `CLAUDE_CONFIG_DIR` and `CODEX_HOME` respectively, so those are read from the user's login shell before registering.

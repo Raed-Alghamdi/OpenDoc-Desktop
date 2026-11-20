@@ -1,4 +1,4 @@
-// The `opendoc` command for agents (plan 3.5), without Electron so the unit tests can run it:
+// The `opendoc` command for agents, without Electron so the unit tests can run it:
 //   Linux packages  ship /usr/bin/opendoc (resources/cli/opendoc); nothing here.
 //   AppImage        the app writes ~/.local/bin/opendoc (resources/cli/opendoc-appimage.sh with the AppImage's path filled in)
 //                   at every launch, so the command follows the file when it moves.

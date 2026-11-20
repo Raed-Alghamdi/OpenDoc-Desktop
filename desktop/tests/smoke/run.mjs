@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Runs the app smoke test (E10) the only way it may run: niced, with a hard time limit, and on a virtual display on Linux
+// Runs the app smoke test the only way it may run: niced, with a hard time limit, and on a virtual display on Linux
 // (Xvfb, with the desktop's display and Electron variables removed, so no window can reach a real screen). On macOS the
 // runner's own session is used. Whatever is left of the app afterwards is killed and reported.
 //

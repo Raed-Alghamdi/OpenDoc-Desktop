@@ -61,7 +61,7 @@ jobs:
         with:
           cache: true
       - run: pnpm install --frozen-lockfile
-      # The build number reaches the runtime, the package revisions, the file names and the update metadata (contracts, "Version numbers").
+      # The build number reaches the runtime, the package revisions, the file names and the update metadata.
       - name: Read the version and build number
         id: meta
         env:
@@ -81,10 +81,10 @@ jobs:
         run: node desktop/tests/shell/run.mjs --unit
       - name: Build the installers
         run: node desktop/runtime/dist.mjs ${{ steps.meta.outputs.stub }} --linux pacman deb rpm AppImage --publish never
-      # The unpacked app: the agent integrations with their dot folders, through the source check script (I2).
+      # The unpacked app: the agent integrations with their dot folders, through the source check script.
       - name: Check the unpacked app
         run: node desktop/tests/packaging/check-packaged.mjs --require linux
-      # Each installer: version, build number, update files, the integrations and the design pack file type (E9).
+      # Each installer: version, build number, update files, the integrations and the design pack file type.
       - name: Check the installers
         run: node desktop/tests/packaging/check-artifacts.mjs --require-rpm
       - name: Test the runtime inside the unpacked app
@@ -114,7 +114,7 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
-  # The agent plugin files (desktop/integrations/, stream I). Needs Node 24 only: no install. The pull_request path filter above
+  # The agent plugin files (desktop/integrations/). Needs Node 24 only: no install. The pull_request path filter above
   # (desktop/**) covers the folder; the installer jobs check the packaged copy as well.
   integrations:
     runs-on: ubuntu-latest
@@ -145,7 +145,7 @@ jobs:
         with:
           cache: true
       - run: pnpm install --frozen-lockfile
-      # The build number reaches the runtime, the package revisions, the file names and the update metadata (contracts, "Version numbers").
+      # The build number reaches the runtime, the package revisions, the file names and the update metadata.
       - name: Read the version and build number
         id: meta
         env:
@@ -161,11 +161,11 @@ jobs:
       # The shell's unit tests (no display needed), with the same command as on Linux.
       - name: Test the shell
         run: node desktop/tests/shell/run.mjs --unit
-      # Ad-hoc signed (identity "-", no notarization), as the config says; the first open on a Mac needs "Open Anyway" (plan 3.5).
+      # Ad-hoc signed (identity "-", no notarization), as the config says; the first open on a Mac needs "Open Anyway".
       - name: Build zip and dmg
         run: node desktop/runtime/dist.mjs ${{ steps.meta.outputs.stub }} --mac zip dmg --arm64 --publish never
-      # The unpacked app: the agent integrations with their dot folders (I2) and the design pack document type, which must not claim
-      # plain ZIP files (E9).
+      # The unpacked app: the agent integrations with their dot folders and the design pack document type, which must not claim
+      # plain ZIP files.
       - name: Check the unpacked app
         run: node desktop/tests/packaging/check-packaged.mjs --require mac
       # The packaged app (production fuses) in the runner's own session: library, PDF, comment, export, `opendoc --version`, quit.
@@ -184,8 +184,8 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
-  # A draft release, for a desktop-v tag or for a call from upstream-watch.yml that names one. Nothing is published here; the integrator
-  # reads the draft and publishes by hand, or upstream-watch publishes it when every gate allows (D16).
+  # A draft release, for a desktop-v tag or for a call from upstream-watch.yml that names one. Nothing is published here; a maintainer
+  # reads the draft and publishes by hand, or upstream-watch publishes it when every gate allows.
   release:
     if: startsWith(github.ref, 'refs/tags/desktop-v') || (inputs.release_tag && inputs.release_tag != '')
     needs: [linux, mac]

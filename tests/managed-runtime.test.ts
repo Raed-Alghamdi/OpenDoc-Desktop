@@ -84,7 +84,7 @@ async function created(t: TestContext) {
   return destination;
 }
 
-test('the 3.4 version table', () => {
+test('the version table', () => {
   assert.equal(comparePin('0.6.1', '0.6.1'), 'current');
   assert.equal(comparePin('0.6.0', '0.6.1'), 'current', 'an older patch opens normally');
   assert.equal(comparePin('0.6.2', '0.6.1'), 'newer-patch');
@@ -146,7 +146,7 @@ test('a managed workspace repairs its runtime link, so no node_modules, a dangli
   assert.notEqual(result.code, 0);
 });
 
-test('the 3.4 table in a managed workspace: older patch opens, newer patch and minor are read-only, older minor is the app\'s to upgrade', { timeout: 300_000 }, async t => {
+test('the version table in a managed workspace: older patch opens, newer patch and minor are read-only, older minor is the app\'s to upgrade', { timeout: 300_000 }, async t => {
   const workspace = await created(t);
   const setPin = async (version: string) => {
     const manifest = JSON.parse(await readFile(resolve(workspace, 'package.json'), 'utf8'));

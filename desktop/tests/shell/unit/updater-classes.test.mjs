@@ -16,7 +16,7 @@ const make = async (type, { build = 1, seams } = {}) => newUpdater(createUpdater
 test('a newer build is offered only when the release lists a file for this install', async () => {
   const all = release(2, 'opendoc-desktop-x86_64.AppImage', 'opendoc-desktop_0.6.1-2_amd64.deb', 'opendoc-desktop-0.6.1-2.x86_64.rpm', 'opendoc-desktop-0.6.1-2-x86_64.pacman');
   for (const type of ['appimage', 'deb', 'rpm', 'pacman']) assert.equal(await (await make(type)).isUpdateAvailable(all), true, type);
-  // S6: a feed with no pacman file made electron-updater fail with "Cannot read properties of undefined (reading 'info')".
+  // A feed with no pacman file made electron-updater fail with "Cannot read properties of undefined (reading 'info')".
   const noPacman = release(2, 'opendoc-desktop-x86_64.AppImage', 'opendoc-desktop_0.6.1-2_amd64.deb');
   assert.equal(await (await make('pacman')).isUpdateAvailable(noPacman), false);
   assert.equal(await (await make('deb')).isUpdateAvailable(noPacman), true);

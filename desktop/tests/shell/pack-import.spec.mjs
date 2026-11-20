@@ -1,4 +1,4 @@
-// Opening a design pack from outside the page (plan E9, shell side) under Electron on the virtual display: a path in the launch
+// Opening a design pack from outside the page (shell side) under Electron on the virtual display: a path in the launch
 // arguments and in a second launch, macOS's open-file (also before any workspace is open), File > Import Design Pack…, the 64 MiB
 // limit, and the refusals of Show in folder. The page here is the workspace page as the service serves it, with a listener the test
 // adds from the first moment of the page; what the Import dialog does with the pack is the page's own (src/app/PackDialogs.tsx).

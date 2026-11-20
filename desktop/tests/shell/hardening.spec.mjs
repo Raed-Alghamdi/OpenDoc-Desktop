@@ -1,4 +1,4 @@
-// Window hardening (plan E1 step 2): isolation, sandbox, no Node in the renderer, content security policy,
+// Window hardening: isolation, sandbox, no Node in the renderer, content security policy,
 // navigation locked to the app's origin, new windows denied, permissions denied, links through the system browser,
 // no file:// pages and no cookies.
 import { expect, test } from '@playwright/test';

@@ -26,7 +26,7 @@ process.on('unhandledRejection', error => console.error('Unhandled rejection in 
 const first = app.requestSingleInstanceLock();
 if (!first) app.quit();
 
-// Design packs opened from outside (E9): a path in the launch arguments (Linux; a double-click runs `opendoc-desktop <path>`), the same in
+// Design packs opened from outside: a path in the launch arguments (Linux; a double-click runs `opendoc-desktop <path>`), the same in
 // a second launch, and macOS's open-file event, which can arrive before the app is ready, so it is registered here, not in run().
 const packs = createPackInbox();
 if (first) {

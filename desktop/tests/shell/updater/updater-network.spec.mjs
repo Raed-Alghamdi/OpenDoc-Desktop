@@ -1,4 +1,4 @@
-// No network when the updater is off (plan E7): with the switch off, with the package manager's marker, and in a development run,
+// No network when the updater is off: with the switch off, with the package manager's marker, and in a development run,
 // the feed server's request log stays empty. The control run, switched on, shows the log would have caught a request. A second server,
 // the "canary", stands in for the built-in address (the app-update.yml of the stand-in resources folder): it must see nothing unless the
 // app is switched on or the user clicks "Check for Updates…".

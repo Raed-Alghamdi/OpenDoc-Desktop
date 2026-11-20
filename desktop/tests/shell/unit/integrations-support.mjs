@@ -1,5 +1,5 @@
 // Helpers for the integrations tests: scratch folders, and fake vendor commands (`claude`, `codex`, `agy`) that behave like the
-// real ones did in I1's runs and keep their state in the config folder they are given. They log every call to $FAKE_LOG so a test can
+// real ones did when checked by hand and keep their state in the config folder they are given. They log every call to $FAKE_LOG so a test can
 // say what was run, with which config folder, and that detection ran nothing. $FAKE_MODE switches in a failure.
 import { execFileSync } from 'node:child_process';
 import * as sync from 'node:fs';

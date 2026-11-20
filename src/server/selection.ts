@@ -12,7 +12,7 @@ export function readSelection(input: unknown, blockId: string | null): DocumentS
 }
 
 /**
- * A list of selections (C1): the first may be a phrase, the others are whole components, each block
+ * A list of selections: the first may be a phrase, the others are whole components, each block
  * once. `activeBlockId` is the block the reader has focused; it must be one of them, and the
  * first entry is kept first. Returns [] for no selection.
  */

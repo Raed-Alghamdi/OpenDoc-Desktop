@@ -1,4 +1,4 @@
-// The About dialog. It credits the original OpenDoc project and links to it (contracts.md, App identity).
+// The About dialog. It credits the original OpenDoc project and links to it.
 import { dialog } from 'electron';
 import { appName, appVersion, originalProject } from './identity.mjs';
 import { openExternal } from './session-policy.mjs';

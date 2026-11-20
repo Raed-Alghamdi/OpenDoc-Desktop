@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Check the agent integration files (contracts C4): the JSON shape of both plugin marketplaces and manifests,
+// Check the agent integration files: the JSON shape of both plugin marketplaces and manifests,
 // and that the three copies of the router skill are identical. Plain Node, no dependencies.
 // Usage: node desktop/integrations/check.mjs [integrations-folder]
 import { lstat, readFile, readdir } from 'node:fs/promises';

@@ -1,4 +1,4 @@
-// Opening a design pack from outside the page (E9), below Electron: which arguments are packs, reading a pack in the main process,
+// Opening a design pack from outside the page, below Electron: which arguments are packs, reading a pack in the main process,
 // the inbox that holds one until a workspace is open, and the rule for Show in folder (refusals included).
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises';

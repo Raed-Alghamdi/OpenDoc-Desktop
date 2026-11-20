@@ -1,4 +1,4 @@
-// Startup (plan E1 step 1): config.json, desktop.json, the first-run picker (open, create, recent), and what the
+// Startup: config.json, desktop.json, the first-run picker (open, create, recent), and what the
 // app does with a stale desktop.json, a stale or live lock and a workspace whose browser service is running.
 import { expect, test } from '@playwright/test';
 import { spawn } from 'node:child_process';

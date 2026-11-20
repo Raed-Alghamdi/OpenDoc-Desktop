@@ -1,4 +1,4 @@
-// Installing a downloaded deb, rpm or pacman file with the system's password (plan 3.7, S6). No Electron import.
+// Installing a downloaded deb, rpm or pacman file with the system's password. No Electron import.
 //
 // electron-updater's own install runs `pkexec ... dpkg -i` with spawnSync, which freezes every window while the password prompt is
 // open, and after Cancel it opens a second prompt for `apt-get install -f -y`. This does it with one asynchronous pkexec call that

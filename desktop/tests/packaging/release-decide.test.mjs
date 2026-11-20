@@ -1,5 +1,5 @@
 // The release decisions of upstream-watch.yml (desktop/release/decide.mjs): version compare, patch or minor, build numbers, the gate,
-// and the report text. One test per row of E13's "done when" list, plus the edges around them.
+// and the report text. One test per row of the release rules, plus the edges around them.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';

@@ -1,4 +1,4 @@
-// Integration of the shell and the service host after review (plan E1): what the service's own headers keep, who may
+// Integration of the shell and the service host: what the service's own headers keep, who may
 // change things through app://opendoc, where the shell's pages can be reached from, what happens to a download or an
 // upload when the host dies or the page gives up, and that quitting or killing the app at any moment leaves nothing.
 import { expect, test } from '@playwright/test';
@@ -342,7 +342,7 @@ test.describe('quitting or killing the app at any moment leaves nothing', () => 
     await waitFor(() => exists(lockFile(workspace)), { timeout: 120_000, interval: 10, what: 'the open workspace lock' });
     child.kill('SIGKILL');
     expect(await waitForNoElectron(5000)).toEqual([]);
-    // By design (C3) a stale lock is never cleared on its own; the app offers "Clear stale lock" after confirming the owner is gone.
+    // By design a stale lock is never cleared on its own; the app offers "Clear stale lock" after confirming the owner is gone.
     expect(await exists(lockFile(workspace))).toBe(true);
     expect(JSON.parse(await readFile(lockFile(workspace), 'utf8')).pid).toBe(child.pid);
     expect(processAlive(child.pid)).toBe(false);

@@ -1,4 +1,4 @@
-// Opening a design pack from outside the page (plan E9): which launch arguments are packs, reading a pack file in the main process
+// Opening a design pack from outside the page: which launch arguments are packs, reading a pack file in the main process
 // (the sandboxed page cannot read paths), the queue that holds a pack until a workspace page can take it, and the rule for
 // "Show in folder". Nothing here needs Electron, so the unit tests read it directly.
 import { open, realpath, stat } from 'node:fs/promises';

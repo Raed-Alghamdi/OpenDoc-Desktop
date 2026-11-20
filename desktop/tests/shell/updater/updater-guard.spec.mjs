@@ -1,4 +1,4 @@
-// The updater's request guard in the real app (plan E7 review): a differential (ranged) AppImage download that is redirected to a
+// The updater's request guard in the real app: a differential (ranged) AppImage download that is redirected to a
 // non-allowed address is refused, and the catch-all on the updater's own session cancels requests and redirect hops the rule refuses.
 import { expect, test } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';

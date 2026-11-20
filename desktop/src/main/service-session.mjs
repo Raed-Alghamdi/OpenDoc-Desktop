@@ -1,5 +1,5 @@
 // `.opendoc/server.json`: the browser edition's session record. The app reads it to refuse a workspace whose
-// browser service is running (contracts.md, C3), using the same checks as runningSession() in src/cli/start.ts.
+// browser service is running, using the same checks as runningSession() in src/cli/start.ts.
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { processExists } from './process-info.mjs';

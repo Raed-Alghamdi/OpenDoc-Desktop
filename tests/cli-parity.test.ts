@@ -356,7 +356,7 @@ export function scanRoutes(sources: { file: string; text: string }[]): Scanned {
   return { routes, unplaced };
 }
 
-/** The files the brief names: the service, the listener and every `*-http.ts` module. */
+/** The files the scan covers: the service, the listener and every `*-http.ts` module. */
 function serviceSources(overrides: Record<string, string> = {}) {
   const directory = resolve(projectRoot, 'src/server');
   const files = ['service.ts', 'index.ts', ...readdirSync(directory).filter(name => name.endsWith('-http.ts')).sort()];
@@ -520,7 +520,7 @@ test('every route of the service is covered by a CLI command or exempt with a re
   assert.deepEqual(unmapped(allRoutes(routes)), [], 'add each of these to `covered` (with its CLI command) or to `exempt` (with a reason)');
 });
 
-test('the scan reads the routes that are there, from every file the brief names', () => {
+test('the scan reads the routes that are there, from every file it covers', () => {
   const { routes } = scanWith();
   const keys = new Set(routes.map(keyOf));
   for (const key of ['GET /api/session', 'POST /api/context', 'GET /api/documents/*/comments', 'PATCH /api/documents/*/comments/*', 'POST /api/documents/*/comments/*/restore',

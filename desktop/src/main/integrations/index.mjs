@@ -1,6 +1,6 @@
-// The integration module (plan I2, contracts C4): finds the agent apps on this computer, installs the OpenDoc plugin or skill into
+// The integration module: finds the agent apps on this computer, installs the OpenDoc plugin or skill into
 // the ones the user picks (through each vendor's own command, from a stable copy of desktop/integrations/), checks the result,
-// records exactly what it did, and undoes exactly that. The screen (I3) is a thin layer over the five calls below.
+// records exactly what it did, and undoes exactly that. The screen is a thin layer over the five calls below.
 //
 //   const integrations = createIntegrations({ sourceDirectory, build });
 //   await integrations.refresh();                 at startup, when the app's build changed (see refresh)

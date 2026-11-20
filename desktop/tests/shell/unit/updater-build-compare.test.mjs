@@ -1,4 +1,4 @@
-// The build-aware version check against electron-updater's real classes (S6's 16 rows, and more).
+// The build-aware version check against electron-updater's real classes (a table of 16 rows, and more).
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';

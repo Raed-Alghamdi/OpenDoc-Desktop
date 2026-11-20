@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Checks the unpacked apps in desktop/dist (the folders electron-builder builds the installers from): the agent integrations (I2)
-// with their dot folders, through the source check script, and on macOS the design pack document type in Info.plist (E9).
+// Checks the unpacked apps in desktop/dist (the folders electron-builder builds the installers from): the agent integrations
+// with their dot folders, through the source check script, and on macOS the design pack document type in Info.plist.
 //
 // Usage: node desktop/tests/packaging/check-packaged.mjs [--dist <folder>] [--require <linux|mac>...]
 // Looks for dist/linux-unpacked and for every .app folder under dist/mac*. Without --require it checks what it finds and fails when

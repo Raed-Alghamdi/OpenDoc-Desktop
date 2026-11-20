@@ -166,7 +166,7 @@ test('beside opendoc-desktop, documents list and show read, even in a read-only 
     assert.equal(process.exitCode, undefined, args.join(' '));
     assert.ok(JSON.parse(lines.join('\n')), args.join(' '));
   }
-  // A failure is the C2 object with a stable code, and a missing document is not-found.
+  // A failure is the usual JSON failure object with a stable code, and a missing document is not-found.
   lines.length = 0;
   await main(['--workspace', root, 'documents', 'show', 'missing', '--json']);
   assert.equal(process.exitCode, 1);

@@ -86,11 +86,11 @@ jobs:
       detail: ${{ steps.prepare.outputs.detail }}
     steps:
       # The checkout keeps its credential: this job pushes the mirror and the candidate branch.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.target_branch || 'roadmap' }}
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
       # The published releases and tags decide the build number; open issues say whether an earlier run is still waiting for the repository owner.
@@ -181,10 +181,10 @@ jobs:
       CANDIDATE_SHA: ${{ needs.prepare.outputs.candidate_sha }}
       REHEARSAL: ${{ needs.prepare.outputs.rehearsal }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
       - name: Decide

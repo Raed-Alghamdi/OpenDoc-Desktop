@@ -85,10 +85,18 @@ export function createIntegrations(options = {}) {
   let queue = Promise.resolve();
   /** One call at a time: the manifest and the vendors' own config are never changed by two calls together. */
   const serial = work => { const run = queue.then(work).finally(releaseWorkingDirectory); queue = run.catch(() => {}); return run; };
-  /** The folder the commands ran in is empty between calls: removed (it is made again when a command needs it), and the data folder with it when that leaves it empty. */
+  /**
+   * With nothing connected the app leaves nothing behind: the empty folder the commands ran in is removed (it is made again when a
+   * command needs it), and the data folder with it when that leaves it empty. While an app is connected the folder stays, so a
+   * command that is starting never loses its working folder.
+   */
   async function releaseWorkingDirectory() {
-    if (options.workingDirectory === undefined) await rmdir(workingDirectory).catch(() => {}); // a folder the caller named is the caller's
-    await rmdir(dataDir).catch(() => {});
+    try {
+      const { manifest: current } = await manifest.read();
+      if (Object.keys(current.apps).length > 0) return;
+      if (options.workingDirectory === undefined) await rmdir(workingDirectory).catch(() => {}); // a folder the caller named is the caller's
+      await rmdir(dataDir).catch(() => {});
+    } catch { /* a manifest that cannot be read is no reason to fail the call */ }
   }
 
   /** What the user's shell and the app's environment say; the login shell wins, because it holds what the user set up. */

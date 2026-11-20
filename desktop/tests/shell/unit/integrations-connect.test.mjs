@@ -334,7 +334,10 @@ test('vendor commands run in a private folder under the app\'s data folder, neve
     assert.equal(call.cwdMode, 0o700, 'only the user can enter it');
   }
   assert.notEqual(folder, await realpath(tmpdir()));
-  await assert.rejects(stat(folder), { code: 'ENOENT' }, 'the empty folder is not left behind between calls');
+  assert.ok((await stat(folder)).isDirectory(), 'it stays while an app is connected');
+  assert.equal((await world.integrations.disconnect(['claude', 'codex'])).ok, true);
+  await assert.rejects(stat(folder), { code: 'ENOENT' }, 'and goes with the last app');
+  await assert.rejects(stat(world.data), { code: 'ENOENT' });
 });
 
 test('an explicit working folder is still honoured, and left in place', async () => {

@@ -2,7 +2,7 @@
 import { app, clipboard, dialog, ipcMain, screen, session, shell } from 'electron';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readFile, realpath, rmdir, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { showAbout } from './about.mjs';
 import { installAppImageShim } from './cli-shim.mjs';
@@ -26,6 +26,7 @@ import { createUpdates } from './updater/electron.mjs';
 import { prepareAppImageRuntime } from './workspace/appimage-runtime.mjs';
 import { cleanPartials, deleteBackup, humanBytes, journalName, listBackups, recoverRestore } from './workspace/backup.mjs';
 import { prepareWorkspace } from './workspace/prepare.mjs';
+import { removeCreatedOpendocFolders, snapshotOpendocFolders } from './workspace/created-folders.mjs';
 import { readOnlySupported, readRuntimeInfo } from './workspace/runtime-info.mjs';
 import { WorkspaceWindow, createPickerWindow, createShellWindow, guardAllContents } from './windows.mjs';
 
@@ -137,6 +138,7 @@ export class DesktopShell {
     }
     await this.#teardown(this.current).catch(error => console.error('Shutdown problem:', error.message));
     this.current = null;
+    if (opening?.created) await removeCreatedOpendocFolders(opening.created.root, opening.created.folders).catch(() => {});
     this.updates.stop();
     // An AppImage update that was downloaded replaces the file now, with the service stopped (a no-op for everything else).
     await this.updates.installOnQuit();
@@ -148,6 +150,7 @@ export class DesktopShell {
     await current.supervisor?.stop();
     await removeDesktopRecord(current.root);
     await current.lock?.release();
+    if (current.folders) await removeCreatedOpendocFolders(current.root, current.folders).catch(() => {}); // what the app made empty and the folder had not
   }
 
   // ---------- workspaces ----------
@@ -193,7 +196,7 @@ export class DesktopShell {
   openWorkspace(input) {
     if (this.opening) return Promise.resolve({ ok: false, message: 'Another workspace is opening. Wait a moment.' });
     if (this.stopped) return Promise.resolve({ ok: false, canceled: true });
-    const opening = { abort: new AbortController(), lock: null };
+    const opening = { abort: new AbortController(), lock: null, created: null };
     this.opening = opening;
     const task = this.#open(input, opening).finally(() => { if (this.opening === opening) this.opening = null; });
     this.openTask = task;
@@ -204,13 +207,14 @@ export class DesktopShell {
     const { signal } = opening.abort;
     let lock = null;
     let left = false;
+    let folders = null; // what `.opendoc/` held before this open, to remove what the open leaves empty
+    let root = null;
     const fail = async result => {
       // Having let go of the previous workspace, leave the user somewhere they can act: the picker, with the reason.
       if (left && !this.current && !this.picker) await this.showPicker(result);
       return result;
     };
     try {
-      let root;
       try { root = await realpath(resolve(input)); } catch { return { ok: false, code: 'missing', message: `The folder ${input} was not found.`, path: input }; }
       if (!(await this.#isWorkspace(root)) && !(await this.#hasPackage(root))) return { ok: false, code: 'not-a-workspace', message: `${root} is not an OpenDoc workspace. A workspace has a package.json that pins OpenDoc and, on this device, a .opendoc/workspace.json file; create a new one instead.`, path: root };
       if (this.current?.root === root) { this.#focus(); return { ok: true }; }
@@ -224,7 +228,8 @@ export class DesktopShell {
       const service = await inspectService(root);
       if (service.state === 'running') return { ok: false, code: 'service-running', message: `OpenDoc is already running for this workspace in a browser (process ${service.pid}, ${service.origin}). Stop it before opening the workspace here.`, path: root };
       if (service.state !== 'none') return { ok: false, code: 'service-unclear', message: service.state === 'finishing' ? 'OpenDoc is still finishing its previous session for this workspace. Wait a moment, then try again.' : service.message, path: root };
-      const hadOpendoc = existsSync(join(root, '.opendoc'));
+      folders = await snapshotOpendocFolders(root);
+      opening.created = { root, folders }; // quitting while a question is open still has to undo what the lock made
       try { lock = await acquireWorkspaceLock(root); }
       catch (error) {
         if (error instanceof WorkspaceLockError) return { ok: false, code: error.code, message: error.message, path: root };
@@ -245,7 +250,6 @@ export class DesktopShell {
       if (!prepared.ok) {
         await lock.release().catch(() => {});
         lock = null;
-        if (!hadOpendoc) await rmdir(join(root, '.opendoc')).catch(() => {}); // the lock made it; a folder that was refused keeps none
         return prepared.canceled ? { ok: false, canceled: true } : { ok: false, code: prepared.code, message: prepared.message, path: root };
       }
       if (this.current) {
@@ -268,7 +272,7 @@ export class DesktopShell {
       }
       if (signal.aborted) { await transport.stop(); return { ok: false, canceled: true }; } // The app is quitting
       const { partition, session: ses } = this.#sessionFor(root);
-      const current = { root, partition, session: ses, log, crashed: null, readOnly: prepared.readOnly ?? null };
+      const current = { root, partition, session: ses, log, crashed: null, readOnly: prepared.readOnly ?? null, folders };
       this.current = current;
       current.supervisor = superviseTransport({
         start,
@@ -302,6 +306,9 @@ export class DesktopShell {
       return await fail({ ok: false, code: 'failed', message: `The workspace could not be opened: ${error.message}` });
     } finally {
       await lock?.release().catch(() => {});
+      // An open that did not end with this workspace open (refused, declined, cancelled, failed to start, app quitting) leaves none of
+      // the folders it made. A workspace that is open keeps them until it is closed (see #teardown).
+      if (folders && root && this.current?.root !== root) await removeCreatedOpendocFolders(root, folders).catch(() => {});
       this.switching = false;
     }
   }

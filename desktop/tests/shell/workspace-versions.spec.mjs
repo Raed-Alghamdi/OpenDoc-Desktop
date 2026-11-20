@@ -238,6 +238,78 @@ test.describe.serial('opening: the link, adoption and the pin', () => {
   });
 });
 
+// ---- a folder that had no .opendoc/ has none once the app lets go of it (the lock makes the folder, and in a synced folder it
+// would sync to the other devices), whether the open was declined, abandoned by quitting, or ended by switching workspace; one that
+// had it keeps it. Only empty folders go: the service's own `current.json` (the reader's selection) is not the app's to delete.
+
+test.describe.serial('a folder the app opened without a marker is left as it was found', () => {
+  test.describe.configure({ timeout: 600_000 });
+  let app; let picker;
+  test.beforeAll(async () => { ({ app, picker } = await pickerApp()); });
+  test.afterAll(async () => { await app?.close().catch(() => {}); });
+  let first = true;
+  async function open(workspace) {
+    if (first) { first = false; await chooseInPicker(app, picker, workspace); } else await openByMenu(app, workspace);
+    await opened(app, workspace);
+  }
+  const newerPin = async name => { const workspace = await newWorkspace(name); await setPin(workspace, '0.6.9'); return workspace; };
+  const inside = async workspace => (await readdir(join(workspace, '.opendoc')).catch(() => null))?.sort() ?? null;
+
+  test('declining the adoption from the picker, the first open, leaves no .opendoc', async () => {
+    await app.close();
+    ({ app, picker } = await pickerApp({ native: { messageChoice: { 'Use this workspace on this device?': 'Cancel' } } }));
+    first = true;
+    const synced = await newWorkspace('left-declined');
+    await rm(join(synced, '.opendoc'), { recursive: true });
+    const before = await listing(synced);
+    await chooseInPicker(app, picker, synced);
+    await waitFor(async () => (await asked(app, 'Use this workspace on this device?')).length === 1, { what: 'the adoption question' });
+    await waitFor(() => exists(join(synced, '.opendoc')).then(found => !found), { what: 'the folder to be left alone' });
+    expect(await listing(synced)).toEqual(before);
+    await app.close();
+    ({ app, picker } = await pickerApp());
+    first = true;
+  });
+
+  test('switching to another workspace removes what the lock, the desktop record and the service left empty; the other workspace keeps its own', async () => {
+    const synced = await newerPin('left-synced');
+    await rm(join(synced, '.opendoc'), { recursive: true });
+    await open(synced);
+    await expectReadOnly(app, synced, 'newer-patch', patchMessage);
+    expect(await exists(join(synced, '.opendoc', 'desktop.json'))).toBe(true); // in use while it is open
+    const other = await newWorkspace('left-other');
+    await open(other);
+    // The service's own record of what the reader looked at stays: it is a file, and only empty folders are removed.
+    expect(await inside(synced)).toEqual(['current.json']);
+    expect(await exists(join(other, '.opendoc', 'workspace.json'))).toBe(true);
+  });
+
+  test('a folder that already had an empty .opendoc keeps it after the app lets go of it', async () => {
+    const had = await newerPin('left-had');
+    await rm(join(had, '.opendoc'), { recursive: true });
+    await mkdir(join(had, '.opendoc'));
+    await open(had);
+    await expectReadOnly(app, had, 'newer-patch', patchMessage);
+    await open(await newWorkspace('left-other-2'));
+    expect(await inside(had)).toEqual(['current.json']);
+  });
+
+  test('quitting the app while the adoption question is open leaves no .opendoc', async () => {
+    const synced = await newWorkspace('left-quit');
+    await rm(join(synced, '.opendoc'), { recursive: true });
+    const before = await listing(synced);
+    await app.evaluate(({ dialog }) => {
+      const answer = dialog.showMessageBox;
+      dialog.showMessageBox = (...args) => (args.at(-1).title === 'Use this workspace on this device?' ? new Promise(() => {}) : answer(...args)); // never answered
+    });
+    await openByMenu(app, synced);
+    await waitFor(() => exists(join(synced, '.opendoc', 'update.lock')), { what: 'the lock, taken for the open that waits for the answer' });
+    await app.close();
+    expect(await waitForNoElectron(5000)).toEqual([]);
+    expect(await listing(synced)).toEqual(before);
+  });
+});
+
 // ---- read-only for real: the service opens the workspace read-only, the banner shows the app's message, a write is refused
 
 const patchMessage = 'This workspace is on OpenDoc 0.6.9, newer than the 0.6.1 in this app. Update the app to edit it.';

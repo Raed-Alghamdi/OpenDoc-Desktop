@@ -60,6 +60,13 @@ linux:
   # The .desktop file's MimeType line. The type itself is defined by resources/mime/opendoc-desktop.xml, which the three fpm
   # targets below install; an AppImage cannot install it (docs/DESKTOP.md says what that means).
   mimeTypes: [application/x-opendoc-pack]
+  # The root-owned helper the updater runs through pkexec (deb, rpm and pacman installs). Its polkit action
+  # (resources/polkit, installed by the three fpm lists below) names this exact path, /opt/opendoc-desktop/resources/updater/install-update,
+  # so the password prompt shows a sentence instead of a script. extraResources keeps the file's mode, 0755.
+  extraResources:
+    - from: resources/updater
+      to: updater
+      filter: ["install-update"]
   description: A self-contained desktop app for OpenDoc, built on the original OpenDoc project.
   maintainer: opendoc-desktop contributors <Raed-Alghamdi@users.noreply.github.com>
   vendor: opendoc-desktop contributors
@@ -81,6 +88,7 @@ deb:
     - resources/icons/opendoc-desktop-symbolic.svg=/usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg
     - resources/cli/opendoc=/usr/bin/opendoc
     - resources/mime/opendoc-desktop.xml=/usr/share/mime/packages/opendoc-desktop.xml
+    - resources/polkit/io.github.ryanyahya.opendocdesktop.install-update.policy=/usr/share/polkit-1/actions/io.github.ryanyahya.opendocdesktop.install-update.policy
 pacman:
   # electron-builder's default list pulls http-parser and libappindicator-gtk3, which a bundled Electron does not need.
   depends: [gtk3, nss, libnotify, libxss, xdg-utils, at-spi2-core]
@@ -90,6 +98,7 @@ pacman:
     - resources/icons/opendoc-desktop-symbolic.svg=/usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg
     - resources/cli/opendoc=/usr/bin/opendoc
     - resources/mime/opendoc-desktop.xml=/usr/share/mime/packages/opendoc-desktop.xml
+    - resources/polkit/io.github.ryanyahya.opendocdesktop.install-update.policy=/usr/share/polkit-1/actions/io.github.ryanyahya.opendocdesktop.install-update.policy
 rpm:
   artifactName: ${name}-${version}-${buildNumber}.${arch}.${ext}
   fpm:
@@ -97,6 +106,7 @@ rpm:
     - resources/icons/opendoc-desktop-symbolic.svg=/usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg
     - resources/cli/opendoc=/usr/bin/opendoc
     - resources/mime/opendoc-desktop.xml=/usr/share/mime/packages/opendoc-desktop.xml
+    - resources/polkit/io.github.ryanyahya.opendocdesktop.install-update.policy=/usr/share/polkit-1/actions/io.github.ryanyahya.opendocdesktop.install-update.policy
 appImage:
   # No version in the name: electron-updater then replaces the file in place, so launchers and the opendoc shim keep working.
   artifactName: ${productName}-${arch}.${ext}

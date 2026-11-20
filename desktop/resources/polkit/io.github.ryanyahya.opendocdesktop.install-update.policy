@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+<!-- The password prompt for installing an update (deb, rpm and pacman packages). The app runs the helper below through pkexec; polkit
+     finds this action by the helper's path, so the prompt shows the message instead of the helper's command line. The package that
+     installs this file also installs the helper at exactly that path. -->
+<policyconfig>
+  <vendor>opendoc-desktop</vendor>
+  <action id="io.github.ryanyahya.opendocdesktop.install-update">
+    <description>Install an OpenDoc Desktop update</description>
+    <message>Authentication is required to install an OpenDoc Desktop update.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/opt/opendoc-desktop/resources/updater/install-update</annotate>
+  </action>
+</policyconfig>

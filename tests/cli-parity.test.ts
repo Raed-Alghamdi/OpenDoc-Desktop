@@ -481,6 +481,7 @@ export const exempt: Record<string, string> = {
   'GET /api/assets/logo/*/file': 'Bytes for the page: a logo file; `assets inspect` gives the files.',
   'GET /api/assets/font/*/file': 'Bytes for the page: a font file; `assets inspect` gives the files.',
   'GET /api/packs/staged/*/previews/*': 'Bytes for the page: a staged pack\'s preview PDF; `packs inspect` reads the pack file itself.',
+  'DELETE /api/packs/staged/*': 'UI-only cleanup of the app\'s own staging; the CLI has no staging.',
 
   'GET /api/documents/*/comments/*': sameAs('GET /api/documents/*/comments'),
   'GET /api/documents/*/comments/*/restore': sameAs('GET /api/documents/*/comments'),

@@ -23,7 +23,7 @@ const stagedLimit = 8;
 const stagedFolder = '.opendoc/pack-uploads';
 const stagedName = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const previewName = /^(?:theme|template)-[a-z0-9]+(?:-[a-z0-9]+)*\.pdf$/;
-const installing = new Set<string>();
+const installing = new Map<string, string>(); // workspace root -> the staged ID being installed
 
 function exact(value: unknown, fields: string[]): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !fields.includes(key))) throw new PackHttpError('Invalid pack request. Reload and try again.');
@@ -113,18 +113,28 @@ const listing = (paths: string[]) => paths.length > 10 ? `${paths.slice(0, 10).j
  * - `POST /api/packs/export` makes a pack from workspace themes and templates (this renders their own code).
  * - `POST /api/packs/inspect` stages one uploaded ZIP and reports it. Pack code never runs here.
  * - `GET /api/packs/staged/<stagedId>/previews/<file>` serves a staged pack's own preview PDFs.
+ * - `DELETE /api/packs/staged/<stagedId>` discards one staged upload (Cancel and Close in the Import dialog) -> `{ removed }`.
  * - `POST /api/packs/install` `{ stagedId, trust: true }` plans first, refuses conflicts, pauses the
  *   watcher, installs (the only step that runs pack code), rescans and resumes.
  */
 export async function handlePacksRequest(root: string, req: IncomingMessage, res: ServerResponse, url: URL, json: Send, body: Body, changed: () => void, hooks: PackHooks): Promise<boolean> {
-  const route = url.pathname.match(/^\/api\/packs\/(export|inspect|install|staged\/([^/]+)\/previews\/([^/]+))$/);
+  const route = url.pathname.match(/^\/api\/packs\/(export|inspect|install|staged\/([^/]+)(?:\/previews\/([^/]+))?)$/);
   if (!route) return false;
   root = await realpath(root);
   const [, action, id, preview] = route;
+  if (id !== undefined && preview === undefined) {
+    // Discard: the app's own staging only, one folder named by a checked UUID. Unknown, expired or installing gives removed: false.
+    if (req.method !== 'DELETE') throw new PackHttpError('Pack action not found.', 404);
+    if (!stagedName.test(id)) throw new PackHttpError('This is not a staged pack.', 400);
+    const folder = resolve(await uploads(root), id), info = await lstat(folder).catch(() => undefined);
+    if (!info?.isDirectory() || installing.get(root) === id) { json(res, { removed: false }); return true; }
+    await rm(folder, { recursive: true, force: true });
+    json(res, { removed: Date.now() - info.mtimeMs < stagedLifetime }); return true;
+  }
   if (id !== undefined) {
     if (req.method !== 'GET') throw new PackHttpError('Pack action not found.', 404);
-    if (!previewName.test(preview)) throw new PackHttpError('This preview is not part of the pack.', 404);
-    const bytes = await readFile(resolve(await staged(root, id), 'previews', preview)).catch(() => { throw new PackHttpError('This preview is not part of the pack.', 404); });
+    if (!previewName.test(preview!)) throw new PackHttpError('This preview is not part of the pack.', 404);
+    const bytes = await readFile(resolve(await staged(root, id), 'previews', preview!)).catch(() => { throw new PackHttpError('This preview is not part of the pack.', 404); });
     // The sender's own PDF: show it, never let it run as page content.
     res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': bytes.length, 'Content-Disposition': `inline; filename="${preview}"`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox" });
     res.end(bytes); return true;
@@ -179,7 +189,7 @@ export async function handlePacksRequest(root: string, req: IncomingMessage, res
   if (input.trust !== true) throw new PackHttpError('Themes and templates run TypeScript when OpenDoc renders them. Confirm that you trust this pack to install it.');
   const folder = await staged(root, input.stagedId), file = resolve(folder, 'pack.zip');
   if (installing.has(root)) throw new PackHttpError('Another pack is installing. Wait for it to finish, then retry.', 409);
-  installing.add(root);
+  installing.set(root, input.stagedId as string);
   try {
     // Dry run first: conflicts and version mismatches never reach the step that runs code.
     const dry = await installPack(root, file, { dryRun: true });

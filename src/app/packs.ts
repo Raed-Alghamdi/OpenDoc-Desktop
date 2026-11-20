@@ -138,6 +138,25 @@ export function packFile(input: PackFileInput): File {
   return new File([bytes as BlobPart], name, { type: 'application/zip' });
 }
 
+/**
+ * The server keeps every inspected pack for an hour and allows 8 at once, so a pack the user looked at and did not install must
+ * be given back. The dialog holds at most one inspected pack. `release` is for Cancel, Close and a dialog that goes away;
+ * `hold` also releases the pack held before (a new file after an inspection that did not install); `forget` is for a pack that
+ * was installed or that the server no longer has. Each discard is fire and forget: a failure or a slow server never delays closing.
+ */
+export function createStagedHold(discard: (stagedId: string) => unknown) {
+  let held: string | undefined;
+  const send = (stagedId: string) => { try { void Promise.resolve(discard(stagedId)).catch(() => {}); } catch { /* Closing never waits on, or fails because of, a cleanup. */ } };
+  return {
+    held: () => held,
+    hold(stagedId: string) { if (held && held !== stagedId) send(held); held = stagedId; },
+    forget() { held = undefined; },
+    release() { if (held) { const stagedId = held; held = undefined; send(stagedId); } },
+    /** An inspection that finished after the user had moved on: its upload was never shown, so give it back at once. */
+    abandon: send,
+  };
+}
+
 export interface ImportRequest { id: number; file?: File }
 export function createImportEntry() {
   let request: ImportRequest | null = null, counter = 0;

@@ -9,8 +9,9 @@ import { collectPack } from '../src/packs/collect';
 import { limits, writeArchive } from '../src/packs/archive';
 import { digest, type PackManifest } from '../src/packs/manifest';
 import { crc32, deflateRawSync } from 'node:zlib';
+import { randomUUID } from 'node:crypto';
 import { handlePacksRequest, stagedLifetime, type PackHooks } from '../src/server/packs-http';
-import { createOpenDocService } from '../src/server/service';
+import { createOpenDocService, readOnlyAllows } from '../src/server/service';
 import { exportPack, installPack } from '../src/packs/packs';
 import { fixture, projectRoot, until } from './helpers';
 
@@ -454,4 +455,119 @@ test('pack HTTP refuses hostile archives at inspection and stages nothing', { ti
   assert.deepEqual(await snapshot(f.recipient), {});
   assert.equal(existsSync(resolve(f.container, 'evil.ts')), false);
   assert.equal(existsSync(resolve(f.recipient, 'evil.ts')), false);
+});
+
+const discard = (server: { origin: string }, id: string, headers?: Record<string, string>) => fetch(`${server.origin}/api/packs/staged/${id}`, { method: 'DELETE', headers });
+
+test('pack HTTP discards one staged pack, which frees its slot', { timeout: 60_000 }, async t => {
+  const f = await workspaces(t);
+  const zip = resolve(f.container, 'design.opendoc.zip');
+  await synthetic(f.source, zip);
+  const server = await serve(t, f.recipient);
+  const archive = await readFile(zip), ids: string[] = [];
+  for (let index = 0; index < 8; index++) ids.push((await good<Inspected>(await server.upload(archive), 201)).stagedId);
+  assert.equal((await server.upload(archive)).status, 429);
+  // A file beside the staging folder, and a staged folder that is not ours to touch, must survive every discard below.
+  await put(f.recipient, '.opendoc/keep.txt', 'keep');
+
+  assert.deepEqual(await good(await discard(server, ids[0])), { removed: true });
+  assert.ok(!(await stagedFolders(f.recipient)).includes(ids[0]));
+  assert.deepEqual((await stagedFolders(f.recipient)).filter(name => !name.startsWith('.')).sort(), ids.slice(1).sort(), 'only that upload is gone');
+  const ninth = await good<Inspected>(await server.upload(archive), 201);
+  assert.equal((await server.upload(archive)).status, 429, 'the freed slot is the only one');
+  assert.deepEqual(await good(await discard(server, ninth.stagedId)), { removed: true });
+  await put(f.recipient, '.opendoc/pack-uploads/.pending-unfinished/pack.zip', 'unfinished'); // Not a staging ID: no discard may reach it.
+  assert.equal((await server.get(ninth.previews[0])).status, 404);
+
+  // Again, an id that was never staged, and one that expired and is still on disk: status 200, nothing removed.
+  assert.deepEqual(await good(await discard(server, ids[0])), { removed: false });
+  assert.deepEqual(await good(await discard(server, randomUUID())), { removed: false });
+  const longAgo = new Date(Date.now() - stagedLifetime - 60_000);
+  await utimes(resolve(staging(f.recipient), ids[1]), longAgo, longAgo);
+  assert.deepEqual(await good(await discard(server, ids[1])), { removed: false });
+  assert.ok(!(await stagedFolders(f.recipient)).includes(ids[1]), 'an expired folder is cleared away too');
+
+  // Ids that are not the staging format are refused, whatever they try to reach.
+  const before = await stagedFolders(f.recipient);
+  for (const id of ['x', 'not-an-id', '..%2F..%2Fkeep.txt', '..%2Fkeep.txt', '.pending-unfinished', ids[2].toUpperCase(), `${ids[2]}%2F..`, `${ids[2]}.`, '%2E%2E%2F%2E%2E%2F']) {
+    const refused = await discard(server, id);
+    assert.equal(refused.status, 400, `${id}: ${await refused.clone().text()}`);
+  }
+  assert.deepEqual(await stagedFolders(f.recipient), before);
+  assert.equal(await readFile(resolve(f.recipient, '.opendoc/keep.txt'), 'utf8'), 'keep');
+  assert.equal(await readFile(resolve(staging(f.recipient), '.pending-unfinished/pack.zip'), 'utf8'), 'unfinished');
+  // Only DELETE discards, and DELETE reaches nothing else in the pack routes.
+  assert.equal((await fetch(`${server.origin}/api/packs/staged/${ids[2]}`)).status, 404);
+  assert.equal((await fetch(`${server.origin}/api/packs/staged/${ids[2]}`, { method: 'POST' })).status, 404);
+  assert.equal((await fetch(`${server.origin}/api/packs/inspect`, { method: 'DELETE' })).status, 404);
+  assert.equal((await fetch(`${server.origin}/api/packs/staged/${ids[2]}/previews/theme-acme.pdf`, { method: 'DELETE' })).status, 404);
+  assert.ok((await stagedFolders(f.recipient)).includes(ids[2]));
+  assert.deepEqual(await snapshot(f.recipient), {}, 'no workspace file was added');
+  assert.deepEqual(server.events, []);
+});
+
+test('pack HTTP: a pack that was installed is already gone, and discard says so', { timeout: 120_000 }, async t => {
+  const f = await workspaces(t);
+  const zip = resolve(f.container, 'acme.opendoc.zip');
+  await exportPack(f.source, { themes: ['acme'], output: zip });
+  const server = await serve(t, f.recipient);
+  const inspected = await good<Inspected>(await server.upload(await readFile(zip)), 201);
+  await good(await server.send('/api/packs/install', { stagedId: inspected.stagedId, trust: true }));
+  assert.deepEqual(await stagedFolders(f.recipient), []);
+  assert.deepEqual(await good(await discard(server, inspected.stagedId)), { removed: false });
+  assert.ok(existsSync(resolve(f.recipient, 'themes/acme/index.ts')), 'the installed design stays');
+});
+
+test('pack HTTP: discard leaves the pack that is installing, and removes any other', { timeout: 60_000 }, async t => {
+  const f = await workspaces(t);
+  const broken = resolve(f.container, 'broken.opendoc.zip');
+  await synthetic(f.source, broken, `import {theme as base} from '../neutral'; throw new Error('BROKEN_DESIGN_SOURCE'); export const theme = {...base,id:'acme'};`);
+  let release!: () => void;
+  const server = await serve(t, f.recipient, new Promise<void>(accept => { release = accept; }));
+  const archive = await readFile(broken);
+  const first = await good<Inspected>(await server.upload(archive), 201), second = await good<Inspected>(await server.upload(archive), 201);
+  const running = server.send('/api/packs/install', { stagedId: first.stagedId, trust: true });
+  await until(() => server.events.includes('pause'));
+  assert.deepEqual(await good(await discard(server, first.stagedId)), { removed: false });
+  assert.deepEqual(await stagedFolders(f.recipient).then(names => names.sort()), [first.stagedId, second.stagedId].sort(), 'the installing upload is untouched');
+  assert.deepEqual(await good(await discard(server, second.stagedId)), { removed: true });
+  release();
+  assert.equal((await running).status, 400); // It still proceeds and fails on its own code, not on a missing file.
+  assert.deepEqual(server.events, ['pause', 'resume']);
+});
+
+test('discarding a staged pack needs the session token and works while the workspace is read-only', { timeout: 60_000 }, async t => {
+  const f = await workspaces(t);
+  const zip = resolve(f.container, 'design.opendoc.zip');
+  await synthetic(f.source, zip);
+  const archive = await readFile(zip);
+  const id = randomUUID();
+  assert.equal(readOnlyAllows('DELETE', `/api/packs/staged/${id}`), true);
+  for (const [method, path] of [['POST', `/api/packs/staged/${id}`], ['DELETE', '/api/packs/staged'], ['DELETE', `/api/packs/staged/${id}/previews/x.pdf`], ['DELETE', '/api/packs/install']] as const) assert.equal(readOnlyAllows(method, path), false, `${method} ${path}`);
+
+  const workspace = await fixture();
+  await rm(resolve(workspace.root, 'assets')); // The fixture links the repository's assets; a workspace that stages packs owns its own.
+  await mkdir(resolve(workspace.root, 'assets'));
+  const service = await createOpenDocService({ root: workspace.root, production: false, client: (_req, res) => { res.end('client'); }, readOnly: { reason: 'newer-patch', message: 'This workspace needs a newer OpenDoc.' } });
+  const server = createServer((req, res) => { service.handle(req, res).catch(() => {}); });
+  await new Promise<void>(accept => server.listen(0, '127.0.0.1', accept));
+  t.after(async () => {
+    server.closeAllConnections(); await new Promise<void>(accept => server.close(() => accept()));
+    try { await service.close(); } finally { await rm(workspace.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const origin = `http://127.0.0.1:${address.port}`, guard = { 'X-OpenDoc-Token': service.token };
+  const form = new FormData(); form.set('file', new Blob([new Uint8Array(archive)]), 'design.opendoc.zip');
+  const inspected = await good<Inspected>(await fetch(`${origin}/api/packs/inspect`, { method: 'POST', headers: guard, body: form }), 201);
+
+  assert.equal((await discard({ origin }, inspected.stagedId)).status, 403, 'a discard without the token is refused');
+  assert.ok((await stagedFolders(workspace.root)).includes(inspected.stagedId));
+  assert.equal((await discard({ origin }, inspected.stagedId, { 'X-OpenDoc-Token': 'wrong' })).status, 403);
+  assert.deepEqual(await good(await discard({ origin }, inspected.stagedId, guard)), { removed: true });
+  assert.deepEqual(await stagedFolders(workspace.root), []);
+  assert.deepEqual(await good(await discard({ origin }, inspected.stagedId, guard)), { removed: false });
+  assert.equal((await discard({ origin }, 'not-an-id', guard)).status, 400);
+  // Read-only still refuses the install and every other write.
+  assert.equal((await fetch(`${origin}/api/packs/install`, { method: 'POST', headers: { ...guard, 'Content-Type': 'application/json' }, body: JSON.stringify({ stagedId: id, trust: true }) })).status, 403);
 });

@@ -1,11 +1,11 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
-import { ApiError, exportPack, inspectPack, installPack, type PackExportResult, type PackInspection, type PackInstallResult, type PackItemInfo } from './api';
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { ApiError, discardStagedPack, exportPack, inspectPack, installPack, type PackExportResult, type PackInspection, type PackInstallResult, type PackItemInfo } from './api';
 import { PdfPage, usePdf } from './Pdf';
 import { fetchReadOnly } from './readOnly';
 import { Button, Dialog, Input } from './ui';
 import { Icon } from './ui/Icon';
 import {
-  canInstall, chosenCount, chosenText, emptyExportForm, exportFailure, exportProblems, exportRequest, fileSize, importEntry, importHosts,
+  canInstall, chosenCount, chosenText, createStagedHold, emptyExportForm, exportFailure, exportProblems, exportRequest, fileSize, importEntry, importHosts,
   installedLinks, isPackFileName, licenseLimit, nameLimit, openPackImport, packBlockers, packBridge, packChoice, packFileName, packSizeLimit, type ExportForm, type ImportRequest, type PackKind,
 } from './packs';
 import './packs.css';
@@ -201,18 +201,21 @@ function ImportBody({ request, open, connected, onClose, onBusy }: { request: Im
   const [trusted, setTrusted] = useState(false);
   const [readOnly, setReadOnly] = useState<string>();
   const controller = useRef<AbortController | undefined>(undefined);
+  const staged = useMemo(() => createStagedHold(discardStagedPack), []);
   const step = useRef<HTMLDivElement>(null);
   const trust = useId();
 
   async function inspect(file: File) {
     controller.current?.abort();
+    staged.release(); // A new file after an inspection that did not install: the earlier upload is not needed any more.
     const mine = controller.current = new AbortController();
     setError(''); setTrusted(false); setState({ phase: 'inspecting', name: file.name });
     try {
       if (!isPackFileName(file.name)) throw new Error('Choose an OpenDoc pack, a file that ends in .opendoc.zip.');
       if (file.size > packSizeLimit) throw new Error('Choose a pack of at most 64 MiB.');
       const inspection = await inspectPack(file, file.name);
-      if (mine.signal.aborted) return;
+      if (mine.signal.aborted) { staged.abandon(inspection.stagedId); return; } // Closed or replaced while it was being checked.
+      staged.hold(inspection.stagedId);
       setState({ phase: 'review', name: file.name, inspection, installing: false });
       void fetchReadOnly(mine.signal).then(state => { if (!mine.signal.aborted) setReadOnly(state?.message); }, () => {});
     } catch (failure) {
@@ -221,8 +224,10 @@ function ImportBody({ request, open, connected, onClose, onBusy }: { request: Im
     }
   }
   useEffect(() => { if (request.file) void inspect(request.file); }, [request.id]);
-  // Closing the dialog drops an inspection still in flight; the server expires what it staged.
-  useEffect(() => { if (!open) controller.current?.abort(); }, [open]);
+  // Closing the dialog drops an inspection still in flight, and gives back the pack it was showing. Fire and forget.
+  useEffect(() => { if (!open) { controller.current?.abort(); staged.release(); } }, [open]);
+  // A new request (a file opened while this one is showing) and leaving the page replace this body: give the upload back then too.
+  useEffect(() => () => { controller.current?.abort(); staged.release(); }, []);
   useEffect(() => { step.current?.focus({ preventScroll: true }); }, [state.phase]);
   // The dialog stays open while an install runs: closing would hide the result of something already under way.
   const installingNow = state.phase === 'review' && state.installing;
@@ -233,10 +238,10 @@ function ImportBody({ request, open, connected, onClose, onBusy }: { request: Im
     const { inspection } = state;
     if (!canInstall(packBlockers(inspection, { readOnly, connected }), trusted, state.installing)) return;
     setError(''); setState({ ...state, installing: true });
-    try { setState({ phase: 'done', inspection, result: await installPack(inspection.stagedId) }); }
+    try { const result = await installPack(inspection.stagedId); staged.forget(); setState({ phase: 'done', inspection, result }); }
     catch (failure) {
       const message = (failure as Error).message;
-      if (failure instanceof ApiError && failure.status === 404) { setError(message); setTrusted(false); setState({ phase: 'choose' }); }
+      if (failure instanceof ApiError && failure.status === 404) { staged.forget(); setError(message); setTrusted(false); setState({ phase: 'choose' }); }
       else { setError(message); setState({ ...state, installing: false }); }
     }
   }
@@ -282,7 +287,7 @@ function ImportBody({ request, open, connected, onClose, onBusy }: { request: Im
           {error && <p className="field-error" role="alert">{error}</p>}
           <div className="dialog-actions">
             {refused || blockers.some(blocker => blocker.kind === 'nothing-new') ? <>
-              <Button onClick={() => { setError(''); setState({ phase: 'choose' }); }}>Choose another pack</Button><Dialog.Close render={<Button className="primary" />}>Close</Dialog.Close>
+              <Button onClick={() => { staged.release(); setError(''); setState({ phase: 'choose' }); }}>Choose another pack</Button><Dialog.Close render={<Button className="primary" />}>Close</Dialog.Close>
             </> : <>
               <Dialog.Close render={<Button disabled={installing} />}>Cancel</Dialog.Close>
               <Button className="primary" disabled={!canInstall(blockers, trusted, installing)} onClick={() => void install()}>{installing ? 'Installing…' : 'Install pack'}</Button>

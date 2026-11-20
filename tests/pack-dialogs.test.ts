@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  canInstall, chosenCount, chosenText, createHostRegistry, createImportEntry, createPackChoice, emptyExportForm, exportFailure, exportProblems, exportRequest,
+  canInstall, chosenCount, chosenText, createHostRegistry, createStagedHold, createImportEntry, createPackChoice, emptyExportForm, exportFailure, exportProblems, exportRequest,
   fileSize, installedLinks, isPackFileName, packBlockers, packFile, packFileName, packId, type ExportForm,
 } from '../src/app/packs';
 import type { PackInspection } from '../src/app/api';
@@ -174,4 +174,64 @@ test('only the first mounted dialog host is active, and the next takes over when
   leaveGallery();
   assert.equal(hosts.active(), undefined);
   assert.deepEqual(changes, [shell, gallery, undefined]);
+});
+
+test('an inspected pack that is not installed is given back on Cancel, on Close, and when the dialog restarts with a new file', () => {
+  const sent: string[] = [];
+  const hold = createStagedHold(id => { sent.push(id); });
+  // Cancel or Close after an inspection (the dialog calls `release` for both, and again when it goes away).
+  hold.hold('a');
+  assert.equal(hold.held(), 'a');
+  hold.release();
+  hold.release();
+  assert.deepEqual(sent, ['a'], 'one discard, however many times the dialog closes');
+  assert.equal(hold.held(), undefined);
+  // A new file after an inspection that did not install: the first upload goes, the second is held.
+  hold.hold('b');
+  hold.hold('c');
+  assert.deepEqual(sent, ['a', 'b']);
+  assert.equal(hold.held(), 'c');
+  hold.hold('c');
+  assert.deepEqual(sent, ['a', 'b'], 'the same pack held again is not discarded');
+  // Installed, or already gone on the server: nothing to give back.
+  hold.forget();
+  hold.release();
+  assert.deepEqual(sent, ['a', 'b']);
+  // An inspection that finished after the user had closed the dialog was never shown: it goes at once.
+  hold.abandon('d');
+  assert.deepEqual(sent, ['a', 'b', 'd']);
+  hold.release();
+  assert.deepEqual(sent, ['a', 'b', 'd'], 'nothing held, nothing sent');
+});
+
+test('giving a pack back never blocks or fails closing', async () => {
+  let started = 0;
+  const slow = createStagedHold(() => { started++; return new Promise(() => {}); }); // Never answers.
+  slow.hold('a');
+  slow.release(); // Returns at once.
+  assert.equal(started, 1);
+  assert.equal(slow.held(), undefined, 'the dialog is free of it straight away');
+  const failing = createStagedHold(() => Promise.reject(new Error('offline')));
+  failing.hold('a'); failing.release();
+  const throwing = createStagedHold(() => { throw new Error('no network'); });
+  throwing.hold('a'); throwing.release(); throwing.abandon('b');
+  await new Promise(accept => setImmediate(accept));
+  assert.equal(throwing.held(), undefined);
+});
+
+test('discarding a staged pack sends DELETE with the session token to the staging route', async () => {
+  const original = globalThis.fetch;
+  const calls: { path: string; method?: string; token: string | null }[] = [];
+  globalThis.fetch = async (input, init) => {
+    const path = String(input);
+    calls.push({ path, method: init?.method, token: new Headers(init?.headers).get('X-OpenDoc-Token') });
+    return new Response(JSON.stringify(path === '/api/session' ? { token: 'test-session' } : { removed: true }), { headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const { discardStagedPack } = await import(`../src/app/api.ts?test=${Date.now()}-${Math.random()}`) as typeof import('../src/app/api');
+    assert.deepEqual(await discardStagedPack('0b6f1a52-8d3c-4f0e-9a41-2c7d5e8f9a10'), { removed: true });
+    assert.deepEqual(calls.at(-1), { path: '/api/packs/staged/0b6f1a52-8d3c-4f0e-9a41-2c7d5e8f9a10', method: 'DELETE', token: 'test-session' });
+    await discardStagedPack('../x');
+    assert.equal(calls.at(-1)!.path, '/api/packs/staged/..%2Fx', 'an id is never a path');
+  } finally { globalThis.fetch = original; }
 });

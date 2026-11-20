@@ -61,9 +61,17 @@ export function createUpdaterClass(type, { getBuild, getFeedBase = () => null, s
   const Base = bases[type];
   if (!Base) throw new Error(`No updater for install type ${type}.`);
   const Checked = withConfigFallback(withReleaseFile(withBuildCompare(Base, getBuild), type, getFeedBase));
+  /**
+   * Every type can empty the folder the download sits in (the file and update-info.json): after a package install, and at a check that
+   * finds nothing newer (which clears what an AppImage swap or a macOS swap left there). The controller never calls it while a downloaded
+   * update still waits to be installed, so the AppImage's swap at quit always has its file.
+   */
+  const Clearing = class extends Checked {
+    async clearDownloaded() { await (await this.getOrCreateDownloadHelper()).clear(); }
+  };
 
   if (type === 'appimage') {
-    return class extends Checked {
+    return class extends Clearing {
       /**
        * The swap at quit stages a copy in the AppImage's own folder, so that folder must be writable and have room (about the size of
        * the AppImage itself until the real size is known). Either problem would lose the update at quit, so nothing is downloaded.
@@ -109,11 +117,9 @@ export function createUpdaterClass(type, { getBuild, getFeedBase = () => null, s
   }
 
   if (packageTypes.includes(type)) {
-    return class extends Checked {
+    return class extends Clearing {
       async preflight() { return { ok: true }; }
 
-      /** Empty the folder the download sits in (the installer and update-info.json): after an install, or when nothing newer is left to install. */
-      async clearDownloaded() { await (await this.getOrCreateDownloadHelper()).clear(); }
 
       /** The file as downloaded and its checksum from the metadata (what electron-updater compared it with). */
       downloaded() {
@@ -136,7 +142,7 @@ export function createUpdaterClass(type, { getBuild, getFeedBase = () => null, s
   }
 
   // macOS: electron-updater downloads and checks the zip, then the app's own swap takes over (Squirrel.Mac is skipped).
-  return class extends Checked {
+  return class extends Clearing {
     async updateDownloaded(zipFileInfo, event) {
       this.downloadedZip = event.downloadedFile;
       this.downloadedRelease = { version: event.version, build: parseBuild(event.build) }; // what the unzipped bundle must say it is

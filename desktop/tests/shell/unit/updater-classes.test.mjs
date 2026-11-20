@@ -165,17 +165,20 @@ test('the class checks file addresses against the feed it was given: a loopback 
   assert.equal(await build('http://127.0.0.1:8099/generic/').isUpdateAvailable(release(2, 'opendoc-desktop_0.6.1-2_amd64.deb')), true);
 });
 
-test('package updates can empty the pending folder (the installer and update-info.json), and the other types have no such call', async () => {
-  for (const type of ['deb', 'rpm', 'pacman']) {
+test('every install type can empty the pending folder (the downloaded file and update-info.json)', async () => {
+  for (const type of ['deb', 'rpm', 'pacman', 'appimage']) {
     const folder = await scratch('class-clear');
     const updater = newUpdater(createUpdaterClass(type, { getBuild: () => 1 }), '0.6.1', folder);
     const pending = join(folder, 'opendoc-desktop-updater', 'pending');
     await mkdir(pending, { recursive: true });
-    await writeFile(join(pending, 'opendoc-desktop_0.6.1-2_amd64.deb'), 'x'.repeat(1000));
+    await writeFile(join(pending, type === 'appimage' ? 'opendoc-desktop-x86_64.AppImage' : 'opendoc-desktop_0.6.1-2_amd64.deb'), 'x'.repeat(1000));
     await writeFile(join(pending, 'update-info.json'), '{}');
     await updater.clearDownloaded();
     assert.deepEqual(await readdir(pending), [], type);
     await updater.clearDownloaded(); // nothing there: no error
   }
-  for (const type of ['appimage', 'mac']) assert.equal(typeof createUpdaterClass(type, { getBuild: () => 1 }).prototype.clearDownloaded, 'undefined', type);
+  // MacUpdater needs Electron's autoUpdater to be constructed, so here only the class is checked: it has the same shared call.
+  const mac = createUpdaterClass('mac', { getBuild: () => 1 }).prototype.clearDownloaded;
+  assert.equal(typeof mac, 'function');
+  assert.equal(String(mac), String(createUpdaterClass('deb', { getBuild: () => 1 }).prototype.clearDownloaded));
 });

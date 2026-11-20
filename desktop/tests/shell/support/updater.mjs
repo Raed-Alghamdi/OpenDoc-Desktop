@@ -53,7 +53,7 @@ export class FakeUpdater extends EventEmitter {
 
   downloaded() { return { file: '/cache/update.deb', sha512: 'x' }; }
 
-  /** The package classes empty the updater's pending folder here (the installer and update-info.json). */
+  /** Every install type empties the updater's pending folder here (the downloaded file and update-info.json). */
   async clearDownloaded() {
     if (this.script.clearError) throw new Error(this.script.clearError);
     this.cleared = (this.cleared ?? 0) + 1;

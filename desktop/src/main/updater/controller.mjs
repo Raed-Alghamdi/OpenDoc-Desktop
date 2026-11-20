@@ -411,8 +411,9 @@ export class UpdateController {
   }
 
   /**
-   * Delete the installer and update-info.json of a package update (deb, rpm, pacman) from the updater's pending folder: the
-   * installed file is no use any more, and the next check that finds nothing newer clears what a crash left. Never throws.
+   * Delete the downloaded file and update-info.json from the updater's pending folder: after a package install (deb, rpm, pacman) the
+   * installed file is no use any more, and the next check that finds nothing newer clears what a crash, an AppImage swap or a macOS swap
+   * left. Never while a downloaded update still waits (the AppImage's swap at quit needs its file). Never throws.
    */
   async #clearDownloaded(why) {
     if (typeof this.updater?.clearDownloaded !== 'function') return;

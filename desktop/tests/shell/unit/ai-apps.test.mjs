@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { AiApps, cleanIds, describeApp, integrationOptions, refreshProblem } from '../../../src/main/ai-apps.mjs';
+import { AiApps, cleanIds, describeApp, describeOverview, describeRow, integrationOptions, refreshProblem, tryPrompt } from '../../../src/main/ai-apps.mjs';
 import { aiAppsOffered, createConfig, markAiAppsOffered } from '../../../src/main/config.mjs';
 import { createIntegrations } from '../../../src/main/integrations/index.mjs';
 import { fakeCommand, scratch } from './integrations-support.mjs';
@@ -42,8 +42,9 @@ test('the test options file is read by an unpackaged run only, takes the listed 
   assert.deepEqual(packaged, { dataDirectory: '/data', build: 3, sourceDirectory: '/opt/app/resources/integrations' });
 });
 
-test('a page can name known apps only, each once', () => {
+test('a page can name known apps and their folders only, each once', () => {
   assert.deepEqual(cleanIds(['claude', 'claude', 'codex', 'rm -rf', 5, null, 'constructor']), ['claude', 'codex']);
+  assert.deepEqual(cleanIds(['claude@.claude-Work', 'claude@/srv/profile', 'claude@.claude-Work', 'nothing@.claude-Work', 'claude@a\nb', `claude@${'x'.repeat(2000)}`]), ['claude@.claude-Work', 'claude@/srv/profile'], 'a target id is the app id, an at sign and a folder; the module checks the folder');
   assert.deepEqual(cleanIds('claude'), []);
   assert.deepEqual(cleanIds(undefined), []);
 });
@@ -255,4 +256,82 @@ test('the first-run flag: absent until the screen is shown, true afterwards, and
   await mkdir(join(world.root, 'other'), { recursive: true });
   await writeFile(join(world.root, 'other', 'config.json'), JSON.stringify({ aiAppsOffered: 'yes' }));
   assert.equal(await aiAppsOffered(createConfig(join(world.root, 'other', 'config.json'))), false, 'only the boolean true counts');
+});
+
+test('the list rows: installed or not, how many folders are connected, what needs attention and what has an update', () => {
+  const target = (id, label, fields = {}) => ({ id, label, configFolder: `/h/${label}`, note: '', source: 'found', exists: true, terminal: false, recorded: false, pending: false, stale: false, managed: false, ...fields });
+  const app = (fields = {}) => ({ id: 'claude', name: 'Claude Code', present: true, canConnect: true, reason: 'Found.', executable: '/bin/claude', installer: null, website: 'claude.com/claude-code', targets: [target('claude', '~/.claude'), target('claude@.claude-Work', '~/.claude-Work')], ...fields });
+  const texts = row => row.badges.map(badge => badge.text);
+  assert.deepEqual(texts(describeRow(app())), ['Installed']);
+  const one = app({ targets: [target('claude', '~/.claude', { recorded: true, managed: true }), target('claude@.claude-Work', '~/.claude-Work')] });
+  assert.deepEqual(texts(describeRow(one)), ['Installed', 'Connected in 1 of 2 folders']);
+  const both = app({ targets: one.targets.map(item => ({ ...item, recorded: true, managed: true })) });
+  assert.deepEqual(texts(describeRow(both)), ['Installed', 'Connected in 2 of 2 folders']);
+  const single = app({ id: 'codex', name: 'Codex', targets: [target('codex', '~/.codex', { recorded: true, managed: true })] });
+  assert.deepEqual(texts(describeRow(single)), ['Installed', 'Connected']);
+  assert.deepEqual(texts(describeRow(app({ targets: [target('claude', '~/.claude', { recorded: true, managed: true, stale: true })] }))), ['Installed', 'Connected', 'Update available']);
+  assert.deepEqual(texts(describeRow(app({ targets: [target('claude', '~/.claude', { recorded: true, managed: true, pending: true })] }))), ['Installed', 'Needs attention']);
+  const gone = describeRow(app({ present: false, canConnect: false, targets: [target('claude', '~/.claude', { recorded: true, managed: true })] }));
+  assert.deepEqual(texts(gone), ['Not installed', 'Needs attention']);
+  assert.deepEqual(gone.targets.map(item => item.state), ['gone']);
+  assert.deepEqual(texts(describeRow(app({ present: false, canConnect: false }))), ['Not installed']);
+  // With the vendor's answer, a folder that is there but not from this app is "outside" and does not count as connected.
+  const checked = { targets: [{ id: 'claude', managed: false, connected: true, summary: 'Installed and enabled, not from this app.' }, { id: 'claude@.claude-Work', managed: false, connected: false, summary: 'OpenDoc is not installed in Claude Code.' }] };
+  const outside = describeRow(app(), checked);
+  assert.deepEqual(outside.targets.map(item => item.state), ['outside', 'available']);
+  assert.deepEqual(texts(outside), ['Installed']);
+  assert.equal(outside.checked, true);
+});
+
+test('the list opens without a vendor command, and an app\'s page runs the check for that app only', async () => {
+  const world = await setup();
+  await mkdir(join(world.home, '.claude-Work'), { recursive: true });
+  await writeFile(join(world.home, '.claude-Work', 'settings.json'), '{}');
+  const list = await world.apps.overview();
+  assert.deepEqual(list.apps.map(app => app.id), ['claude', 'codex', 'antigravity', 'cursor', 'copilot']);
+  assert.deepEqual(list.apps.map(app => app.badges[0].text), ['Installed', 'Installed', 'Installed', 'Not installed', 'Not installed']);
+  assert.deepEqual(list.apps[0].targets.map(item => [item.id, item.state]), [['claude', 'available'], ['claude@.claude-Work', 'available']]);
+  assert.equal(list.tryPrompt, tryPrompt);
+  assert.equal(list.other.skillFolder, join(world.source, 'skills', 'opendoc'));
+  assert.deepEqual(await world.calls(), [], 'no vendor command ran');
+  assert.deepEqual(describeOverview(await world.apps.integrations.overview()).apps[1].badges, list.apps[1].badges);
+
+  const page = await world.apps.app('claude');
+  assert.equal(page.ok, true);
+  assert.equal(page.app.checked, true);
+  assert.deepEqual(page.app.targets.map(item => [item.id, item.state]), [['claude', 'available'], ['claude@.claude-Work', 'available']]);
+  assert.ok((await world.calls()).every(call => call.tool === 'claude' && call.args.includes('list')), 'only Claude Code was asked');
+  assert.deepEqual((await world.apps.app('not-an-app')).ok, false);
+  assert.deepEqual((await world.apps.app('claude@.claude-Work')).ok, false, 'a page asks for an app, not a folder');
+});
+
+test('Connect and Disconnect in a second Claude Code folder through the screen\'s layer, then only that app is checked again', async () => {
+  const world = await setup();
+  await mkdir(join(world.home, '.claude-Work'), { recursive: true });
+  await writeFile(join(world.home, '.claude-Work', 'settings.json'), '{}');
+  const outcome = await world.apps.connect(['claude@.claude-Work']);
+  assert.equal(outcome.ok, true, JSON.stringify(outcome, null, 1));
+  const page = (await world.apps.app('claude')).app;
+  assert.deepEqual(page.targets.map(item => [item.id, item.state]), [['claude', 'available'], ['claude@.claude-Work', 'connected']]);
+  assert.deepEqual(page.badges.map(badge => badge.text), ['Installed', 'Connected in 1 of 2 folders']);
+  assert.deepEqual((await world.apps.overview()).apps[0].badges.map(badge => badge.text), ['Installed', 'Connected in 1 of 2 folders'], 'the list agrees, from the record alone');
+  const before = (await world.calls()).length;
+  assert.deepEqual((await world.apps.connect(['claude@.claude-Nope', '/etc'])).results.map(item => item.code), ['unknown-target']);
+  assert.equal((await world.calls()).length, before);
+  assert.deepEqual((await world.apps.disconnect(['claude@.claude-Work'])).results.map(item => item.code), ['disconnected']);
+  assert.deepEqual((await world.apps.overview()).apps[0].badges.map(badge => badge.text), ['Installed']);
+});
+
+test('a Copy button copies text the app chose, by name: the prompt, the skill folder, the opendoc command', async () => {
+  const world = await setup({ commands: ['claude'] });
+  assert.equal(await world.apps.copyText('prompt'), 'Make a one-page PDF with OpenDoc: a short memo titled Test.');
+  assert.equal(await world.apps.copyText('skill-folder'), join(world.source, 'skills', 'opendoc'));
+  assert.equal(await world.apps.copyText('command'), null, 'there is no opendoc command in this world');
+  assert.equal(await world.apps.copyText('/etc/passwd'), null);
+  assert.equal(await world.apps.copyText(undefined), null);
+});
+
+test('a failed refresh of a second Claude Code folder names the folder', () => {
+  const failed = { ok: false, results: [{ ok: false, code: 'failed', app: 'claude', target: 'claude@.claude-Work', targetLabel: '~/.claude-Work', name: 'Claude Code', summary: 'It did not work.' }, { ok: false, code: 'failed', app: 'codex', target: 'codex', targetLabel: '~/.codex', name: 'Codex', summary: 'No.' }] };
+  assert.deepEqual(refreshProblem(failed), ['Claude Code (~/.claude-Work): It did not work.', 'Codex: No.']);
 });

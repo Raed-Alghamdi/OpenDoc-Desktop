@@ -11,9 +11,9 @@ import { dump, fakeCommand, listing, scratch } from './integrations-support.mjs'
 async function setup(extraEnv = {}, options = {}) {
   const world = await scratch();
   for (const name of ['claude', 'codex', 'agy']) await fakeCommand(world, name);
-  world.claudeConfig = join(world.root, 'claude-config');
+  world.claudeConfig = join(world.home, '.claude'); // the default folder: the `claude` target
   world.codexHome = join(world.root, 'codex-home');
-  world.integrations = createIntegrations(world.options({ env: world.env({ CLAUDE_CONFIG_DIR: world.claudeConfig, CODEX_HOME: world.codexHome, ...extraEnv }), ...options }));
+  world.integrations = createIntegrations(world.options({ env: world.env({ CODEX_HOME: world.codexHome, ...extraEnv }), ...options }));
   world.manifest = async () => JSON.parse(await readFile(world.integrations.manifestFile, 'utf8'));
   world.vendorCalls = async tool => (await world.calls()).filter(call => call.tool === tool).map(call => call.args.join(' '));
   return world;
@@ -31,7 +31,7 @@ test('Claude Code: connect adds the marketplace from the stable copy, installs, 
   assert.ok(claude.steps.every(step => !step.command || !step.command.includes(world.source)), 'nothing points at the source');
   assert.equal(outcome.copy.ok, true);
   const calls = await world.calls();
-  assert.ok(calls.every(call => call.CLAUDE_CONFIG_DIR === world.claudeConfig && call.HOME === world.home), 'the user\'s config folder is passed through');
+  assert.ok(calls.every(call => call.CLAUDE_CONFIG_DIR === null && call.HOME === world.home), 'the default folder is Claude Code\'s own: the variable is not set for it');
   assert.ok(calls.every(call => call.XDG.every(folder => folder.startsWith(world.home))), 'the XDG variables of the scratch world reach the vendor command, so nothing resolves to real folders');
 
   const manifest = await world.manifest();
@@ -42,7 +42,8 @@ test('Claude Code: connect adds the marketplace from the stable copy, installs, 
   assert.deepEqual(record.marketplace, { name: 'opendoc', path: join(world.data, 'integrations', 'claude') });
   assert.equal(record.plugin.id, 'opendoc@opendoc');
   assert.equal(record.pending, undefined);
-  assert.deepEqual(record.environment, { CLAUDE_CONFIG_DIR: world.claudeConfig });
+  assert.deepEqual(record.environment, { CLAUDE_CONFIG_DIR: null });
+  assert.equal(record.configFolder, world.claudeConfig);
   assert.equal((await stat(world.integrations.manifestFile)).mode & 0o777, 0o600);
 });
 
@@ -70,7 +71,7 @@ test('Codex: connect, verify through plugin list, disconnect, with CODEX_HOME pa
   assert.equal(outcome.ok, true, JSON.stringify(outcome, null, 1));
   assert.ok(outcome.results[0].steps.some(step => step.command === `codex plugin marketplace add ${join(world.data, 'integrations', 'codex')}`));
   assert.ok((await world.calls()).every(call => call.CODEX_HOME === world.codexHome));
-  assert.ok((await world.vendorCalls('codex')).includes('plugin list --json'));
+  assert.ok((await world.vendorCalls('codex')).includes('plugin list --marketplace opendoc --json'));
   const manifest = await world.manifest();
   assert.equal(manifest.apps.codex.plugin.id, 'opendoc@opendoc');
 
@@ -78,6 +79,29 @@ test('Codex: connect, verify through plugin list, disconnect, with CODEX_HOME pa
   assert.equal(removed.ok, true, JSON.stringify(removed, null, 1));
   assert.deepEqual((await listing(world.codexHome)).filter(name => /opendoc/.test(name)), [], 'the empty cache folders Codex leaves are removed too');
   assert.deepEqual(JSON.parse(await readFile(join(world.codexHome, 'fake-codex.json'), 'utf8')), { marketplaces: [], plugins: [] });
+});
+
+test('Codex is only ever asked about the opendoc marketplace, so it never downloads its whole plugin catalog', async () => {
+  // A Codex signed in with ChatGPT downloads OpenAI's plugin catalog (about 85 MB) for a `plugin list` that names no marketplace.
+  const world = await setup();
+  const fakeState = join(world.codexHome, 'fake-codex.json');
+  const otherPlugin = { pluginId: 'helper@other', name: 'helper', marketplaceName: 'other', version: '2.0.0', installed: true, enabled: true, source: { source: 'local', path: '/elsewhere/helper' } };
+  await mkdir(world.codexHome, { recursive: true });
+  await writeFile(fakeState, JSON.stringify({ marketplaces: [{ name: 'other', path: '/elsewhere' }], plugins: [otherPlugin] }));
+
+  const before = await world.integrations.checkApp('codex');
+  assert.equal(before.status.connected, false, 'a plugin from another marketplace is not OpenDoc');
+  assert.equal((await world.integrations.connect(['codex'])).ok, true);
+  assert.equal((await world.integrations.checkApp('codex')).status.connected, true);
+  await world.integrations.refresh();
+  assert.equal((await world.integrations.disconnect(['codex'])).ok, true);
+
+  const lists = (await world.vendorCalls('codex')).filter(call => call.startsWith('plugin list'));
+  assert.ok(lists.length >= 4, lists.join('\n'));
+  assert.ok(lists.every(call => call === 'plugin list --marketplace opendoc --json'), lists.join('\n'));
+  const after = JSON.parse(await readFile(fakeState, 'utf8'));
+  assert.equal(after.catalogDownloads, undefined, 'no catalog download');
+  assert.deepEqual(after.plugins, [otherPlugin], 'the other marketplace\'s plugin is untouched');
 });
 
 test('Antigravity: install from the Codex plugin folder of the stable copy, HOME passed through, undo', async () => {
@@ -227,7 +251,8 @@ test('OpenDoc installed outside the app is left alone and not recorded, and undo
   assert.equal(outcome.results[0].changed, false);
   assert.match(outcome.results[0].summary, /not from this app/);
   const status = await world.integrations.status();
-  assert.deepEqual(status.apps.find(app => app.id === 'claude'), { id: 'claude', name: 'Claude Code', present: true, connected: true, managed: false, stale: false, problem: null, summary: status.apps[0].summary });
+  assert.deepEqual(status.apps.find(app => app.id === 'claude'), { id: 'claude', name: 'Claude Code', present: true, connected: true, managed: false, stale: false, problem: null, summary: status.apps[0].summary, targets: status.apps[0].targets });
+  assert.deepEqual(status.apps[0].targets.map(target => [target.id, target.connected, target.managed]), [['claude', true, false]]);
   assert.match(status.apps[0].summary, /not from this app/);
   assert.equal((await world.integrations.disconnect(['claude'])).results[0].code, 'not-connected');
   const state = JSON.parse(await readFile(join(world.claudeConfig, 'fake-claude.json'), 'utf8'));

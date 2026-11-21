@@ -2,13 +2,14 @@
 //
 //   { "version": 1,
 //     "copy": { "path", "digest", "build", "updatedAt" },          the stable copy (absent until something is connected)
-//     "apps": { "<id>": { ...what was done... } } }               one record per connected app
+//     "apps": { "<target id>": { ...what was done... } } }         one record per connected target (targets.mjs: `claude` is ~/.claude)
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 export const manifestVersion = 1;
 
-export function createManifest(file) {
+/** `normalise` (optional) is applied to every manifest that is read, so an older layout of the records is understood without a migration step. */
+export function createManifest(file, { normalise = value => value } = {}) {
   /** `{ manifest, problem }`: a missing file is an empty manifest; a damaged one is moved aside and reported. */
   async function read() {
     let text;
@@ -16,7 +17,7 @@ export function createManifest(file) {
     catch (error) { if (error.code === 'ENOENT') return { manifest: empty(), problem: null }; throw error; }
     try {
       const value = JSON.parse(text);
-      if (value && typeof value === 'object' && !Array.isArray(value) && value.apps && typeof value.apps === 'object') return { manifest: { ...value, version: manifestVersion }, problem: null };
+      if (value && typeof value === 'object' && !Array.isArray(value) && value.apps && typeof value.apps === 'object') return { manifest: normalise({ ...value, version: manifestVersion }), problem: null };
     } catch { /* fall through */ }
     const aside = `${file}.damaged-${Date.now()}`;
     await rename(file, aside).catch(() => {});

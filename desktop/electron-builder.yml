@@ -57,6 +57,11 @@ linux:
   icon: resources/icons/linux
   category: Office
   synopsis: OpenDoc on the desktop
+  # The name the app menu and launchers show. productName stays opendoc-desktop: it names /opt/opendoc-desktop (which the polkit
+  # action and the opendoc command use), the settings and data folders, the installer files and the AppImage the updater replaces.
+  desktop:
+    entry:
+      Name: OpenDoc Desktop
   # The .desktop file's MimeType line. The type itself is defined by resources/mime/opendoc-desktop.xml, which the three fpm
   # targets below install; an AppImage cannot install it (docs/DESKTOP.md says what that means).
   mimeTypes: [application/x-opendoc-pack]

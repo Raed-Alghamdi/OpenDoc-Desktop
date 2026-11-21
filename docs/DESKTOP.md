@@ -190,7 +190,7 @@ claude plugin list --json
 # Codex
 codex plugin marketplace add <copy>/codex
 codex plugin add opendoc@opendoc
-codex plugin list
+codex plugin list --marketplace opendoc
 
 # Antigravity (CLI)
 agy plugin install <copy>/codex/opendoc

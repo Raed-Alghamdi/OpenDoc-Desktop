@@ -169,7 +169,14 @@ function fakeCodex(args, mode) {
   const state = load(file, { marketplaces: [], plugins: [] });
   process.stderr.write('WARNING: proceeding, even though we could not create PATH aliases\n');
   if (matches(args, 'plugin', 'marketplace', 'list') && args[3] === '--json') return say(JSON.stringify({ marketplaces: state.marketplaces.map(entry => ({ name: entry.name, root: entry.path, marketplaceSource: { sourceType: 'local', source: entry.path } })) }, null, 2));
-  if (matches(args, 'plugin', 'list') && args[2] === '--json') return say(JSON.stringify({ installed: state.plugins, available: [] }, null, 2));
+  if (matches(args, 'plugin', 'list') && args.includes('--json')) {
+    // Like Codex 0.171: `--marketplace NAME` (or `-m NAME`) lists that marketplace only. Without it, a Codex signed in with ChatGPT first
+    // downloads OpenAI's whole plugin catalog; this fake counts those downloads so a test can show the app never causes one.
+    const flag = args.findIndex(arg => arg === '--marketplace' || arg === '-m');
+    const only = flag === -1 ? null : args[flag + 1];
+    if (only === null) { state.catalogDownloads = (state.catalogDownloads ?? 0) + 1; save(file, state); }
+    return say(JSON.stringify({ installed: state.plugins.filter(entry => only === null || entry.marketplaceName === only), available: [] }, null, 2));
+  }
   if (matches(args, 'plugin', 'marketplace', 'add')) {
     if (mode === 'policy') return say('Error: marketplace sources are disabled by requirements set by your administrator.', 1);
     const path = args[3];

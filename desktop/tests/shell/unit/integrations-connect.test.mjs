@@ -71,7 +71,7 @@ test('Codex: connect, verify through plugin list, disconnect, with CODEX_HOME pa
   assert.equal(outcome.ok, true, JSON.stringify(outcome, null, 1));
   assert.ok(outcome.results[0].steps.some(step => step.command === `codex plugin marketplace add ${join(world.data, 'integrations', 'codex')}`));
   assert.ok((await world.calls()).every(call => call.CODEX_HOME === world.codexHome));
-  assert.ok((await world.vendorCalls('codex')).includes('plugin list --json'));
+  assert.ok((await world.vendorCalls('codex')).includes('plugin list --marketplace opendoc --json'));
   const manifest = await world.manifest();
   assert.equal(manifest.apps.codex.plugin.id, 'opendoc@opendoc');
 
@@ -79,6 +79,29 @@ test('Codex: connect, verify through plugin list, disconnect, with CODEX_HOME pa
   assert.equal(removed.ok, true, JSON.stringify(removed, null, 1));
   assert.deepEqual((await listing(world.codexHome)).filter(name => /opendoc/.test(name)), [], 'the empty cache folders Codex leaves are removed too');
   assert.deepEqual(JSON.parse(await readFile(join(world.codexHome, 'fake-codex.json'), 'utf8')), { marketplaces: [], plugins: [] });
+});
+
+test('Codex is only ever asked about the opendoc marketplace, so it never downloads its whole plugin catalog', async () => {
+  // A Codex signed in with ChatGPT downloads OpenAI's plugin catalog (about 85 MB) for a `plugin list` that names no marketplace.
+  const world = await setup();
+  const fakeState = join(world.codexHome, 'fake-codex.json');
+  const otherPlugin = { pluginId: 'helper@other', name: 'helper', marketplaceName: 'other', version: '2.0.0', installed: true, enabled: true, source: { source: 'local', path: '/elsewhere/helper' } };
+  await mkdir(world.codexHome, { recursive: true });
+  await writeFile(fakeState, JSON.stringify({ marketplaces: [{ name: 'other', path: '/elsewhere' }], plugins: [otherPlugin] }));
+
+  const before = await world.integrations.checkApp('codex');
+  assert.equal(before.status.connected, false, 'a plugin from another marketplace is not OpenDoc');
+  assert.equal((await world.integrations.connect(['codex'])).ok, true);
+  assert.equal((await world.integrations.checkApp('codex')).status.connected, true);
+  await world.integrations.refresh();
+  assert.equal((await world.integrations.disconnect(['codex'])).ok, true);
+
+  const lists = (await world.vendorCalls('codex')).filter(call => call.startsWith('plugin list'));
+  assert.ok(lists.length >= 4, lists.join('\n'));
+  assert.ok(lists.every(call => call === 'plugin list --marketplace opendoc --json'), lists.join('\n'));
+  const after = JSON.parse(await readFile(fakeState, 'utf8'));
+  assert.equal(after.catalogDownloads, undefined, 'no catalog download');
+  assert.deepEqual(after.plugins, [otherPlugin], 'the other marketplace\'s plugin is untouched');
 });
 
 test('Antigravity: install from the Codex plugin folder of the stable copy, HOME passed through, undo', async () => {

@@ -51,7 +51,7 @@ claude plugin list --json
 
 codex plugin marketplace add <copy>/codex
 codex plugin add opendoc@opendoc
-codex plugin list
+codex plugin list --marketplace opendoc
 
 agy plugin install <copy>/codex/opendoc
 agy plugin list --json
@@ -62,6 +62,7 @@ What was observed when refreshing the copy (Claude Code 2.1.327, Codex 0.170.0, 
 - Claude Code reads a plugin from a local-path marketplace in place (`readFromFolder` in `claude plugin list --json`), so a refreshed copy takes effect at the next session start without reinstalling.
 - Codex copies the plugin into its own cache when it is added. Running `codex plugin add opendoc@opendoc` again re-copies it even though the version is unchanged. `codex plugin marketplace upgrade` refuses a local marketplace ("not configured as a Git marketplace").
 - Antigravity copies the plugin into `~/.gemini/config/plugins/opendoc` when it is installed, so a refresh means installing again.
+- Codex 0.171.0, signed in with ChatGPT: `codex plugin list` without `--marketplace` first downloads OpenAI's whole plugin catalog (about 85 MB, kept in `cache/remote_plugin_catalog` for three hours), which took about 90 seconds on a home connection. With `--marketplace opendoc` it reads only its own settings, so the app always names the marketplace.
 
 ## One copy per app
 

@@ -217,7 +217,7 @@ jobs:
           UPSTREAM_SHA: ${{ needs.prepare.outputs.upstream_sha }}
         run: |
           node desktop/release/decide.mjs notes --decision "$RUNNER_TEMP/decision.json" --out "$RUNNER_TEMP/release-notes.md" \
-            --commit "$CANDIDATE_SHA" --upstream-sha "$UPSTREAM_SHA"
+            --commit "$CANDIDATE_SHA" --upstream-sha "$UPSTREAM_SHA" --repository "$GITHUB_REPOSITORY"
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/release-notes.md"
       - name: Publish the release
         id: publish

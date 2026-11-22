@@ -43,7 +43,7 @@ chmod +x opendoc-desktop-x86_64.AppImage
 sudo apt install ./opendoc-desktop_<version>-<build>_amd64.deb
 ```
 
-The package installs the app in `/opt/opendoc-desktop/`, a menu entry "opendoc-desktop" (Office), the `opendoc-desktop` link in `/usr/bin` and the `opendoc` command as `/usr/bin/opendoc`. Where AppArmor is on (Ubuntu 24.04 and later), it also installs `/etc/apparmor.d/opendoc-desktop`, which lets the app's sandbox work. It depends on `libgtk-3-0`, `libnotify4`, `libnss3`, `libxss1`, `libxtst6`, `xdg-utils`, `libatspi2.0-0`, `libuuid1` and `libsecret-1-0`, which `apt` installs for you.
+The package installs the app in `/opt/opendoc-desktop/`, a menu entry "OpenDoc Desktop" (Office), the `opendoc-desktop` link in `/usr/bin` and the `opendoc` command as `/usr/bin/opendoc`. Where AppArmor is on (Ubuntu 24.04 and later), it also installs `/etc/apparmor.d/opendoc-desktop`, which lets the app's sandbox work. It depends on `libgtk-3-0`, `libnotify4`, `libnss3`, `libxss1`, `libxtst6`, `xdg-utils`, `libatspi2.0-0`, `libuuid1` and `libsecret-1-0`, which `apt` installs for you.
 
 ### rpm (Fedora, openSUSE)
 
@@ -88,7 +88,7 @@ On macOS 14 and earlier, Control-click the app, choose **Open**, then **Open** a
 
 ## First run
 
-1. Start opendoc-desktop (the menu entry, `opendoc-desktop` in a terminal for a package install, or the AppImage file). With an AppImage the first start takes a few seconds longer while it copies its runtime.
+1. Start OpenDoc Desktop (the menu entry, `opendoc-desktop` in a terminal for a package install, or the AppImage file). With an AppImage the first start takes a few seconds longer while it copies its runtime.
 2. A window titled "Choose a workspace" asks for a folder. A workspace is a folder that holds your documents, themes and templates; the app opens one at a time.
    - **Create new workspace...** asks for a new or empty folder, and creates the workspace there with OpenDoc's own `init` command. It needs no network and no npm: the new folder's `node_modules` is a link to the app's runtime, and its marker file `.opendoc/workspace.json` says `"managed": true`.
    - **Open existing workspace...** opens a folder that already is one. A folder synced from another device (it has a `package.json` pinning OpenDoc but no `.opendoc/workspace.json` yet) is adopted after a question, "Use this workspace on this device?". A real `node_modules` folder in it is never deleted without asking. [Which workspaces open](#which-workspaces-open) says what happens when its OpenDoc version differs from the app's.
@@ -115,7 +115,7 @@ Rules that hold for every install:
 - A download is accepted only from the configured address, over HTTPS, and only when it matches the SHA-512 in that release's update information. The checksum proves the file is the one the release names; who is trusted rests on HTTPS and on whoever controls the release address. The deb and rpm installs run with package signature checks off, because the packages are not signed.
 - A release offers an update to an install type only when its update information lists a file for that type.
 - To turn automatic checks off, clear **Check for Updates Automatically** (in the Help menu, and in the app menu on macOS) or set `"checkForUpdates": false` in `config.json`. **Check for Updates...** then still runs one check when you click it.
-- After an update, the first start says once "opendoc-desktop was updated to <version>, build <build>", with a link to the release.
+- After an update, the first start says once "OpenDoc Desktop was updated to <version>, build <build>", with a link to the release.
 - The details (install type detection, redirects, failures) are in [Updates](#updates) below.
 
 ## Which workspaces open
@@ -469,7 +469,7 @@ What a user sees for each install type is in [Updates by install type](#updates-
 
 Every download is checked against the SHA-512 in the update metadata before it is used. A file that does not match is deleted and refused. The SHA-512 proves the file is the one the metadata names; it does not prove who published it. Authenticity rests on TLS and on whoever controls the feed, and the deb and rpm installs run with signature checks off (`dpkg` has none, and the rpm tools get `--nogpgcheck` or `--allow-unsigned-rpm`), because the packages are not signed.
 
-**After an update** the first launch shows "opendoc-desktop was updated to <version>, build <build>" once, with a button that opens `https://github.com/<owner>/<repo>/releases/tag/desktop-v<version>-<build>` in the browser. `config.json` keeps `lastRun` for this, and `updateNotices` for the notices that are shown once. Other code can listen for an update with `onUpdated(callback)` on the shell's updater. The updater's log is `<userData>/logs/updater.log`.
+**After an update** the first launch shows "OpenDoc Desktop was updated to <version>, build <build>" once, with a button that opens `https://github.com/<owner>/<repo>/releases/tag/desktop-v<version>-<build>` in the browser. `config.json` keeps `lastRun` for this, and `updateNotices` for the notices that are shown once. Other code can listen for an update with `onUpdated(callback)` on the shell's updater. The updater's log is `<userData>/logs/updater.log`.
 
 ## Tests
 

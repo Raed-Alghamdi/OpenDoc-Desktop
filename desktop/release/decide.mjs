@@ -9,7 +9,7 @@
 // Usage:
 //   node desktop/release/decide.mjs decide --kind <kind> --version <x.y.z> --build <n> --tag <tag> --gate <value> --verify <result>
 //        --desktop <result> --minor-published <true|false> --rehearsal <true|false> --out <decision.json>
-//   node desktop/release/decide.mjs notes --decision <decision.json> --out <release-notes.md> [--commit <sha>] [--upstream-sha <sha>]
+//   node desktop/release/decide.mjs notes --decision <decision.json> --out <release-notes.md> [--commit <sha>] [--upstream-sha <sha>] [--repository <owner/name>]
 //   node desktop/release/decide.mjs report --decision <decision.json> --promotion <success|failure|skipped> --publication <success|failure|skipped>
 //        --out-dir <folder> [--run-url ...] [--owner ...] [--target ...] [--candidate-branch ...] [--detail ...]
 // Results are GitHub's: success, failure, cancelled or skipped. Anything but success counts as red. With $GITHUB_OUTPUT set, the
@@ -18,6 +18,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { installNotes } from './notes.mjs';
 
 export const UPSTREAM_URL = 'https://github.com/RyanYahya/OpenDoc';
 const VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
@@ -150,16 +151,16 @@ const KIND_TEXT = {
 // Drops empty lines at the start and doubled empty lines, so optional lines can be left out by passing ''.
 const squash = (lines) => lines.filter((line, index) => line !== '' || (index > 0 && lines[index - 1] !== '')).join('\n');
 
-// The release notes credit the original project.
-export function releaseNotes({ version, build, kind, upstreamSha, commit }) {
+// The release notes credit the original project, then carry the install and update notes every release has (notes.mjs).
+export function releaseNotes({ version, build, kind, upstreamSha, commit, repository }) {
   const lines = [
-    `opendoc-desktop ${version}, build ${build}: the desktop app for OpenDoc ${version}.`,
+    `OpenDoc Desktop ${version}, build ${build}: the desktop app for OpenDoc ${version}.`,
     '',
     `OpenDoc is the original project by its maintainer: ${UPSTREAM_URL}`,
     kind === 'rebuild' ? 'This build changes the app only; OpenDoc itself is unchanged.' : `OpenDoc's own changes are listed in its repository${upstreamSha ? ` (upstream commit ${upstreamSha.slice(0, 12)})` : ''}.`,
     commit ? `Built from commit ${commit.slice(0, 12)} of this repository.` : '',
   ];
-  return `${squash(lines)}\n`;
+  return `${squash(lines)}\n\n${installNotes({ version, build, repository, commit })}\n`;
 }
 
 // What happened after the merge and the publication were tried. `promotion` is how moving the merge into the target branch ended and
@@ -223,7 +224,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     args: rest,
     strict: true,
     options: Object.fromEntries(['kind', 'version', 'build', 'tag', 'gate', 'verify', 'desktop', 'minor-published', 'rehearsal', 'out', 'decision', 'promotion', 'out-dir',
-      'run-url', 'owner', 'target', 'candidate-branch', 'detail', 'commit', 'upstream-sha', 'publication'].map((name) => [name, { type: 'string' }])),
+      'run-url', 'owner', 'target', 'candidate-branch', 'detail', 'commit', 'upstream-sha', 'publication', 'repository'].map((name) => [name, { type: 'string' }])),
   });
   if (command === 'decide') {
     const decision = decideRelease({
@@ -236,7 +237,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     emit({ outcome: decision.outcome, release: decision.release, publish: decision.publish, promote: decision.promote, fail: decision.fail, reasons: decision.reasons.join(',') });
   } else if (command === 'notes') {
     const decision = JSON.parse(readFileSync(values.decision, 'utf8'));
-    writeFileSync(values.out, releaseNotes({ ...decision, upstreamSha: values['upstream-sha'], commit: values.commit }));
+    writeFileSync(values.out, releaseNotes({ ...decision, upstreamSha: values['upstream-sha'], commit: values.commit, repository: values.repository }));
   } else if (command === 'report') {
     const decision = JSON.parse(readFileSync(values.decision, 'utf8'));
     const report = finalReport(decision, {

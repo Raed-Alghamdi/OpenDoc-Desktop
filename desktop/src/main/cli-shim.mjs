@@ -203,7 +203,7 @@ export async function macInstallFolder({ home, candidates = ['/usr/local/bin'] }
  */
 export async function installMacCommand({ executable, runtime, home, candidates }) {
   if (translocated(executable)) {
-    return { ok: false, reason: 'translocated', message: 'The app is running from a temporary location. Move opendoc-desktop to your Applications folder, open it from there, and choose Install Command-Line Tool again.' };
+    return { ok: false, reason: 'translocated', message: 'The app is running from a temporary location. Move OpenDoc Desktop to your Applications folder, open it from there, and choose Install Command-Line Tool again.' };
   }
   // A command of ours already in a candidate folder is refreshed in place, wherever it is.
   const folders = [...(candidates ?? ['/usr/local/bin']), userBinDirectory(home)];
@@ -219,7 +219,7 @@ export async function installMacCommand({ executable, runtime, home, candidates 
   }
   const result = await writeShim({ file: join(folder, commandName), content: renderMacShim({ executable, runtime }) });
   if (result.action === 'foreign') {
-    return { ok: false, reason: 'foreign', message: `${result.path} already exists and is not the opendoc-desktop command, so it was left alone. Remove it or rename it, then try again.` };
+    return { ok: false, reason: 'foreign', message: `${result.path} already exists and is not the OpenDoc Desktop command, so it was left alone. Remove it or rename it, then try again.` };
   }
   return { ok: true, path: result.path, folder, action: result.action };
 }

@@ -2,10 +2,10 @@
 // remembered size and position of the workspace window.
 import { BrowserWindow, app, dialog, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
-import { appName } from './identity.mjs';
+import { displayName } from './identity.mjs';
 import { classifyNavigation, classifyWindowOpen, originOf } from './policy.mjs';
 import { openExternal } from './session-policy.mjs';
-import { defaultSize, loadWindowState, restoreBounds, saveWindowState } from './window-state.mjs';
+import { defaultSize, loadWindowState, minimumSize, restoreBounds, saveWindowState } from './window-state.mjs';
 
 const preload = fileURLToPath(new URL('../preload/shell.cjs', import.meta.url));
 
@@ -89,11 +89,11 @@ export class WorkspaceWindow {
   async #create(session) {
     const saved = restoreBounds(await loadWindowState(this.stateFile), screen.getAllDisplays().map(display => display.workArea));
     const { maximized, ...bounds } = saved;
-    const window = new BrowserWindow({ ...defaultSize, ...bounds, show: false, title: appName, backgroundColor: '#ffffff', webPreferences: secureWebPreferences({ session }) });
+    const window = new BrowserWindow({ ...defaultSize, ...bounds, minWidth: minimumSize.width, minHeight: minimumSize.height, show: false, title: displayName, backgroundColor: '#ffffff', webPreferences: secureWebPreferences({ session }) });
     this.window = window;
     if (maximized) window.maximize();
     window.once('ready-to-show', () => window.show());
-    window.webContents.on('page-title-updated', (event, title) => { event.preventDefault(); window.setTitle(title && title !== appName ? `${title} - ${appName}` : appName); });
+    window.webContents.on('page-title-updated', (event, title) => { event.preventDefault(); window.setTitle(title && title !== displayName ? `${title} - ${displayName}` : displayName); });
     // Answer the page's own beforeunload prompt (the page registers one only when it could not store a draft):
     // without an answer, Electron ignores close and quit while the page holds one. preventDefault means leave.
     window.webContents.on('will-prevent-unload', event => {
@@ -151,7 +151,7 @@ export class WorkspaceWindow {
 
 /** The small window for choosing a workspace (also shown when nothing is open). */
 export function createPickerWindow(session) {
-  const window = new BrowserWindow({ width: 760, height: 660, minWidth: 480, minHeight: 420, show: false, title: appName, backgroundColor: '#ffffff', webPreferences: secureWebPreferences({ session }) });
+  const window = new BrowserWindow({ width: 760, height: 660, minWidth: 480, minHeight: 420, show: false, title: displayName, backgroundColor: '#ffffff', webPreferences: secureWebPreferences({ session }) });
   window.once('ready-to-show', () => window.show());
   return window;
 }
@@ -160,7 +160,7 @@ export function createPickerWindow(session) {
  * A small window for one of the app's own pages that is not the picker: the upgrade's progress and result, the backups list.
  * It belongs to `parent` when there is one, so it stays in front of it.
  */
-export function createShellWindow(session, { width = 640, height = 560, title = appName, parent } = {}) {
+export function createShellWindow(session, { width = 640, height = 560, title = displayName, parent } = {}) {
   const window = new BrowserWindow({ width, height, minWidth: 420, minHeight: 300, show: false, title, backgroundColor: '#ffffff', parent: parent && !parent.isDestroyed() ? parent : undefined, webPreferences: secureWebPreferences({ session }) });
   window.setMenuBarVisibility(false);
   window.once('ready-to-show', () => window.show());

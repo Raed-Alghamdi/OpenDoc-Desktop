@@ -44,7 +44,7 @@ export class CommandLineTool {
     if (result.action === 'foreign') {
       await this.#noticeOnce('foreign', {
         message: `${result.path} already exists, so the opendoc command was not installed.`,
-        detail: 'It is not the opendoc-desktop command, so it was left alone. Remove or rename it and start the app again; agents need an "opendoc" command to work with your documents.',
+        detail: 'It is not the OpenDoc Desktop command, so it was left alone. Remove or rename it and start the app again; agents need an "opendoc" command to work with your documents.',
       });
     } else {
       await this.#checkPath(userBinDirectory(this.home));

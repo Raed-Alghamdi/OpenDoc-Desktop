@@ -1,7 +1,7 @@
 // A design pack opened from outside the page, with the page's real Import dialog (src/app/PackDialogs.tsx, mounted in src/app/main.tsx),
 // under Electron on the virtual display (end to end). Two apps take part, each with its own profile and workspace:
 //   * the sender exports two themes through the Export dialog (so the packs are real files in output/packs/), and its Show in folder
-//     button reaches the shell, which reveals the file it just wrote;
+//     button reaches the shell, which reveals the file it just wrote; a pack opened while Pack saved shows closes it and opens Import;
 //   * the recipient (a workspace without those themes) is opened with a pack on the command line, then given packs by a second
 //     launch and by File > Import Design Pack…, and must always show the review step with the trust box unticked and Install disabled.
 // Nothing is installed until the test ticks the box on purpose, and the OS file manager is never started (shell calls are recorded).
@@ -70,7 +70,7 @@ test.describe.serial('a pack from the command line, a second launch, open-file a
 
   test.afterAll(async () => { await sender?.close().catch(() => {}); await app?.close().catch(() => {}); });
 
-  test('the sender exports a theme, and Show in folder reveals the file the dialog names, and only that', async () => {
+  test('the sender exports a theme, Show in folder reveals the file the dialog names, and only that, and a pack opened over Pack saved replaces it', async () => {
     test.setTimeout(420_000);
     const senderPage = workspacePage(sender);
     packs = [];
@@ -86,7 +86,20 @@ test.describe.serial('a pack from the command line, a second launch, open-file a
         await waitFor(async () => (await nativeCalls(sender)).folders.length === 1, { what: 'the reveal' });
         expect((await nativeCalls(sender)).folders[0]).toBe(file);
       }
-      await dialog.getByRole('button', { name: 'Done' }).click();
+      if (theme === themes.at(-1)) {
+        // A pack opened from outside while Pack saved is still showing (say, a double-click on the file Show in folder revealed)
+        // replaces it with Import: the two dialogs never sit on top of each other. The sender has the theme, so nothing is new.
+        await openFile(sender, packs[0]);
+        await expect(importDialog(senderPage).getByRole('heading', { name: 'e2e-civic' })).toBeVisible(long);
+        await expect(senderPage.getByText('Pack saved')).toBeHidden();
+        await expect(senderPage.getByRole('dialog')).toHaveCount(1);
+        await expect(importDialog(senderPage).getByText('Everything in this pack is already installed, unchanged.')).toBeVisible();
+        await shoot(senderPage, 'e2e-01b-import-replaces-pack-saved');
+        await importDialog(senderPage).getByRole('button', { name: 'Close', exact: true }).click();
+        await expect(importDialog(senderPage)).toBeHidden();
+      } else {
+        await dialog.getByRole('button', { name: 'Done' }).click();
+      }
       await expect(senderPage.getByRole('dialog')).toBeHidden();
     }
     // A path the page invents, even next to the real pack, is refused (the shell logs it and shows nothing).

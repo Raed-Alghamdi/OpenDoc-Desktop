@@ -16,7 +16,7 @@ import { manualCommand } from './privileged-install.mjs';
 import { describeRun, launchOutcome } from './release-notes.mjs';
 import { createSchedule } from './schedule.mjs';
 
-const title = 'opendoc-desktop updates';
+const title = 'OpenDoc Desktop updates';
 const describeInfo = info => `${info.version}${parseBuild(info.build) === null ? '' : `, build ${parseBuild(info.build)}`}`;
 const firstLine = error => String(error?.message ?? error).split('\n')[0].slice(0, 300);
 
@@ -134,7 +134,7 @@ export class UpdateController {
     const answer = await this.show({
       type: 'info',
       title,
-      message: `opendoc-desktop was updated to ${current.version}, build ${current.build}`,
+      message: `OpenDoc Desktop was updated to ${current.version}, build ${current.build}`,
       detail: `Before: ${describeRun(previous)}.`,
       buttons: ['OK', 'What Changed'],
       defaultId: 0,
@@ -254,7 +254,7 @@ export class UpdateController {
    */
   async check({ manual }) {
     if (!this.base.active) {
-      if (manual) await this.#say('info', 'Updates are not available', this.base.reason ? `This copy of opendoc-desktop does not update itself: ${this.base.reason}.` : 'This copy of opendoc-desktop does not update itself.');
+      if (manual) await this.#say('info', 'Updates are not available', this.base.reason ? `This copy of OpenDoc Desktop does not update itself: ${this.base.reason}.` : 'This copy of OpenDoc Desktop does not update itself.');
       return { status: 'none' };
     }
     if (!manual && !this.automatic) return { status: 'none' }; // the switch is off: only the user's own click checks
@@ -315,7 +315,7 @@ export class UpdateController {
     switch (result.status) {
       case 'downloaded':
         if (installsOnQuit) {
-          if (manual) await this.#say('info', 'An update is ready', `${describeInfo(result.info)} has been downloaded. It is installed when you quit opendoc-desktop, and the next start runs it.${this.#feedNote()}`);
+          if (manual) await this.#say('info', 'An update is ready', `${describeInfo(result.info)} has been downloaded. It is installed when you quit OpenDoc Desktop, and the next start runs it.${this.#feedNote()}`);
         } else await this.#offerRestart(result.info);
         break;
       case 'available': {
@@ -326,7 +326,7 @@ export class UpdateController {
         break;
       }
       case 'up-to-date':
-        if (manual) await this.#say('info', 'opendoc-desktop is up to date', `You have the newest version: ${describeRun({ version: this.getVersion(), build: this.getBuild() ?? 'development' })}.`);
+        if (manual) await this.#say('info', 'OpenDoc Desktop is up to date', `You have the newest version: ${describeRun({ version: this.getVersion(), build: this.getBuild() ?? 'development' })}.`);
         break;
       case 'error':
         if (manual) await this.#say('error', 'Could not check for updates', firstLine(result.error));
@@ -367,7 +367,7 @@ export class UpdateController {
         type: 'info',
         title,
         message: `A new version is ready: ${describeInfo(info)}`,
-        detail: `It has been downloaded and checked. opendoc-desktop restarts to install it.${mac ? '' : ' Your system asks for your password, because the app is installed for all users.'}${this.#feedNote()}`,
+        detail: `It has been downloaded and checked. OpenDoc Desktop restarts to install it.${mac ? '' : ' Your system asks for your password, because the app is installed for all users.'}${this.#feedNote()}`,
         buttons: ['Restart to Update', 'Later'],
         defaultId: 0,
         cancelId: 1,
@@ -465,7 +465,7 @@ export class UpdateController {
       return { ...value, updateNotices: rest };
     });
     this.log(`the last update could not be installed: ${failure.reason}`);
-    this.#track(this.#say('info', 'The last update could not be installed', `opendoc-desktop could not replace itself${failure.folder ? ` in ${failure.folder}` : ''}: ${failure.reason}\n\nNothing was changed, and this is still the version you had. The next check tries again.`));
+    this.#track(this.#say('info', 'The last update could not be installed', `OpenDoc Desktop could not replace itself${failure.folder ? ` in ${failure.folder}` : ''}: ${failure.reason}\n\nNothing was changed, and this is still the version you had. The next check tries again.`));
   }
 
   /** macOS: what the swap helper wrote last time (it runs after the app has quit), put in the updater's log; the next check offers the update again. */
@@ -490,7 +490,7 @@ export class UpdateController {
     const notices = (await this.config.read()).updateNotices ?? {};
     if (notices.folder === blocked.folder) return;
     await this.config.update(value => ({ ...value, updateNotices: { ...(value.updateNotices ?? {}), folder: blocked.folder } })); // before the dialog, as the other one-time notices
-    await this.#say('info', 'opendoc-desktop cannot update itself here', blocked.message);
+    await this.#say('info', 'OpenDoc Desktop cannot update itself here', blocked.message);
   }
 
   /** Stop everything (the timer); the app is closing. */

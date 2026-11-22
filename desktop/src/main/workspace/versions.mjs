@@ -24,7 +24,7 @@ export function readPin(manifest) {
     const prefix = `npm:${packageNames[edition]}@`;
     if (typeof pin === 'string' && pin.startsWith(prefix) && parseVersion(pin.slice(prefix.length))) {
       const version = pin.slice(prefix.length);
-      if (edition === 'headless') return { ok: false, code: 'headless', edition, version, message: `This workspace uses the headless edition of OpenDoc (${version}), which has no editor and no app. opendoc-desktop opens workspaces of the normal edition only, and switching edition is not an update, so nothing was changed. Use the headless package's own command for this folder.` };
+      if (edition === 'headless') return { ok: false, code: 'headless', edition, version, message: `This workspace uses the headless edition of OpenDoc (${version}), which has no editor and no app. OpenDoc Desktop opens workspaces of the normal edition only, and switching edition is not an update, so nothing was changed. Use the headless package's own command for this folder.` };
       return { ok: true, edition, version };
     }
   }

@@ -80,7 +80,7 @@ export function createUpdaterClass(type, { getBuild, getFeedBase = () => null, s
         const file = (seams.appImagePath ?? (() => process.env.APPIMAGE))();
         if (!file) return { ok: false, reason: 'no-appimage', message: 'The APPIMAGE variable is not set.' };
         const folder = dirname(file);
-        if (!(await writable(folder))) return { ok: false, reason: 'not-writable', folder, message: `opendoc-desktop is an AppImage in ${folder}, a folder you cannot write to, so it cannot replace itself there. Move the AppImage to a folder of yours (for example ~/Applications) and start it from there, or update it by hand.` };
+        if (!(await writable(folder))) return { ok: false, reason: 'not-writable', folder, message: `OpenDoc Desktop is an AppImage in ${folder}, a folder you cannot write to, so it cannot replace itself there. Move the AppImage to a folder of yours (for example ~/Applications) and start it from there, or update it by hand.` };
         let size = 0;
         try { size = statSync(file).size; } catch { /* the file is gone: the swap will say so */ }
         const space = enoughSpace(folder, size, seams.statfs);

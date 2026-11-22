@@ -26,7 +26,7 @@ export function enoughSpace(folder, size, statfs = statfsSync) {
   let free;
   try { free = freeBytes(folder, statfs); } catch { return { ok: true }; } // unknown: the copy itself then decides
   if (free >= size + spaceSlack) return { ok: true };
-  return { ok: false, message: `There is not enough free space in ${folder} to put the update beside opendoc-desktop (${megabytes(size)} needed, ${megabytes(Math.max(free, 0))} free). Free some space and check again.` };
+  return { ok: false, message: `There is not enough free space in ${folder} to put the update beside OpenDoc Desktop (${megabytes(size)} needed, ${megabytes(Math.max(free, 0))} free). Free some space and check again.` };
 }
 
 /** Where the new file goes: over the AppImage, as electron-updater does, or beside it under the new name when the old name has a version in it. */
@@ -72,7 +72,7 @@ export function swapAppImage({ appImage, installerPath, sha512, ops = {}, log = 
   const staged = join(folder, `.${basename(destination)}.update-${process.pid}`);
   try {
     copyFile(installerPath, staged, constants.COPYFILE_EXCL);
-    if (hashFileSync(staged) !== sha512) throw new Error('The copy of the update next to opendoc-desktop does not match its checksum, so it was not installed.');
+    if (hashFileSync(staged) !== sha512) throw new Error('The copy of the update next to OpenDoc Desktop does not match its checksum, so it was not installed.');
     chmodSync(staged, 0o755);
     syncPath(staged, 'r');
     renameSync(staged, destination); // atomic: the AppImage is the old file or the new one, never neither

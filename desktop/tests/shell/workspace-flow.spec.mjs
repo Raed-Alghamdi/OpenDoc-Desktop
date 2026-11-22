@@ -50,7 +50,10 @@ test.describe.serial('workspace flow', () => {
   test('the library shows', async () => {
     // The first render of a fresh workspace can take a while on a busy machine.
     await expect(page.getByText('Welcome to OpenDoc').first()).toBeVisible({ timeout: 120_000 });
-    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getTitle())).toMatch(/opendoc-desktop$/);
+    const shown = await app.evaluate(({ BrowserWindow }) => { const window = BrowserWindow.getAllWindows()[0]; return { title: window.getTitle(), minimum: window.getMinimumSize() }; });
+    expect(shown.title).toMatch(/(^| - )OpenDoc Desktop$/);
+    // The window cannot be made smaller than this (minimumSize in window-state.mjs, the same floor a saved size is restored with).
+    expect(shown.minimum).toEqual([640, 480]);
   });
 
   test('a document opens and its PDF renders', async () => {

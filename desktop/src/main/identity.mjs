@@ -1,7 +1,11 @@
 import { readFile } from 'node:fs/promises';
 
 // Names and addresses the app shows or checks. Kept in one place so About, the menus and the pages agree.
+// appName names things on disk and in the system: the settings and data folders, the process, the package and its files.
+// displayName is what a person reads: window titles, About, the menus and the app's messages (the launcher entry says the same,
+// see linux.desktop.entry in electron-builder.yml).
 export const appName = 'opendoc-desktop';
+export const displayName = 'OpenDoc Desktop';
 export const originalProject = { name: 'OpenDoc', author: 'RyanYahya', url: 'https://github.com/RyanYahya/OpenDoc' };
 
 // The app's own pages (workspace picker, crash screen) are served from this origin, never from file://.

@@ -158,12 +158,13 @@ export const safePath = value => String(value ?? '').split(delimiter).filter(ent
  * Resolves { outcome: 'installed' | 'cancelled' | 'failed', reason?, message?, code }.
  * `spawn` and `env` are for tests (a fake pkexec first on PATH).
  */
-export async function installPackage({ type, file, sha512, signature, spawn = nodeSpawn, env = process.env, log = () => {}, helper, publicKey }) {
+export async function installPackage({ type, file, sha512, signature, spawn = nodeSpawn, env = process.env, log = () => {}, helper, publicKey, resourcesPath }) {
   // `helper` is for tests: a path (use it as found), null (use the fallback), or left out (look for the installed one).
-  if (helper === undefined) helper = await findHelper();
+  // `resourcesPath` is the app's resources folder (the packaged app's own, or the stand-in a test build was told to use); left out it is Electron's.
+  if (helper === undefined) helper = await findHelper({ resourcesPath });
   let args;
   try {
-    if (!helper && publicKey === undefined) publicKey = await readReleaseKey();
+    if (!helper && publicKey === undefined) publicKey = await readReleaseKey({ resourcesPath });
     args = pkexecArguments({ type, file, sha512, signature, helper, publicKey });
   } catch (error) { return { outcome: 'failed', reason: 'input', message: error.message, code: null }; }
   log(helper ? `installing through the polkit action ${actionId}` : 'installing through pkexec /bin/sh (no installed helper and policy)');

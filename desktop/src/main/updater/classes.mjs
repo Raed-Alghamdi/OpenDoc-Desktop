@@ -70,10 +70,11 @@ const writable = path => access(path, constants.W_OK).then(() => true, () => fal
  * for the types that need a click, `installDownloaded()` (resolves { outcome: 'installed' | 'cancelled' | 'failed' | 'blocked', message? }).
  * @param options.getBuild the running build number
  * @param options.getFeedBase () => the feed's address (text or URL) when `updateFeed` is set, else null: file addresses must stay on its origin
+ * @param options.getResourcesPath () => the app's resources folder (the release key and the root helper are looked for there); undefined means Electron's own
  * @param options.isLoopbackFeed () => true when the feed is on the loopback address (a test build only): the signature may then be fetched over plain http from there
  * @param options.seams for tests: install (replaces installPackage), fetchSignature (replaces the download of the .sig), appImagePath, statfs, swapOps, macState, macInstall
  */
-export function createUpdaterClass(type, { getBuild, getFeedBase = () => null, isLoopbackFeed = () => false, seams = {} }) {
+export function createUpdaterClass(type, { getBuild, getFeedBase = () => null, isLoopbackFeed = () => false, getResourcesPath = () => undefined, seams = {} }) {
   const Base = bases[type];
   if (!Base) throw new Error(`No updater for install type ${type}.`);
   const Checked = withConfigFallback(withReleaseFile(withBuildCompare(Base, getBuild), type, getFeedBase));
@@ -203,7 +204,7 @@ export function createUpdaterClass(type, { getBuild, getFeedBase = () => null, i
         }
         // Without the signature nothing is installed, and pkexec is never started (no password prompt for an update that will be refused).
         if (!signature) return { outcome: 'failed', reason: 'no-signature', message: noSignatureMessage };
-        return (seams.install ?? installPackage)({ type, ...found, signature, log: message => this._logger.info(message) });
+        return (seams.install ?? installPackage)({ type, ...found, signature, resourcesPath: getResourcesPath(), log: message => this._logger.info(message) });
       }
 
       // The stock installs are synchronous (they freeze every window while the password prompt is open), so none of them may run.

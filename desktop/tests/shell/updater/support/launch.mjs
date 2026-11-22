@@ -35,7 +35,8 @@ export const clickItem = (app, path) => app.evaluate(({ Menu }, names) => {
 
 /**
  * @param options.config config.json of the profile (updateFeed, checkForUpdates, lastRun ...)
- * @param options.resources files of the stand-in resources folder, name to text ({ 'package-type': 'deb' }, { 'update-disabled': '' })
+ * @param options.resources files of the stand-in resources folder, name to text ({ 'package-type': 'deb' }, { 'update-disabled': '' },
+ *   { 'updater/release-key.pem': <a test key's public half> }: the stand-in's release key, which the app's install script checks signatures with)
  * @param options.path directories put first on the app's PATH (fake pkexec and package tools)
  * @param options.answers [[dialog message pattern, button label], ...] (the first match wins; the first button when none)
  * @param options.env more environment variables
@@ -49,7 +50,10 @@ export async function updaterApp({ config = {}, resources = {}, path = [], answe
   for (const folder of [homeDir, ...Object.values(folders)]) await mkdir(folder, { recursive: true });
   const resourcesDir = join(root, 'resources');
   await mkdir(resourcesDir, { recursive: true });
-  for (const [name, text] of Object.entries(resources)) await writeFile(join(resourcesDir, name), text);
+  for (const [name, text] of Object.entries(resources)) {
+    await mkdir(dirname(join(resourcesDir, name)), { recursive: true });
+    await writeFile(join(resourcesDir, name), text);
+  }
   const events = join(root, 'events.jsonl');
   const answerFile = join(root, 'answers.json');
   await writeFile(events, '');

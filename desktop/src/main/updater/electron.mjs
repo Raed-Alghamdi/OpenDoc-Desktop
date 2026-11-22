@@ -88,7 +88,7 @@ export function createUpdates({ config, getVersion, getBuild, parent, onChange, 
       let loopbackFeed = Boolean(feed) && isLoopbackHost(new URL(feed.url ?? `${feed.protocol ?? 'https'}://${feed.host ?? 'github.com'}`).hostname);
       if (!feed && testResources) { try { loopbackFeed = updateConfigIsLoopback(readFileSync(join(testResources, 'app-update.yml'), 'utf8')); } catch { /* none */ } }
       // The release signature of a package is fetched under the same rules as the package (https; loopback only for a loopback feed).
-      const Updater = createUpdaterClass(type, { getBuild: () => getBuild() ?? 0, getFeedBase: () => feedBase(feed), isLoopbackFeed: () => loopbackFeed });
+      const Updater = createUpdaterClass(type, { getBuild: () => getBuild() ?? 0, getFeedBase: () => feedBase(feed), isLoopbackFeed: () => loopbackFeed, getResourcesPath: () => testResources ?? (app.isPackaged ? process.resourcesPath : undefined) });
       const updater = new Updater(null, new VersionedAppAdapter(getVersion()));
       const GuardedExecutor = guardRedirects(ElectronHttpExecutor, { loopbackFeed: () => loopbackFeed, log: line => logger.warn(line) });
       updater.httpExecutor = new GuardedExecutor((authInfo, callback) => updater.emit('login', authInfo, callback));

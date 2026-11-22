@@ -93,8 +93,10 @@ test.describe.serial('a pack from the command line, a second launch, open-file a
         await expect(importDialog(senderPage).getByRole('heading', { name: 'e2e-civic' })).toBeVisible(long);
         await expect(senderPage.getByText('Pack saved')).toBeHidden();
         await expect(senderPage.getByRole('dialog')).toHaveCount(1);
+        await expect(importDialog(senderPage).getByText('Everything in this pack is already installed, unchanged.')).toBeVisible();
         await shoot(senderPage, 'e2e-01b-import-replaces-pack-saved');
-        await cancelImport(senderPage);
+        await importDialog(senderPage).getByRole('button', { name: 'Close', exact: true }).click();
+        await expect(importDialog(senderPage)).toBeHidden();
       } else {
         await dialog.getByRole('button', { name: 'Done' }).click();
       }

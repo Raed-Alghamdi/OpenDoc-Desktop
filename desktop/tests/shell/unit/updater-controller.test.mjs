@@ -378,6 +378,19 @@ test('a failed install says why and shows the command to install the file by han
   assert.equal(controller.menuState.restartReady, true);
 });
 
+test('an update without a valid signature says so and does not offer the downloaded file to install by hand', async () => {
+  for (const reason of ['no-signature', 'signature']) {
+    const { controller, shown } = await setup({ type: 'deb', script: { check: downloadedUpdate(), install: () => ({ outcome: 'failed', reason, message: 'No signature, nothing installed.' }) }, answers: 0 });
+    await controller.start();
+    await settle();
+    await controller.idle();
+    const failure = shown.at(-1);
+    assert.equal(failure.message, 'The update could not be installed', reason);
+    assert.match(failure.detail, /No signature, nothing installed\./);
+    assert.doesNotMatch(failure.detail, /sudo apt install/, reason);
+  }
+});
+
 test('while the install runs the menu offers no second click, and a second call is ignored', async () => {
   let release;
   const gate = new Promise(accept => { release = accept; });

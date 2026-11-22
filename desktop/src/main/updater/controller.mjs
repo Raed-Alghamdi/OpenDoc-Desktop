@@ -404,7 +404,8 @@ export class UpdateController {
       await this.#offerDownloadPage(this.ready.info, result.message);
     } else {
       const file = this.updater.downloaded?.()?.file;
-      const manual = file ? manualCommand(this.updaterType, file) : null;
+      // Not for a file that failed the signature check (or had none): the downloaded copy is not one to install by hand.
+      const manual = file && !['signature', 'no-signature'].includes(result.reason) ? manualCommand(this.updaterType, file) : null;
       await this.#say('error', 'The update could not be installed', `${result.message ?? 'The installer failed.'}${manual ? `\n\nYou can install the downloaded file yourself:\n${manual}` : ''}`);
     }
     return result;

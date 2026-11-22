@@ -143,7 +143,7 @@ export function classifyExit(code, stderr = '') {
     return { outcome: 'cancelled' };
   }
   if (code === checksumExitCode) return { outcome: 'failed', reason: 'checksum', message: 'The downloaded file did not match its checksum when it was about to be installed, so nothing was installed.' };
-  if (code === signatureExitCode) return { outcome: 'failed', reason: 'signature', message: 'The downloaded update is not signed with the OpenDoc Desktop release key, so nothing was installed. Download it from the release page and install it by hand only if you trust where it came from.' };
+  if (code === signatureExitCode) return { outcome: 'failed', reason: 'signature', message: 'The downloaded update is not signed with the OpenDoc Desktop release key, so nothing was installed. Download the update again from the release page.' };
   if (code === opensslExitCode) return { outcome: 'failed', reason: 'no-openssl', message: 'openssl is needed to check the update signature and is not installed, so nothing was installed. Install openssl and try again, or download the update from the release page.' };
   return { outcome: 'failed', reason: 'install', message: tail(stderr) || `The installer exited with code ${code}.` };
 }

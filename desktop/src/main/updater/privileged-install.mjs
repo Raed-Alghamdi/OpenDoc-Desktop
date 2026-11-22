@@ -4,22 +4,29 @@
 // open, and after Cancel it opens a second prompt for `apt-get install -f -y`. This does it with one asynchronous pkexec call that
 // runs one script: Cancel ends it, and the app stays responsive.
 //
-// The script runs as root, so it does not trust the downloaded file where it lies (the user's cache): it copies the file into a
-// root-owned folder, checks the SHA-512 from the release metadata on the copy, and installs the copy.
+// The script runs as root, so it does not trust the downloaded file where it lies (the user's cache): it copies the file and its
+// signature (<file>.sig, a raw Ed25519 signature the release publishes) into a root-owned folder, checks the SHA-512 from the release
+// metadata on the copy, verifies the signature with the release public key (release-key.pem, shipped with the app), and installs the
+// copy. The SHA-512 comes from the same feed as the file; only the signature proves the release's own key made it.
 //
 // Two ways to run that script. The packaged app's own install (deb, rpm, pacman) ships it as a root-owned helper,
 // <resources>/updater/install-update, with a polkit action that names it (resources/polkit), and runs `pkexec <helper> <args>`: the
-// password prompt then shows the action's sentence. Anything else (an older install without the helper, an unpackaged run) keeps
-// the original call, `pkexec /bin/sh -c <script>`, whose prompt shows the whole script but works without any installed file.
+// password prompt then shows the action's sentence, and the helper reads the public key from its own folder. Anything else (an older
+// install without the helper, an unpackaged run) keeps the original call, `pkexec /bin/sh -c <script>`, whose prompt shows the whole
+// script (the public key text included, which the app read from its own resources) but works without any installed file.
 import { spawn as nodeSpawn } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
 import { basename, delimiter, extname, isAbsolute, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** The polkit action the packages install, and the file that defines it. */
 export const actionId = 'io.github.ryanyahya.opendocdesktop.install-update';
 export const policyFile = `/usr/share/polkit-1/actions/${actionId}.policy`;
 /** Where the helper sits inside the app's resources folder (the packages install the app under /opt/opendoc-desktop). */
 export const helperRelativePath = join('updater', 'install-update');
+/** The release public key (Ed25519, SPKI PEM), beside the helper in the packaged app and in the source tree under resources/. */
+export const keyRelativePath = join('updater', 'release-key.pem');
+const sourceKeyFile = fileURLToPath(new URL('../../../resources/updater/release-key.pem', import.meta.url));
 
 export const installCommands = {
   deb: 'dpkg -i "$pkg" || apt-get install -f -y',
@@ -30,22 +37,35 @@ export const installCommands = {
   pacman: 'pacman -U --noconfirm "$pkg"',
 };
 
-/** Exit code of the script when the copy does not match the checksum. */
+/** Exit codes of the script: the copy does not match the checksum; the signature is not the release key's; openssl is missing. */
 export const checksumExitCode = 70;
+export const signatureExitCode = 71;
+export const opensslExitCode = 72;
+
+/** A public key text that is safe to write into the script: one SPKI PEM block, base64 lines only (no quote or other character the shell reads). */
+const pemPattern = /^-----BEGIN PUBLIC KEY-----\n(?:[A-Za-z0-9+/]{1,76}={0,2}\n)+-----END PUBLIC KEY-----\n?$/;
 
 /**
- * The script for one package type. Arguments: $1 the file, $2 its SHA-512 in hex, $3 the file extension.
+ * The script for one package type. Arguments: $1 the file, $2 its SHA-512 in hex, $3 the file extension, $4 the signature file.
+ * `publicKey` is the release public key text, read by the app from its own resources; the script writes it into its root-owned
+ * temporary folder itself, so no value the user controls reaches the key (it is checked to be plain PEM before it is embedded).
  * The install step's own 126 and 127 (a tool that is missing) become 1, so they are never taken for pkexec's "dismissed".
  */
-export function installScript(type) {
+export function installScript(type, publicKey) {
   const command = installCommands[type];
   if (!command) throw new Error(`No installer for ${type}.`);
+  if (typeof publicKey !== 'string' || !pemPattern.test(publicKey)) throw new Error('The release public key is not in the expected form.');
   return `set -u
 tmp=$(mktemp -d) || exit 1
 trap 'rm -rf "$tmp"' EXIT
 pkg="$tmp/update.$3"
 cp -- "$1" "$pkg" || exit 1
+cp -- "$4" "$tmp/update.sig" || exit 1
 printf '%s  %s\\n' "$2" "$pkg" | sha512sum -c - >/dev/null 2>&1 || { echo 'opendoc-desktop: the update file does not match its checksum' >&2; exit ${checksumExitCode}; }
+key="$tmp/release-key.pem"
+printf '%s\\n' '${publicKey.trimEnd()}' > "$key" || exit 1
+command -v openssl >/dev/null 2>&1 || { echo 'opendoc-desktop: openssl is needed to check the update signature and is not installed' >&2; exit ${opensslExitCode}; }
+openssl pkeyutl -verify -pubin -inkey "$key" -rawin -in "$pkg" -sigfile "$tmp/update.sig" >/dev/null 2>&1 || { echo 'opendoc-desktop: the update file is not signed with the opendoc-desktop release key' >&2; exit ${signatureExitCode}; }
 (
   ${command}
 )
@@ -63,19 +83,35 @@ export function sha512Hex(base64) {
 }
 
 /**
- * The arguments for pkexec. --disable-internal-agent: without a graphical agent pkexec fails instead of asking in a terminal.
- * With `helper` (the installed helper's path) pkexec runs that file; without, it runs the script through /bin/sh -c.
+ * The release public key text the fallback script embeds: from the app's own resources folder when there is one (the packaged app),
+ * else from the source tree (an unpackaged run, tests). Throws when it cannot be read or is not a plain PEM key.
  */
-export function pkexecArguments({ type, file, sha512, helper = null }) {
+export async function readReleaseKey({ resourcesPath = process.resourcesPath, readText = path => readFile(path, 'utf8') } = {}) {
+  const inResources = resourcesPath && isAbsolute(resourcesPath) ? join(resourcesPath, keyRelativePath) : null;
+  let text;
+  try { text = await readText(inResources ?? sourceKeyFile); }
+  catch { throw new Error('The release public key that checks the update signature could not be read.'); }
+  if (!pemPattern.test(text)) throw new Error('The release public key is not in the expected form.');
+  return text;
+}
+
+/**
+ * The arguments for pkexec. --disable-internal-agent: without a graphical agent pkexec fails instead of asking in a terminal.
+ * With `helper` (the installed helper's path) pkexec runs that file, which reads the public key from its own folder; without, it
+ * runs the script through /bin/sh -c, and `publicKey` (the key text, see readReleaseKey) goes into that script.
+ * `signature` is the downloaded <file>.sig.
+ */
+export function pkexecArguments({ type, file, sha512, signature, helper = null, publicKey }) {
   const hex = sha512Hex(sha512);
   if (!hex) throw new Error('The release has no usable SHA-512 for this file.');
   if (!isAbsolute(file)) throw new Error('The downloaded file has no absolute path.');
+  if (typeof signature !== 'string' || !isAbsolute(signature) || !signature.endsWith('.sig')) throw new Error('The downloaded update has no signature file.');
   const extension = extname(basename(file)).slice(1) || type;
   if (helper) {
     if (!installCommands[type]) throw new Error(`No installer for ${type}.`);
-    return ['--disable-internal-agent', helper, file, hex, extension];
+    return ['--disable-internal-agent', helper, file, hex, extension, signature];
   }
-  return ['--disable-internal-agent', '/bin/sh', '-c', installScript(type), 'opendoc-desktop-update', file, hex, extension];
+  return ['--disable-internal-agent', '/bin/sh', '-c', installScript(type, publicKey), 'opendoc-desktop-update', file, hex, extension, signature];
 }
 
 /**
@@ -107,6 +143,8 @@ export function classifyExit(code, stderr = '') {
     return { outcome: 'cancelled' };
   }
   if (code === checksumExitCode) return { outcome: 'failed', reason: 'checksum', message: 'The downloaded file did not match its checksum when it was about to be installed, so nothing was installed.' };
+  if (code === signatureExitCode) return { outcome: 'failed', reason: 'signature', message: 'The downloaded update is not signed with the OpenDoc Desktop release key, so nothing was installed. Download it from the release page and install it by hand only if you trust where it came from.' };
+  if (code === opensslExitCode) return { outcome: 'failed', reason: 'no-openssl', message: 'openssl is needed to check the update signature and is not installed, so nothing was installed. Install openssl and try again, or download the update from the release page.' };
   return { outcome: 'failed', reason: 'install', message: tail(stderr) || `The installer exited with code ${code}.` };
 }
 
@@ -120,12 +158,14 @@ export const safePath = value => String(value ?? '').split(delimiter).filter(ent
  * Resolves { outcome: 'installed' | 'cancelled' | 'failed', reason?, message?, code }.
  * `spawn` and `env` are for tests (a fake pkexec first on PATH).
  */
-export async function installPackage({ type, file, sha512, spawn = nodeSpawn, env = process.env, log = () => {}, helper }) {
+export async function installPackage({ type, file, sha512, signature, spawn = nodeSpawn, env = process.env, log = () => {}, helper, publicKey }) {
   // `helper` is for tests: a path (use it as found), null (use the fallback), or left out (look for the installed one).
   if (helper === undefined) helper = await findHelper();
   let args;
-  try { args = pkexecArguments({ type, file, sha512, helper }); }
-  catch (error) { return { outcome: 'failed', reason: 'input', message: error.message, code: null }; }
+  try {
+    if (!helper && publicKey === undefined) publicKey = await readReleaseKey();
+    args = pkexecArguments({ type, file, sha512, signature, helper, publicKey });
+  } catch (error) { return { outcome: 'failed', reason: 'input', message: error.message, code: null }; }
   log(helper ? `installing through the polkit action ${actionId}` : 'installing through pkexec /bin/sh (no installed helper and policy)');
   return new Promise(resolve => {
     let child;

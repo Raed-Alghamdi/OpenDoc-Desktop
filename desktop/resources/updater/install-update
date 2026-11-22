@@ -4,23 +4,28 @@
 # shows a sentence instead of a script. The package that holds this file installs it root-owned, mode 0755, and nothing else may
 # change it.
 #
-# Usage: install-update <file> <sha512-hex> <deb|rpm|pacman>
+# Usage: install-update <file> <sha512-hex> <deb|rpm|pacman> <signature-file>
 #
-# The downloaded file lies in the user's cache folder and is not trusted where it lies: it is copied into a root-owned folder,
-# its SHA-512 (from the release metadata) is checked on the copy, and the copy is installed. Every argument is checked first.
+# The downloaded file lies in the user's cache folder and is not trusted where it lies: the file and its signature (<file>.sig, the
+# 64 raw bytes of an Ed25519 signature the release publishes) are copied into a root-owned folder, the SHA-512 (from the release
+# metadata) is checked on the copy, the signature is verified on the copy with the release public key (release-key.pem in this
+# file's own folder, next to it in the same root-owned install), and only then is the copy installed. Every argument is checked first.
+# The SHA-512 comes from the same feed as the file; the signature is what proves the release's own key made the file.
 #
-# Exit codes: 0 installed; 64 bad arguments; 70 the copy does not match the checksum; 1 any other failure, including a missing
-# install tool (the install tool's own 126 and 127 become 1 so they are never taken for pkexec's "prompt dismissed").
+# Exit codes: 0 installed; 64 bad arguments; 70 the copy does not match the checksum; 71 the signature is not the release key's (or
+# the key file is missing); 72 openssl is not installed; 1 any other failure, including a missing install tool (the install tool's
+# own 126 and 127 become 1 so they are never taken for pkexec's "prompt dismissed"). Nothing is installed on 64, 70, 71 and 72.
 #
 # pkexec runs this with a minimal environment and PATH=/usr/sbin:/usr/bin:/sbin:/bin (pkexec(1)), so PATH is not set here.
 set -u
 
 usage() { echo "opendoc-desktop: $1" >&2; exit 64; }
 
-[ "$#" -eq 3 ] || usage 'usage: install-update <file> <sha512-hex> <deb|rpm|pacman>'
+[ "$#" -eq 4 ] || usage 'usage: install-update <file> <sha512-hex> <deb|rpm|pacman> <signature-file>'
 file=$1
 sum=$2
 ext=$3
+sig=$4
 
 case $ext in deb | rpm | pacman) ;; *) usage 'the package type must be deb, rpm or pacman' ;; esac
 case $sum in *[!0-9a-f]*) usage 'the checksum must be 128 lowercase hex digits' ;; esac
@@ -30,12 +35,24 @@ case $file in *"
 "*) usage 'the file name must not contain a line break' ;; esac
 case $file in *".$ext") ;; *) usage "the file name must end in .$ext" ;; esac
 [ -f "$file" ] && [ ! -L "$file" ] || usage 'the file must be a regular file (not a link)'
+case $sig in /*) ;; *) usage 'the signature file must be an absolute path' ;; esac
+case $sig in *"
+"*) usage 'the signature file name must not contain a line break' ;; esac
+case $sig in *.sig) ;; *) usage 'the signature file name must end in .sig' ;; esac
+[ -f "$sig" ] && [ ! -L "$sig" ] || usage 'the signature file must be a regular file (not a link)'
+[ "$(wc -c < "$sig")" -eq 64 ] || usage 'the signature file must be exactly 64 bytes'
 
 tmp=$(mktemp -d) || exit 1
 trap 'rm -rf "$tmp"' EXIT
 pkg="$tmp/update.$ext"
 cp -- "$file" "$pkg" || exit 1
+cp -- "$sig" "$tmp/update.sig" || exit 1
 printf '%s  %s\n' "$sum" "$pkg" | sha512sum -c - >/dev/null 2>&1 || { echo 'opendoc-desktop: the update file does not match its checksum' >&2; exit 70; }
+
+# The release key sits next to this file; pkexec runs the file by the absolute path the polkit action names.
+key=$(dirname -- "$0")/release-key.pem
+command -v openssl >/dev/null 2>&1 || { echo 'opendoc-desktop: openssl is needed to check the update signature and is not installed' >&2; exit 72; }
+[ -f "$key" ] && openssl pkeyutl -verify -pubin -inkey "$key" -rawin -in "$pkg" -sigfile "$tmp/update.sig" >/dev/null 2>&1 || { echo 'opendoc-desktop: the update file is not signed with the opendoc-desktop release key' >&2; exit 71; }
 
 # The same tools in the same order as the app's fallback (updater/privileged-install.mjs keeps the two texts equal; a test checks it).
 (

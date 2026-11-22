@@ -2,13 +2,15 @@
 // artifact whose app.asar has the field. Real tools (ar, bsdtar) and real asar archives; the AppImage is a stand-in script.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { installerTestBuildMark, readAsarFile, testBuildMark } from './app-archive.mjs';
 import { asarModule, desktop } from './builder-support.mjs';
 import { testBuildArguments, testBuildField, testBuildVariable } from '../../runtime/test-build.mjs';
+import { generateKeyPairSync } from 'node:crypto';
+import { signFiles } from '../../release/sign.mjs';
 
 const tmp = (name) => mkdtempSync(path.join(os.tmpdir(), `opendoc-${name}-`));
 
@@ -133,13 +135,17 @@ function artifacts(scratch, asar) {
   return folder;
 }
 
-function check(scratch, ...targets) {
+/** check-release.mjs with the given arguments, on a PATH of just ar and bsdtar. */
+function checkWith(scratch, args) {
   const tools = path.join(scratch, 'tools');
   mkdirSync(tools, { recursive: true });
   for (const [name, target] of [['ar', ar], ['bsdtar', bsdtar]]) if (target) try { symlinkSync(target, path.join(tools, name)); } catch { /* there */ }
-  const result = spawnSync(process.execPath, [script, ...targets], { encoding: 'utf8', env: { PATH: tools, HOME: scratch } });
+  const result = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env: { PATH: tools, HOME: scratch } });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
+
+// The artifacts here are not signed: these tests are about the test build mark, so they leave the signature check out.
+const check = (scratch, ...targets) => checkWith(scratch, ['--skip-signatures', ...targets]);
 
 test('check-release.mjs passes a folder of release artifacts and lists what it read', { skip }, async () => {
   const scratch = tmp('release');
@@ -229,5 +235,58 @@ test('check-packaged.mjs --release reads the unpacked apps\' app.asar, and plain
     assert.equal(marked.status, 1);
     assert.match(marked.stdout, /^FAIL {2}linux-unpacked is not a test build: this is a test build/m);
     assert.equal(run().status, 0, 'without --release the mark is not looked for (a test build is a legitimate local build)');
+  } finally { rmSync(scratch, { recursive: true, force: true }); }
+});
+
+test('check-release.mjs wants a signature that verifies with the public key beside every installer, dmg included', { skip }, async () => {
+  const scratch = tmp('release-signed');
+  try {
+    const folder = artifacts(scratch, await makeAsar(scratch, 'signed', {}));
+    const keys = generateKeyPairSync('ed25519');
+    const publicFile = path.join(scratch, 'public.pem');
+    writeFileSync(publicFile, keys.publicKey.export({ type: 'spki', format: 'pem' }));
+    const installers = readdirSync(folder).filter((name) => !name.endsWith('.yml')).map((name) => path.join(folder, name));
+    const run = (...args) => checkWith(scratch, ['--public-key', publicFile, ...args]);
+
+    // Unsigned: every installer fails, and so does the whole run.
+    const unsigned = run(folder);
+    assert.equal(unsigned.status, 1);
+    for (const file of installers) assert.match(unsigned.stdout, new RegExp(`^FAIL {2}${path.basename(file).replace(/\./g, '\\.')} .*: no .*\\.sig beside it`, 'm'), file);
+
+    signFiles(installers, { privateKey: keys.privateKey, publicKey: keys.publicKey });
+    const signed = run(folder);
+    assert.equal(signed.status, 0, signed.stdout + signed.stderr);
+    for (const kind of [...kinds, 'dmg']) assert.match(signed.stdout, new RegExp(`^ok {4}\\S+ \\(${kind}\\): signed with the release key`, 'm'), kind);
+    assert.equal(run(path.join(folder, 'opendoc-desktop-0.6.1-3-x64.pacman')).status, 0, 'one file');
+
+    // The repository's own key is not the test key: nothing verifies.
+    const wrongKey = checkWith(scratch, [folder]);
+    assert.equal(wrongKey.status, 1);
+    assert.match(wrongKey.stdout, /does not verify with the release public key/);
+    // The skip flag leaves the signatures out.
+    assert.equal(checkWith(scratch, ['--skip-signatures', folder]).status, 0);
+
+    // A signature of the wrong length, a file changed after signing, and a signature that is a folder.
+    const pacman = path.join(folder, 'opendoc-desktop-0.6.1-3-x64.pacman');
+    const good = readFileSync(`${pacman}.sig`);
+    writeFileSync(`${pacman}.sig`, good.subarray(0, 63));
+    assert.match(run(folder).stdout, /^FAIL {2}\S+\.pacman \(pacman\): \S+\.sig is 63 bytes, not 64/m);
+    writeFileSync(`${pacman}.sig`, Buffer.concat([good, Buffer.from([0])]));
+    assert.match(run(folder).stdout, /\.sig is 65 bytes, not 64/);
+    writeFileSync(`${pacman}.sig`, good);
+    const zip = path.join(folder, 'opendoc-desktop-0.6.1-3-arm64.zip');
+    const original = readFileSync(zip);
+    writeFileSync(zip, Buffer.concat([original, Buffer.from('x')]));
+    const changed = run(folder);
+    assert.equal(changed.status, 1);
+    assert.match(changed.stdout, /^FAIL {2}\S+\.zip \(zip\): \S+\.sig does not verify/m);
+    writeFileSync(zip, original);
+    rmSync(`${zip}.sig`);
+    mkdirSync(`${zip}.sig`);
+    assert.match(run(folder).stdout, /\.zip\.sig is not a file/);
+
+    // A bad public key file is a usage error, not a pass.
+    assert.equal(checkWith(scratch, ['--public-key', path.join(scratch, 'missing.pem'), folder]).status, 2);
+    assert.equal(checkWith(scratch, ['--bogus', folder]).status, 2);
   } finally { rmSync(scratch, { recursive: true, force: true }); }
 });

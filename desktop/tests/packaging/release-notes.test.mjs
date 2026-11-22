@@ -38,9 +38,14 @@ test('the install notes name every file of this version and build the way electr
   for (const file of ['opendoc-desktop-x86_64.AppImage', 'opendoc-desktop_0.7.0-3_amd64.deb', 'opendoc-desktop-0.7.0-3.x86_64.rpm', 'opendoc-desktop-0.7.0-3-x64.pacman', 'opendoc-desktop-0.7.0-3-arm64.dmg']) {
     assert.ok(notes.includes(`\`${file}\``), file);
   }
-  for (const fact of ['libfuse2t64', 'AppArmor', '--nogpgcheck', 'Open Anyway', 'xattr -dr com.apple.quarantine /Applications/opendoc-desktop.app', 'Restart to Update', 'SHA-512', 'not signed']) {
+  for (const fact of ['libfuse2t64', 'AppArmor', '--nogpgcheck', 'Open Anyway', 'xattr -dr com.apple.quarantine /Applications/opendoc-desktop.app', 'Restart to Update', 'SHA-512']) {
     assert.ok(notes.includes(fact), fact);
   }
+  // The signature files: what they are, the command to check one by hand, and where the public key is.
+  for (const fact of ['`<file>.sig`', 'Ed25519', 'openssl pkeyutl -verify -pubin -inkey release-key.pem -rawin -in <file> -sigfile <file>.sig', 'desktop/resources/updater/release-key.pem', 'before it installs a deb, rpm or pacman update']) {
+    assert.ok(notes.includes(fact), fact);
+  }
+  assert.ok(!notes.includes('themselves are not signed'), 'the old "not signed" sentence is gone');
   assert.ok(!notes.includes('user guide'), 'no guide link without a repository');
 });
 

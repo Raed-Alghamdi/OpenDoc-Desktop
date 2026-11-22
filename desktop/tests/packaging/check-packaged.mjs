@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Checks the unpacked apps in desktop/dist (the folders electron-builder builds the installers from): the agent integrations
-// with their dot folders, through the source check script, and on macOS the design pack document type in Info.plist.
+// with their dot folders, through the source check script, on Linux the update helper and the release public key beside it (the
+// repository's own files), and on macOS the design pack document type in Info.plist.
 //
 // With --release it also reads package.json from inside each app.asar and fails when the app is a test build (the field
 // opendocTestBuild, runtime/test-build.mjs): a release must never carry it.
@@ -42,6 +43,16 @@ function checkHelper(resources) {
   return 'present, executable, the repository\'s text';
 }
 
+// The release public key beside the helper (resources/updater/release-key.pem): the helper checks every update's signature with it
+// and the app reads the same file for its fallback. It must be the repository's file, byte for byte; a Mac app has none (see below).
+const keyFile = path.join('updater', 'release-key.pem');
+function checkReleaseKey(resources) {
+  const file = path.join(resources, keyFile);
+  assert.ok(existsSync(file), `missing ${file}`);
+  assert.ok(readFileSync(file).equals(readFileSync(path.join(desktop, 'resources', keyFile))), `${file} differs from the repository's release key`);
+  return 'present, the repository\'s key';
+}
+
 // A release app is not a test build. app.asar is read in place; package.json is the file the running app reads its own mark from.
 function checkNotTestBuild(resources) {
   const file = path.join(resources, 'app.asar');
@@ -63,6 +74,7 @@ if (entries.includes('linux-unpacked')) {
   found.add('linux');
   check('linux-unpacked integrations', () => checkIntegrations(path.join(dist, 'linux-unpacked', 'resources')));
   check('linux-unpacked update helper', () => checkHelper(path.join(dist, 'linux-unpacked', 'resources')));
+  check('linux-unpacked release key', () => checkReleaseKey(path.join(dist, 'linux-unpacked', 'resources')));
   if (values.release) check('linux-unpacked is not a test build', () => checkNotTestBuild(path.join(dist, 'linux-unpacked', 'resources')));
 }
 for (const folder of entries.filter((name) => /^mac/.test(name))) {

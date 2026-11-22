@@ -40,7 +40,7 @@ export function installNotes({ version, build, repository = '', commit = '' }) {
     '- **AppImage:** `chmod +x opendoc-desktop-x86_64.AppImage`, then run it. It needs FUSE 2 (on Ubuntu 24.04: `sudo apt install libfuse2t64`). Keep it in a folder you can write to: updates replace the file in place. The first start copies the runtime (about 185 MB) to `~/.local/share/opendoc-desktop/runtime/` and sets up the `opendoc` command in `~/.local/bin`. The AppImage makes no menu entry.',
     `- **Ubuntu 24.04:** prefer the deb. It installs an AppArmor profile, so the app runs in Chromium's sandbox; the AppImage starts without that sandbox there.`,
     `- **deb:** \`sudo apt install ./opendoc-desktop_${version}-${build}_amd64.deb\``,
-    `- **rpm:** \`sudo dnf install --nogpgcheck ./opendoc-desktop-${version}-${build}.x86_64.rpm\` (openSUSE: \`sudo zypper install --allow-unsigned-rpm ...\`). The flag is needed because the package is not signed.`,
+    `- **rpm:** \`sudo dnf install --nogpgcheck ./opendoc-desktop-${version}-${build}.x86_64.rpm\` (openSUSE: \`sudo zypper install --allow-unsigned-rpm ...\`). The flag is needed because the rpm has no signature your package manager knows; the release signature below is a separate file.`,
     `- **Arch:** \`sudo pacman -U ./opendoc-desktop-${version}-${build}-x64.pacman\`.`,
     '- **macOS:** open the `.dmg` and drag opendoc-desktop to Applications; don\'t run it from the disk image or from Downloads. The app is not notarized, so macOS blocks the first launch: open it once, then in System Settings > Privacy & Security click **Open Anyway** next to "opendoc-desktop was blocked" (on macOS 14 and earlier: Control-click the app, then **Open**). Or run `xattr -dr com.apple.quarantine /Applications/opendoc-desktop.app` once.',
     '',
@@ -53,10 +53,10 @@ export function installNotes({ version, build, repository = '', commit = '' }) {
     '| Install | What you do |',
     '|---|---|',
     '| AppImage | Nothing. The new file downloads in the background and replaces the AppImage when you quit. |',
-    '| deb, rpm, or a pacman file | Click **Restart to Update**, then type your password (installing a system package needs it). |',
+    '| deb, rpm, or a pacman file | Click **Restart to Update**, then type your password (installing a system package needs it). The app installs it only if its signature checks out. |',
     '| macOS | Click **Restart to Update** while the app runs from Applications. From anywhere else it shows a button to this page instead. |',
     '',
-    'A download is accepted only from this repository\'s releases, over HTTPS, and only when it matches the SHA-512 listed in `latest-linux.yml` or `latest-mac.yml`. The packages themselves are not signed. To check a file by hand: `openssl dgst -sha512 -binary <file> | base64 -w0` gives the same base64 form.',
+    'A download is accepted only from this repository\'s releases, over HTTPS, and only when it matches the SHA-512 listed in `latest-linux.yml` or `latest-mac.yml`. Every installer also has a signature file beside it, `<file>.sig` (an Ed25519 signature made with the release key); the app checks it before it installs a deb, rpm or pacman update, as root. The public key is `desktop/resources/updater/release-key.pem` in the repository. To check a file by hand: `openssl pkeyutl -verify -pubin -inkey release-key.pem -rawin -in <file> -sigfile <file>.sig` (OpenSSL 3), and `openssl dgst -sha512 -binary <file> | base64 -w0` gives the SHA-512 in the base64 form.',
     ...(guide ? ['', `The [user guide](${guide}) covers the first run, which workspaces open, the \`opendoc\` command, connecting AI apps and uninstalling.`] : []),
   ].join('\n');
 }

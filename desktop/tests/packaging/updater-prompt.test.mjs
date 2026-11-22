@@ -15,8 +15,8 @@ const policyPath = path.join(desktop, 'resources', 'polkit', policyName);
 const helperPath = path.join(desktop, 'resources', 'updater', 'install-update');
 const installedHelper = path.posix.join('/opt/opendoc-desktop/resources', ...helperRelativePath.split(path.sep));
 
-test('the helper is shipped for Linux only, into resources/updater, next to the other extra resources', () => {
-  assert.deepEqual(config.linux.extraResources, [{ from: 'resources/updater', to: 'updater', filter: ['install-update'] }]);
+test('the helper and the release key are shipped for Linux only, into resources/updater, next to the other extra resources', () => {
+  assert.deepEqual(config.linux.extraResources, [{ from: 'resources/updater', to: 'updater', filter: ['install-update', 'release-key.pem'] }]);
   assert.equal(config.mac.extraResources, undefined, 'a Mac app has no pkexec');
   assert.ok(!config.extraResources.some((entry) => /updater/.test(entry.to)), 'the top-level list reaches every platform');
   assert.ok(config.extraResources.some((entry) => entry.to === 'runtime'), 'the runtime entries stay');
@@ -50,4 +50,20 @@ test('the AUR package leaves the helper and the policy out: its updater is off, 
   assert.match(extract, /--exclude='usr\/share\/polkit-1'/);
   assert.match(extract, /--exclude='opt\/opendoc-desktop\/resources\/updater'/);
   assert.match(pkgbuild, /resources\/update-disabled/);
+});
+
+test('openssl is a dependency of the deb, rpm and pacman packages and of the AUR package, which check an update signature with it', () => {
+  for (const target of ['deb', 'rpm', 'pacman']) assert.ok(config[target].depends.includes('openssl'), target);
+  // deb and rpm keep electron-builder's own default dependencies (setting `depends` replaces them).
+  assert.ok(['libgtk-3-0', 'libnss3', 'xdg-utils', 'libatspi2.0-0'].every((name) => config.deb.depends.includes(name)));
+  assert.ok(['gtk3', 'nss', 'xdg-utils', 'at-spi2-core', '(libXtst or libXtst6)'].every((name) => config.rpm.depends.includes(name)));
+  const pkgbuild = readFileSync(path.join(desktop, 'aur', 'PKGBUILD'), 'utf8');
+  assert.match(pkgbuild, /^depends=\(.*\bopenssl\b.*\)$/m);
+  assert.match(readFileSync(path.join(desktop, 'aur', '.SRCINFO'), 'utf8'), /^\tdepends = openssl$/m);
+});
+
+test('the release key in the repository is the SPKI public key the helper reads, and the helper looks for it in its own folder', () => {
+  const key = readFileSync(path.join(desktop, 'resources', 'updater', 'release-key.pem'), 'utf8');
+  assert.match(key, /^-----BEGIN PUBLIC KEY-----\n[A-Za-z0-9+/=\n]+-----END PUBLIC KEY-----\n$/);
+  assert.match(readFileSync(helperPath, 'utf8'), /^key=\$\(dirname -- "\$0"\)\/release-key\.pem$/m);
 });

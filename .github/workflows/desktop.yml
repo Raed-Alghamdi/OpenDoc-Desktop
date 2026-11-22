@@ -6,6 +6,10 @@ name: Desktop
 # upstream-watch.yml calls this workflow (workflow_call) for the merge it prepared: `ref` is the commit to build, `build` its build
 # number, and `release_tag` the release to leave as a draft (a rehearsal passes a `dryrun-` tag and `prerelease`). The call never
 # publishes; upstream-watch decides that after verify has also finished.
+# Every installer in a release is signed with the release key (Ed25519; the repository secret DESKTOP_SIGNING_KEY, whose public half
+# is desktop/resources/updater/release-key.pem) and carries its signature as <file>.sig. A deb, rpm or pacman update is installed
+# only when the app's root helper has checked that signature. A call must pass the secret itself (a called workflow gets none unless
+# the caller hands it over), and a draft release is never made without it.
 on:
   push:
     tags: ['desktop-v*']
@@ -37,6 +41,10 @@ on:
         description: Mark that draft release as a pre-release (rehearsals)
         type: boolean
         default: false
+    secrets:
+      DESKTOP_SIGNING_KEY:
+        description: The release signing key (an Ed25519 private key, PKCS#8 PEM), used by the release job only
+        required: true
 
 permissions:
   contents: read
@@ -90,7 +98,7 @@ jobs:
         run: node desktop/tests/packaging/check-artifacts.mjs --require-rpm
       # Every installer's app.asar (deb, rpm, pacman, AppImage) must be free of the test build mark, before anything is uploaded.
       - name: Check that no installer is a test build
-        run: node desktop/tests/packaging/check-release.mjs desktop/dist
+        run: node desktop/tests/packaging/check-release.mjs --skip-signatures desktop/dist
       - name: Test the runtime inside the unpacked app
         env:
           OPENDOC_RUNTIME: ${{ github.workspace }}/desktop/dist/linux-unpacked/resources/runtime
@@ -174,7 +182,7 @@ jobs:
         run: node desktop/tests/packaging/check-packaged.mjs --require mac --release
       # The zip's app.asar must be free of the test build mark, before anything is uploaded (the dmg holds the same app).
       - name: Check that no installer is a test build
-        run: node desktop/tests/packaging/check-release.mjs desktop/dist
+        run: node desktop/tests/packaging/check-release.mjs --skip-signatures desktop/dist
       # The packaged app (production fuses) in the runner's own session: library, PDF, comment, export, `opendoc --version`, quit.
       - name: Smoke test the packaged app
         run: node desktop/tests/smoke/run.mjs
@@ -219,6 +227,20 @@ jobs:
       # Nothing is published with the test build mark: it makes the app honour test switches and a plain-http update feed. This reads
       # the app archive of every file about to be attached, and fails the job (and so the release) if one has the mark.
       - name: Check that no release file is a test build
+        run: node desktop/tests/packaging/check-release.mjs --skip-signatures release
+      # Every installer (AppImage, deb, rpm, pacman, dmg, zip; not the block maps or the update metadata) gets <file>.sig, a raw
+      # Ed25519 signature over the whole file. The key reaches this one step through its environment and is never printed. A missing
+      # or empty secret, a key that is not Ed25519 and a key that does not match desktop/resources/updater/release-key.pem all fail
+      # the step, so no release is ever drafted unsigned. The .sig files are attached with the rest (release/desktop-*/*).
+      - name: Sign the installers
+        env:
+          DESKTOP_SIGNING_KEY: ${{ secrets.DESKTOP_SIGNING_KEY }}
+        run: |
+          shopt -s nullglob
+          files=(release/desktop-linux/*.{AppImage,deb,rpm,pacman} release/desktop-mac-*/*.{dmg,zip})
+          node desktop/release/sign.mjs "${files[@]}"
+      # Every installer must have a signature that verifies with the repository's public key, and still not be a test build.
+      - name: Check the signatures
         run: node desktop/tests/packaging/check-release.mjs release
       - name: Create the draft release
         env:

@@ -7,13 +7,17 @@ import { join } from 'node:path';
 import { readConfig } from '../support/app.mjs';
 import { waitFor } from '../support/helpers.mjs';
 import { workDir } from '../support/paths.mjs';
-import { fakeTools } from '../support/updater.mjs';
+import { fakeTools, testReleaseKey } from '../support/updater.mjs';
 import { fakePackage, publish, sha512, startFeed } from './support/feed.mjs';
 import { clickItem, menuLabels, updaterApp } from './support/launch.mjs';
 
 // The tests' runtime is build 7 (global-setup.mjs), so the feed offers build 8.
 const deb = { name: 'opendoc-desktop_0.6.1-8_amd64.deb', bytes: fakePackage(120_000) };
 const ready = 'A new version is ready: 0.6.1, build 8';
+// The release key of these runs: a throwaway one. The stand-in resources folder holds its public half where the app looks for the release
+// key, and the feed serves a .sig made with the private half for each file, as a release does.
+const key = testReleaseKey();
+const resources = { 'package-type': 'deb', 'updater/release-key.pem': key.publicPem };
 const exited = (app, milliseconds) => Promise.race([new Promise(accept => app.process().once('exit', () => accept(true))), new Promise(accept => setTimeout(accept, milliseconds, false))]);
 
 test.describe('a package install updates through one pkexec call', () => {
@@ -27,8 +31,8 @@ test.describe('a package install updates through one pkexec call', () => {
   test.afterEach(async () => { await feed?.stop(); });
 
   test('download, Later, then Restart to Update: one prompt, the checked copy is installed, the app relaunches', async () => {
-    await publish(feed, { version: '0.6.1', build: 8, files: [deb] });
-    const run = await updaterApp({ config: { updateFeed: feed.url }, resources: { 'package-type': 'deb' }, path: [tools.bin], answers: [[ready, 'Later']] });
+    await publish(feed, { version: '0.6.1', build: 8, files: [deb], signWith: key });
+    const run = await updaterApp({ config: { updateFeed: feed.url }, resources, path: [tools.bin], answers: [[ready, 'Later']] });
     try {
       await run.app.firstWindow();
       const offer = await run.waitForDialog(ready);
@@ -37,7 +41,7 @@ test.describe('a package install updates through one pkexec call', () => {
 
       // Nothing was installed while the offer was pending, and the download is in the app's cache folder.
       expect(await tools.calls('pkexec')).toEqual([]);
-      expect(await readdir(join(run.updaterCache, 'pending'))).toContain(deb.name);
+      expect(await readdir(join(run.updaterCache, 'pending'))).toEqual(expect.arrayContaining([deb.name, `${deb.name}.sig`]));
 
       await clickItem(run.app, ['Help', 'Restart to Update']);
       expect(await exited(run.app, 60_000)).toBe(true);
@@ -52,6 +56,10 @@ test.describe('a package install updates through one pkexec call', () => {
       expect(call[5]).toBe(join(run.updaterCache, 'pending', deb.name));
       expect(call[6]).toBe(Buffer.from(sha512(deb.bytes), 'base64').toString('hex'));
       expect(call[7]).toBe('deb');
+      expect(call[8]).toBe(join(run.updaterCache, 'pending', `${deb.name}.sig`));
+      expect(call).toHaveLength(9);
+      // The script carries the stand-in release key, and the key the checks use is not an argument.
+      expect(call[3]).toContain(key.publicPem.trimEnd());
       const [dpkg] = await tools.calls('dpkg');
       expect(dpkg[0]).toBe('-i');
       expect(dpkg[1]).toMatch(/\/update\.deb$/);
@@ -60,14 +68,14 @@ test.describe('a package install updates through one pkexec call', () => {
 
       // Only the metadata and the one file were asked for, and the dialogs were the offer and nothing else.
       const asked = (await feed.requests()).map(request => request.path.split('?')[0]);
-      expect(asked).toEqual(['/generic/latest-linux.yml', `/generic/${deb.name}`]);
+      expect(asked).toEqual(['/generic/latest-linux.yml', `/generic/${deb.name}`, `/generic/${deb.name}.sig`]);
       expect((await run.dialogs()).map(dialog => dialog.message)).toEqual([ready]);
     } finally { await run.app.close().catch(() => {}); }
   });
 
   test('a cancelled password prompt says so, keeps the download, and the app carries on', async () => {
-    await publish(feed, { version: '0.6.1', build: 8, files: [deb] });
-    const run = await updaterApp({ config: { updateFeed: feed.url }, resources: { 'package-type': 'deb' }, path: [tools.bin], env: { FAKE_PKEXEC_EXIT: '126' }, answers: [[ready, 'Restart to Update']] });
+    await publish(feed, { version: '0.6.1', build: 8, files: [deb], signWith: key });
+    const run = await updaterApp({ config: { updateFeed: feed.url }, resources, path: [tools.bin], env: { FAKE_PKEXEC_EXIT: '126' }, answers: [[ready, 'Restart to Update']] });
     try {
       await run.app.firstWindow();
       await run.waitForDialog('Update cancelled');
@@ -82,10 +90,10 @@ test.describe('a package install updates through one pkexec call', () => {
   });
 
   test('the app stays alive while the password prompt is open, and the menu offers no second click', async () => {
-    await publish(feed, { version: '0.6.1', build: 8, files: [deb] });
+    await publish(feed, { version: '0.6.1', build: 8, files: [deb], signWith: key });
     await writeFile(join(tools.bin, 'pkexec'), '#!/bin/sh\nsleep 4\nexit 126\n');
     await chmod(join(tools.bin, 'pkexec'), 0o755);
-    const run = await updaterApp({ config: { updateFeed: feed.url }, resources: { 'package-type': 'deb' }, path: [tools.bin], answers: [[ready, 'Later']] });
+    const run = await updaterApp({ config: { updateFeed: feed.url }, resources, path: [tools.bin], answers: [[ready, 'Later']] });
     try {
       await run.app.firstWindow();
       await run.waitForDialog(ready);
@@ -97,6 +105,49 @@ test.describe('a package install updates through one pkexec call', () => {
       for (let round = 0; round < 5; round++) await run.app.evaluate(() => process.pid);
       expect(Date.now() - started).toBeLessThan(2000);
       await run.waitForDialog('Update cancelled');
+    } finally { await run.app.close().catch(() => {}); }
+  });
+
+  test('a release file without a signature is offered, but "Restart to Update" refuses it: no password prompt, nothing installed', async () => {
+    await publish(feed, { version: '0.6.1', build: 8, files: [deb], signWith: key, unsigned: [deb.name] });
+    const run = await updaterApp({ config: { updateFeed: feed.url }, resources, path: [tools.bin], answers: [[ready, 'Restart to Update']] });
+    try {
+      await run.app.firstWindow();
+      const failure = await run.waitForDialog('The update could not be installed');
+      expect(failure.detail).toContain('This update has no signature, so it was not installed. Download it from the release page and install it by hand.');
+      expect(failure.detail).not.toContain('sudo apt install');
+      expect(await tools.calls('pkexec')).toEqual([]);
+      expect(await tools.calls('dpkg')).toEqual([]);
+      expect(await run.relaunched()).toBe(false);
+      // Asked for when the download finished, and once more when the install was tried.
+      const signatureRequests = (await feed.requests()).filter(request => request.path.endsWith('.sig'));
+      expect(signatureRequests).toHaveLength(2);
+      expect(signatureRequests.every(request => request.status === 404)).toBe(true);
+    } finally { await run.app.close().catch(() => {}); }
+  });
+
+  test('a signature that does not verify is refused by the install script: the prompt opens, nothing is installed, the app says why', async () => {
+    await publish(feed, { version: '0.6.1', build: 8, files: [deb], signWith: key, badSignature: [deb.name] });
+    const run = await updaterApp({ config: { updateFeed: feed.url }, resources, path: [tools.bin], answers: [[ready, 'Restart to Update']] });
+    try {
+      await run.app.firstWindow();
+      const failure = await run.waitForDialog('The update could not be installed');
+      expect(failure.detail).toContain('not signed with the OpenDoc Desktop release key');
+      expect(failure.detail).not.toContain('sudo apt install');
+      expect(await tools.calls('pkexec')).toHaveLength(1);
+      expect(await tools.calls('dpkg')).toEqual([]);
+      expect(await run.relaunched()).toBe(false);
+    } finally { await run.app.close().catch(() => {}); }
+  });
+
+  test('a release signed with another key is refused the same way', async () => {
+    await publish(feed, { version: '0.6.1', build: 8, files: [deb], signWith: testReleaseKey() });
+    const run = await updaterApp({ config: { updateFeed: feed.url }, resources, path: [tools.bin], answers: [[ready, 'Restart to Update']] });
+    try {
+      await run.app.firstWindow();
+      const failure = await run.waitForDialog('The update could not be installed');
+      expect(failure.detail).toContain('not signed with the OpenDoc Desktop release key');
+      expect(await tools.calls('dpkg')).toEqual([]);
     } finally { await run.app.close().catch(() => {}); }
   });
 

@@ -68,10 +68,12 @@ linux:
   # The root-owned helper the updater runs through pkexec (deb, rpm and pacman installs). Its polkit action
   # (resources/polkit, installed by the three fpm lists below) names this exact path, /opt/opendoc-desktop/resources/updater/install-update,
   # so the password prompt shows a sentence instead of a script. extraResources keeps the file's mode, 0755.
+  # release-key.pem, the release public key, sits beside it: the helper checks every update's signature with it, and the app reads
+  # the same file for the fallback script. Linux only (the macOS and AppImage updates check the SHA-512 only).
   extraResources:
     - from: resources/updater
       to: updater
-      filter: ["install-update"]
+      filter: ["install-update", "release-key.pem"]
   description: A self-contained desktop app for OpenDoc, built on the original OpenDoc project.
   maintainer: opendoc-desktop contributors <Raed-Alghamdi@users.noreply.github.com>
   vendor: opendoc-desktop contributors
@@ -83,7 +85,9 @@ linux:
 # File names carry the build number, except the AppImage; fpm gets it as the package revision. Each follows its distribution's own convention.
 # fpm also installs the scalable and symbolic icons (electron-builder only handles the sized PNGs) and the `opendoc` agent command
 # (a real file in /usr/bin), mapped from desktop/.
+# openssl checks the release signature of an update (the root helper runs it); the lists below are electron-builder's own defaults plus openssl.
 deb:
+  depends: [libgtk-3-0, libnotify4, libnss3, libxss1, libxtst6, xdg-utils, libatspi2.0-0, libuuid1, libsecret-1-0, openssl]
   # Ubuntu 24.04 blocks unprivileged user namespaces without a profile (electron-builder issue 8635); 26.18.1 writes one by
   # default, and this template keeps it ours.
   appArmorProfile: resources/apparmor-profile.tpl
@@ -96,7 +100,7 @@ deb:
     - resources/polkit/io.github.ryanyahya.opendocdesktop.install-update.policy=/usr/share/polkit-1/actions/io.github.ryanyahya.opendocdesktop.install-update.policy
 pacman:
   # electron-builder's default list pulls http-parser and libappindicator-gtk3, which a bundled Electron does not need.
-  depends: [gtk3, nss, libnotify, libxss, xdg-utils, at-spi2-core]
+  depends: [gtk3, nss, libnotify, libxss, xdg-utils, at-spi2-core, openssl]
   artifactName: ${name}-${version}-${buildNumber}-${arch}.${ext}
   fpm:
     - resources/icons/opendoc-desktop.svg=/usr/share/icons/hicolor/scalable/apps/opendoc-desktop.svg
@@ -105,6 +109,7 @@ pacman:
     - resources/mime/opendoc-desktop.xml=/usr/share/mime/packages/opendoc-desktop.xml
     - resources/polkit/io.github.ryanyahya.opendocdesktop.install-update.policy=/usr/share/polkit-1/actions/io.github.ryanyahya.opendocdesktop.install-update.policy
 rpm:
+  depends: [gtk3, libnotify, nss, libXScrnSaver, (libXtst or libXtst6), xdg-utils, at-spi2-core, (libuuid or libuuid1), openssl]
   artifactName: ${name}-${version}-${buildNumber}.${arch}.${ext}
   fpm:
     - resources/icons/opendoc-desktop.svg=/usr/share/icons/hicolor/scalable/apps/opendoc-desktop.svg

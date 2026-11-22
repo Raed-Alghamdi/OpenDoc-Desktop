@@ -116,7 +116,16 @@ test('check-packaged.mjs accepts the unpacked apps it should and names what is w
     writeFileSync(path.join(scratch, 'dist', 'mac-arm64', 'opendoc-desktop.app', 'Contents', 'Info.plist'), plist(goodTypes));
     const good = run('--require', 'linux', '--require', 'mac');
     assert.equal(good.status, 0, good.stdout + good.stderr);
-    assert.equal(good.stdout.match(/^ok /gm).length, 5);
+    assert.equal(good.stdout.match(/^ok /gm).length, 6);
+
+    // A release key that is not the repository's, or none at all.
+    const keyFile = path.join(scratch, 'dist', 'linux-unpacked', 'resources', 'updater', 'release-key.pem');
+    const key = readFileSync(keyFile);
+    writeFileSync(keyFile, key.toString().replace('MCow', 'MCoX'));
+    assert.match(run().stdout, /FAIL {2}linux-unpacked release key: .* differs from the repository's release key/);
+    rmSync(keyFile);
+    assert.match(run().stdout, /FAIL {2}linux-unpacked release key: missing /);
+    writeFileSync(keyFile, key);
 
     // A file filter that drops dot folders.
     rmSync(path.join(scratch, 'dist', 'linux-unpacked', 'resources', 'integrations', 'codex', '.agents'), { recursive: true });

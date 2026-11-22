@@ -47,14 +47,17 @@ export function metadata({ version = '0.6.1', build, commit = '0123456789abcdef0
 /**
  * Publish a release into the feed's generic folder: write each file, then latest-linux.yml listing them.
  * `files` are { name, bytes }; `corrupt: name` serves that file with its last byte changed while the metadata keeps the real checksum.
+ * `signWith` (testReleaseKey() of tests/shell/support/updater.mjs) also serves <name>.sig for each file, the key's signature of the real bytes,
+ * as the release does; `unsigned: [names]` leaves some of them out, `badSignature: [names]` serves a signature of other bytes.
  * Resolves the metadata's file entries.
  */
-export async function publish(feed, { version, build, files, corrupt = null, channel = 'latest-linux.yml' }) {
+export async function publish(feed, { version, build, files, corrupt = null, channel = 'latest-linux.yml', signWith = null, unsigned = [], badSignature = [] }) {
   const entries = [];
   for (const file of files) {
     const bytes = Buffer.from(file.bytes);
     const served = file.name === corrupt ? Buffer.concat([bytes.subarray(0, -1), Buffer.from([bytes.at(-1) ^ 0xff])]) : bytes;
     await writeFile(join(feed.root, 'generic', file.name), served);
+    if (signWith && !unsigned.includes(file.name)) await writeFile(join(feed.root, 'generic', `${file.name}.sig`), signWith.sign(badSignature.includes(file.name) ? Buffer.concat([bytes, Buffer.from('x')]) : bytes));
     entries.push({ name: file.name, sha512: sha512(bytes), size: bytes.length });
   }
   await writeFile(join(feed.root, 'generic', channel), metadata({ version, build, files: entries }));

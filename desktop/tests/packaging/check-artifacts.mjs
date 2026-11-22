@@ -160,6 +160,9 @@ const memberLine = (kind, file, inner) => {
 // package. The policy's exec path must be the helper's installed path, or polkit shows the command line instead of the message.
 const policyRelative = 'usr/share/polkit-1/actions/io.github.ryanyahya.opendocdesktop.install-update.policy';
 const helperRelative = 'opt/opendoc-desktop/resources/updater/install-update';
+// The release public key the helper verifies every update's signature with, installed beside the helper.
+const keyRelative = 'opt/opendoc-desktop/resources/updater/release-key.pem';
+const keySource = readFileSync(path.join(desktop, 'resources', 'updater', 'release-key.pem'), 'utf8');
 const policySource = readFileSync(path.join(desktop, 'resources', 'polkit', path.basename(policyRelative)), 'utf8');
 const helperSource = readFileSync(path.join(desktop, 'resources', 'updater', 'install-update'), 'utf8');
 for (const [kind, extension] of [['deb', '.deb'], ['pacman', '.pacman'], ['rpm', '.rpm']]) {
@@ -172,11 +175,12 @@ for (const [kind, extension] of [['deb', '.deb'], ['pacman', '.pacman'], ['rpm',
     const execPath = policySource.match(/<annotate key="org\.freedesktop\.policykit\.exec\.path">([^<]*)</)[1];
     assert.equal(execPath, `/${helperRelative}`, 'the policy must name the helper\'s installed path');
     assert.equal(inPackage(kind, file, helperRelative).stdout, helperSource, 'the installed helper differs from resources/updater/install-update');
+    assert.equal(inPackage(kind, file, keyRelative).stdout, keySource, 'the installed release key is missing or differs from resources/updater/release-key.pem');
     const policy = memberLine(kind, file, policyRelative);
     assert.ok(policy && /^-rw-r--r--$/.test(policy.mode) && /^(0|root)$/.test(policy.owner), `the policy must be a root-owned 0644 file (found ${JSON.stringify(policy)})`);
     const helper = memberLine(kind, file, helperRelative);
     assert.ok(helper && helper.mode === '-rwxr-xr-x' && /^(0|root)$/.test(helper.owner) && /^(0|root)$/.test(helper.group), `the helper must be a root-owned 0755 file (found ${JSON.stringify(helper)})`);
-    return `action ${execPath} (policy 0644, helper 0755, both root-owned)`;
+    return `action ${execPath} (policy 0644, helper 0755, both root-owned), release key beside the helper`;
   });
 }
 

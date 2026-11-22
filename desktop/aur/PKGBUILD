@@ -11,7 +11,7 @@ arch=(x86_64)
 url='https://github.com/Raed-Alghamdi/OpenDoc-Desktop'
 # The app is MIT; the bundled Chromium carries more licences, listed in LICENSES.chromium.html (installed under /usr/share/licenses).
 license=(MIT BSD-3-Clause)
-depends=(gtk3 nss libnotify libxss xdg-utils at-spi2-core)
+depends=(gtk3 nss libnotify libxss xdg-utils at-spi2-core openssl)
 provides=(opendoc-desktop)
 conflicts=(opendoc-desktop)
 # Prebuilt binaries: stripping would only damage them.

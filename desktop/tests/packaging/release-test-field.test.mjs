@@ -38,7 +38,7 @@ function distRun(env) {
   try {
     const runtime = path.join(scratch, 'desktop', 'runtime');
     mkdirSync(runtime, { recursive: true });
-    for (const name of ['dist.mjs', 'release-metadata.mjs', 'test-build.mjs']) copyFileSync(path.join(desktop, 'runtime', name), path.join(runtime, name));
+    for (const name of ['dist.mjs', 'release-metadata.mjs', 'test-build.mjs', 'builder-environment.mjs']) copyFileSync(path.join(desktop, 'runtime', name), path.join(runtime, name));
     mkdirSync(path.join(scratch, 'desktop', 'dist'));
     const info = path.join(scratch, 'desktop', 'build', 'runtime', `${process.platform}-${process.arch}`);
     mkdirSync(info, { recursive: true });

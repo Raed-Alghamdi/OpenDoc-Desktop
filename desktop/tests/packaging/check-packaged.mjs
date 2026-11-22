@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Checks the unpacked apps in desktop/dist (the folders electron-builder builds the installers from): the agent integrations
 // with their dot folders, through the source check script, on Linux the update helper and the release public key beside it (the
-// repository's own files), and on macOS the design pack document type in Info.plist.
+// repository's own files), and on macOS the design pack document type in Info.plist and a read-only runtime.
 //
 // With --release it also reads package.json from inside each app.asar and fails when the app is a test build (the field
-// opendocTestBuild, runtime/test-build.mjs): a release must never carry it.
+// opendocTestBuild, runtime/test-build.mjs): a release must never carry it. On a Mac, --release also checks each app's code signature
+// with codesign.
 //
 // Usage: node desktop/tests/packaging/check-packaged.mjs [--dist <folder>] [--require <linux|mac>...] [--release]
 // Looks for dist/linux-unpacked and for every .app folder under dist/mac*. Without --require it checks what it finds and fails when
@@ -16,6 +17,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { readAsarFile, testBuildMark } from './app-archive.mjs';
 import { builderConfig, desktop, documentTypeProblems, readPlist } from './builder-support.mjs';
+import { writableEntries } from '../../runtime/permissions.mjs';
 import { testBuildField } from '../../runtime/test-build.mjs';
 
 const { values } = parseArgs({ options: { dist: { type: 'string' }, require: { type: 'string', multiple: true, default: [] }, release: { type: 'boolean', default: false } }, strict: true });
@@ -63,6 +65,23 @@ function checkNotTestBuild(resources) {
   return `no ${testBuildField}`;
 }
 
+// The runtime inside a Mac app stays read-only like the one it was copied from: the signing hooks (runtime/mac-signing.mjs) open it
+// for codesign and must close it again before the zip and the dmg are made.
+function checkReadOnlyRuntime(resources) {
+  const runtime = path.join(resources, 'runtime');
+  assert.ok(existsSync(runtime), `missing ${runtime}`);
+  const writable = writableEntries(runtime);
+  assert.deepEqual(writable.slice(0, 5), [], `${writable.length} writable entries in ${runtime}, first: ${writable.slice(0, 5).join(', ')}`);
+  return 'nothing writable';
+}
+
+// The app's ad-hoc signature covers every file, so a file changed after signing (or a signing step that was skipped) fails here.
+function checkSignature(app) {
+  const run = spawnSync('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app], { encoding: 'utf8' });
+  assert.equal(run.status, 0, `codesign --verify failed on ${app}:\n${run.stdout}${run.stderr}`);
+  return 'codesign --verify --deep --strict passes';
+}
+
 const results = [];
 const check = (label, run) => {
   try { results.push(`ok    ${label}: ${run()}`); } catch (error) { results.push(`FAIL  ${label}: ${error.message}`); process.exitCode = 1; }
@@ -83,6 +102,8 @@ for (const folder of entries.filter((name) => /^mac/.test(name))) {
     const contents = path.join(dist, folder, app, 'Contents');
     check(`${folder}/${app} integrations`, () => checkIntegrations(path.join(contents, 'Resources')));
     if (values.release) check(`${folder}/${app} is not a test build`, () => checkNotTestBuild(path.join(contents, 'Resources')));
+    check(`${folder}/${app} runtime is read-only`, () => checkReadOnlyRuntime(path.join(contents, 'Resources')));
+    if (values.release && process.platform === 'darwin') check(`${folder}/${app} signature`, () => checkSignature(path.join(dist, folder, app)));
     check(`${folder}/${app} has no update helper`, () => {
       assert.ok(!existsSync(path.join(contents, 'Resources', 'updater')), 'a Mac app must not carry the Linux update helper');
       return 'none';

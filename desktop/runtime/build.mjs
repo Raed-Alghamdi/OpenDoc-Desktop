@@ -9,11 +9,12 @@
 // Layout: <runtime>/{package.json, package-lock.json, build-info.json, node_modules/}. `opendoc` is installed as a `file:`
 // tarball alias, so the folder looks like a workspace that pins the core (runtime paths in src/runtime/paths.ts key on it).
 import { execFileSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { setWritable, walk } from './permissions.mjs';
 
 const repo = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const { values: options } = parseArgs({
@@ -37,25 +38,6 @@ const prunedExtensions = ['.map'];
 
 function run(command, args, cwd, env = {}) {
   execFileSync(command, args, { cwd, stdio: 'inherit', env: { ...process.env, ...env } });
-}
-
-function walk(directory, visit) {
-  for (const name of readdirSync(directory)) {
-    const file = path.join(directory, name);
-    const stat = lstatSync(file);
-    visit(file, stat);
-    if (stat.isDirectory()) walk(file, visit);
-  }
-}
-
-// Symlinks are skipped on purpose: chmod would follow them. The runtime's only links are relative ones under node_modules/.bin.
-function setWritable(directory, writable) {
-  const mode = (stat) => (writable ? stat.mode | 0o200 : stat.mode & ~0o222) & 0o7777;
-  const root = lstatSync(directory);
-  chmodSync(directory, mode(root));
-  walk(directory, (file, stat) => {
-    if (!stat.isSymbolicLink()) chmodSync(file, mode(stat));
-  });
 }
 
 function nativePieces() {

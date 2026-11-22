@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { handlePacksRequest, stagedLifetime, type PackHooks } from '../src/server/packs-http';
 import { createOpenDocService, readOnlyAllows } from '../src/server/service';
 import { exportPack, installPack } from '../src/packs/packs';
+import { packageMetadata } from '../src/cli/workspace';
 import { fixture, projectRoot, until } from './helpers';
 
 async function put(root: string, path: string, source: string | Buffer) { await mkdir(dirname(resolve(root, path)), { recursive: true }); await writeFile(resolve(root, path), source); }
@@ -36,7 +37,7 @@ async function synthetic(source: string, file: string, themeSource?: string) {
   // The exporter refuses code like this, so a hostile pack is built by hand, after collection.
   if (themeSource) collected.files.set('themes/acme/index.ts', Buffer.from(themeSource));
   collected.files.set('previews/theme-acme.pdf', Buffer.from('%PDF-1.7\nA supplied preview placeholder.'));
-  const manifest: PackManifest = { format: 'opendoc-pack', schemaVersion: 1, id: 'test-pack', name: 'Test pack', version: '1.0.0', opendocVersion: '0.6.0', items: collected.items, assets: collected.assets,
+  const manifest: PackManifest = { format: 'opendoc-pack', schemaVersion: 1, id: 'test-pack', name: 'Test pack', version: '1.0.0', opendocVersion: (await packageMetadata()).version, items: collected.items, assets: collected.assets,
     files: [...collected.files].map(([path, bytes]) => ({ path, bytes: bytes.length, sha256: digest(bytes) })) };
   collected.files.set('manifest.json', Buffer.from(JSON.stringify(manifest)));
   await writeFile(file, writeArchive(collected.files));

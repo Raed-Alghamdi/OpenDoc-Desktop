@@ -114,6 +114,14 @@ export function ExportPackDialog({ open, onOpenChange, themes, templates, connec
     if (!next && state.phase === 'done') packChoice.stop();
     onOpenChange(next);
   }
+  // A pack opened from outside the page (a double-click in the file manager, a second launch, a drop) opens Import. This dialog
+  // closes first, so the two never sit on top of each other; an export that is still running stays open under Import.
+  const closeNow = useRef(close);
+  useEffect(() => { closeNow.current = close; });
+  useEffect(() => {
+    if (!open) return;
+    return importEntry.subscribe(() => { if (importEntry.get() && !working.current) closeNow.current(false); });
+  }, [open]);
   const shown = (field: keyof ExportForm) => attempted || form[field] ? problems[field] : undefined;
   const result = state.phase === 'done' ? state.result : undefined;
   const reveal = packBridge()?.showInFolder;

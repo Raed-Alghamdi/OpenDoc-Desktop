@@ -252,7 +252,7 @@ test('AppImage in a folder the user cannot write to: told once, and nothing is d
   await settle();
   assert.equal(first.updater.lastAutoDownload, false, 'autoDownload is off for the check');
   assert.equal(first.shown.length, 1);
-  assert.equal(first.shown[0].message, 'opendoc-desktop cannot update itself here');
+  assert.equal(first.shown[0].message, 'OpenDoc Desktop cannot update itself here');
   assert.match(first.shown[0].detail, /\/opt\/apps/);
   assert.equal((await first.config.read()).updateNotices.folder, '/opt/apps');
   assert.deepEqual(first.external, []);
@@ -398,7 +398,7 @@ test('while the install runs the menu offers no second click, and a second call 
 // ---------- macOS ----------
 
 test('macOS: a bundle that cannot replace itself is not downloaded; a notice with a button opens the release page, once', async () => {
-  const blocked = { ok: false, reason: 'translocated', message: 'Move opendoc-desktop to your Applications folder.' };
+  const blocked = { ok: false, reason: 'translocated', message: 'Move OpenDoc Desktop to your Applications folder.' };
   const found = { isUpdateAvailable: true, updateInfo: { version: '0.6.1', build: 2 }, downloadPromise: null };
   const { controller, updater, shown, external } = await setup({ type: 'mac', script: { preflight: blocked, check: found }, answers: 0 });
   await controller.start();
@@ -443,7 +443,7 @@ test('Check for Updates: up to date, an error, and an AppImage download each get
   const quiet = upToDate.shown.length;
   assert.equal(quiet, 0, 'the launch check says nothing when there is nothing to do');
   await upToDate.controller.checkNow();
-  assert.equal(upToDate.shown.at(-1).message, 'opendoc-desktop is up to date');
+  assert.equal(upToDate.shown.at(-1).message, 'OpenDoc Desktop is up to date');
   assert.match(upToDate.shown.at(-1).detail, /0\.6\.1, build 3/);
 
   const failing = await setup({ type: 'deb', script: { check: new Error('getaddrinfo ENOTFOUND\nsecond line') } });
@@ -548,7 +548,7 @@ test('after an update: the hooks run, what changed is shown once, and the last r
   await controller.idle();
   assert.deepEqual(seen, [{ previous: { version: '0.6.1', build: 1 }, current: { version: '0.6.1', build: 2 } }]);
   assert.equal(shown.length, 1);
-  assert.equal(shown[0].message, 'opendoc-desktop was updated to 0.6.1, build 2');
+  assert.equal(shown[0].message, 'OpenDoc Desktop was updated to 0.6.1, build 2');
   assert.equal(shown[0].detail, 'Before: 0.6.1, build 1.');
   assert.deepEqual(shown[0].buttons, ['OK', 'What Changed']);
   assert.deepEqual(external, ['https://github.com/Raed-Alghamdi/OpenDoc-Desktop/releases/tag/desktop-v0.6.1-2']);
@@ -633,7 +633,7 @@ test('the notice appears for an AppImage that was swapped at quit as well (the n
   await controller.start();
   await controller.idle();
   assert.equal(shown.length, 1);
-  assert.equal(shown[0].message, 'opendoc-desktop was updated to 0.6.1, build 2');
+  assert.equal(shown[0].message, 'OpenDoc Desktop was updated to 0.6.1, build 2');
 });
 
 // ---------- the switch governs automatic checks; a click is always one check ----------
@@ -726,7 +726,7 @@ test('a manual click right after switching off does not join the dropped check a
   first.accept({ isUpdateAvailable: false });
   assert.equal((await click).status, 'up-to-date');
   assert.equal(updater.checks, 2, 'a second, separate check');
-  assert.equal(shown.at(-1).message, 'opendoc-desktop is up to date');
+  assert.equal(shown.at(-1).message, 'OpenDoc Desktop is up to date');
 });
 
 // ---------- a newer download clears the ready one ----------
@@ -752,7 +752,7 @@ test('a newer download starting makes "Restart to Update" go away until it has f
 });
 
 test('AppImage: no room beside the AppImage is reported like a read-only folder: nothing is downloaded', async () => {
-  const blocked = { ok: false, reason: 'no-space', folder: '/home/u/Apps', message: 'There is not enough free space in /home/u/Apps to put the update beside opendoc-desktop (180 MB needed, 2 MB free). Free some space and check again.' };
+  const blocked = { ok: false, reason: 'no-space', folder: '/home/u/Apps', message: 'There is not enough free space in /home/u/Apps to put the update beside OpenDoc Desktop (180 MB needed, 2 MB free). Free some space and check again.' };
   const { controller, updater, shown } = await setup({ type: 'appimage', script: { preflight: blocked, check: { isUpdateAvailable: true, updateInfo: { version: '0.6.1', build: 2 }, downloadPromise: null, cancellationToken: { cancel() {} } } }, answers: 1 });
   await controller.start();
   await settle();
@@ -765,7 +765,7 @@ test('AppImage: no room beside the AppImage is reported like a read-only folder:
 // ---------- a swap at quit that failed is told once at the next launch ----------
 
 test('AppImage: a swap at quit that fails is recorded with its reason, and the next launch says so once, without blocking', async () => {
-  const failing = { check: downloadedUpdate('0.6.1', 2), installAtQuit: updater => { updater.emit('error', new Error('There is not enough free space in /home/u/Apps to put the update beside opendoc-desktop (180 MB needed, 2 MB free).')); return false; } };
+  const failing = { check: downloadedUpdate('0.6.1', 2), installAtQuit: updater => { updater.emit('error', new Error('There is not enough free space in /home/u/Apps to put the update beside OpenDoc Desktop (180 MB needed, 2 MB free).')); return false; } };
   const first = await setup({ type: 'appimage', script: failing });
   await first.controller.start();
   await settle();

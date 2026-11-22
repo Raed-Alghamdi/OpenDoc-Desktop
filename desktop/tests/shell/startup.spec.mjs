@@ -127,7 +127,7 @@ test.describe('startup', () => {
       const second = await launchApp({ profile: await newProfile('visitor-profile', { defaultWorkspace: workspace }) });
       try {
         const picker = await second.firstWindow();
-        await expect(picker.locator('#message')).toContainText('already open in another opendoc-desktop');
+        await expect(picker.locator('#message')).toContainText('already open in another copy of OpenDoc Desktop');
         expect((await desktopRecord(workspace)).pid).toBe(first.process().pid);
       } finally { await second.close(); }
       expect((await desktopRecord(workspace)).pid).toBe(first.process().pid);

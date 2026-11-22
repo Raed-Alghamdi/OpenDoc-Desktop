@@ -224,7 +224,7 @@ export class DesktopShell {
 
       // Check the workspace before letting go of the one that is open.
       const owner = await inspectDesktopRecord(root);
-      if (owner.state === 'live') return { ok: false, code: 'open-elsewhere', message: `This workspace is already open in another opendoc-desktop (process ${owner.record.pid}). Close it there first.`, path: root };
+      if (owner.state === 'live') return { ok: false, code: 'open-elsewhere', message: `This workspace is already open in another copy of OpenDoc Desktop (process ${owner.record.pid}). Close it there first.`, path: root };
       const service = await inspectService(root);
       if (service.state === 'running') return { ok: false, code: 'service-running', message: `OpenDoc is already running for this workspace in a browser (process ${service.pid}, ${service.origin}). Stop it before opening the workspace here.`, path: root };
       if (service.state !== 'none') return { ok: false, code: 'service-unclear', message: service.state === 'finishing' ? 'OpenDoc is still finishing its previous session for this workspace. Wait a moment, then try again.' : service.message, path: root };
@@ -393,7 +393,7 @@ export class DesktopShell {
       })).response === 0,
       askRealModules: async (_root, kind) => (await ask('showMessageBox', parent(), {
         type: 'warning', title: 'Replace node_modules?', message: `This workspace has its own ${kind === 'file' ? 'file' : 'folder'} named node_modules.`,
-        detail: `${join(root, 'node_modules')}\n\nopendoc-desktop runs the workspace with the OpenDoc that comes with the app. To do that it replaces node_modules with a link to it. The ${kind === 'file' ? 'file' : 'folder'} you have now is moved to the trash, not deleted.`,
+        detail: `${join(root, 'node_modules')}\n\nOpenDoc Desktop runs the workspace with the OpenDoc that comes with the app. To do that it replaces node_modules with a link to it. The ${kind === 'file' ? 'file' : 'folder'} you have now is moved to the trash, not deleted.`,
         buttons: ["Use the app's OpenDoc", 'Leave it as it is'], defaultId: 1, cancelId: 1, noLink: true,
       })).response === 0,
       askRecoveryFailed: async ({ message }) => (await ask('showMessageBox', parent(), {
@@ -649,7 +649,7 @@ export class DesktopShell {
       const problems = refreshProblem(await this.aiApps.refresh());
       if (!problems || this.stopped) return;
       const answer = await ask('showMessageBox', this.#parent(), {
-        type: 'warning', title: 'AI apps could not be updated', message: 'opendoc-desktop could not update OpenDoc in an AI app it is connected to.',
+        type: 'warning', title: 'AI apps could not be updated', message: 'OpenDoc Desktop could not update OpenDoc in an AI app it is connected to.',
         detail: `${problems.join('\n\n')}\n\nThe screen shows the details, and lets you disconnect.`,
         buttons: ['Open Connect AI Apps', 'Close'], defaultId: 0, cancelId: 1, noLink: true,
       });

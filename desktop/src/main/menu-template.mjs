@@ -1,5 +1,5 @@
 // The application menu's contents, without Electron so the unit tests can read them.
-import { appName, originalProject } from './identity.mjs';
+import { displayName, originalProject } from './identity.mjs';
 import { basename } from 'node:path';
 
 /**
@@ -11,11 +11,11 @@ export function menuTemplate({ platform = process.platform, actions, state }) {
   const recent = state.recent.length
     ? state.recent.map(path => ({ label: `${basename(path)}  (${path})`, click: () => actions.openRecent(path) }))
     : [{ label: 'No recent workspaces', enabled: false }];
-  const about = { label: `About ${appName}`, click: () => actions.about() };
+  const about = { label: `About ${displayName}`, click: () => actions.about() };
   const updates = updateItems({ actions, state: state.updates });
   const aiApps = { label: 'Connect AI Apps…', click: () => actions.connectAiApps() };
   return [
-    ...(mac ? [{ label: appName, submenu: [about, ...updates, { type: 'separator' }, { label: 'Install Command-Line Tool…', click: () => actions.installCommand() }, aiApps, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }] : []),
+    ...(mac ? [{ label: displayName, submenu: [about, ...updates, { type: 'separator' }, { label: 'Install Command-Line Tool…', click: () => actions.installCommand() }, aiApps, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] }] : []),
     {
       label: 'File',
       submenu: [

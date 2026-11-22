@@ -30,8 +30,8 @@ export async function macBundleState({ execPath = process.execPath, canWrite = p
  * and neither can one in a folder the user may not write to. Then the app shows a notice with a download button instead.
  */
 export function decideMacInstall(state) {
-  if (state.translocated) return { action: 'notice', reason: 'translocated', message: 'opendoc-desktop is running from a temporary read-only copy that macOS makes for apps opened from Downloads. Move it to your Applications folder, open it from there, and it can update itself.' };
-  if (!state.writable) return { action: 'notice', reason: 'not-writable', message: `opendoc-desktop cannot replace itself in ${state.folder}, because you cannot write to that folder. Download the new version and replace the app by hand.` };
+  if (state.translocated) return { action: 'notice', reason: 'translocated', message: 'OpenDoc Desktop is running from a temporary read-only copy that macOS makes for apps opened from Downloads. Move it to your Applications folder, open it from there, and it can update itself.' };
+  if (!state.writable) return { action: 'notice', reason: 'not-writable', message: `OpenDoc Desktop cannot replace itself in ${state.folder}, because you cannot write to that folder. Download the new version and replace the app by hand.` };
   return { action: 'swap' };
 }
 

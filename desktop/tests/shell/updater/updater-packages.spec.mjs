@@ -137,7 +137,7 @@ test.describe('what changed, shown once', () => {
     try {
       await run.app.firstWindow();
       const shown = await run.waitForDialog('was updated');
-      expect(shown.message).toBe('opendoc-desktop was updated to 0.6.1, build 7');
+      expect(shown.message).toBe('OpenDoc Desktop was updated to 0.6.1, build 7');
       expect(shown.detail).toBe('Before: 0.6.1, build 3.');
       await waitFor(async () => (await run.external()).length > 0, { what: 'the release page link' });
       expect(await run.external()).toEqual(['https://github.com/Raed-Alghamdi/OpenDoc-Desktop/releases/tag/desktop-v0.6.1-7']);

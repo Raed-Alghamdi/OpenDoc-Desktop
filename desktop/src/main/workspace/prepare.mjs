@@ -58,7 +58,7 @@ export async function prepareWorkspace(options) {
     if (pin?.code === 'headless') return fail('headless', pin.message);
     if (!pin?.ok) return fail('not-a-workspace', `${root} is not an OpenDoc workspace. A workspace has a package.json that pins OpenDoc and, on this device, a .opendoc/workspace.json file; create a new one instead.`);
   } else {
-    if (marker.marker.edition !== undefined && marker.marker.edition !== runtime.edition) return fail('headless', `This workspace is of the ${marker.marker.edition} edition of OpenDoc, and opendoc-desktop opens workspaces of the ${runtime.edition} edition only. Edition switching is not an update, so nothing was changed.`);
+    if (marker.marker.edition !== undefined && marker.marker.edition !== runtime.edition) return fail('headless', `This workspace is of the ${marker.marker.edition} edition of OpenDoc, and OpenDoc Desktop opens workspaces of the ${runtime.edition} edition only. Edition switching is not an update, so nothing was changed.`);
     if (!Number.isInteger(marker.marker.formatVersion)) return fail('unsupported-format', `This workspace does not say which workspace format it uses (${marker.marker.formatVersion ?? 'missing'}), so the app cannot open it. Nothing was changed.`);
     format = compareFormat(marker.marker.formatVersion, runtime.workspaceFormat);
     if (!loaded) return fail('no-package', `${root} has no package.json, so the app cannot tell which OpenDoc version the workspace is on. Nothing was changed.`);

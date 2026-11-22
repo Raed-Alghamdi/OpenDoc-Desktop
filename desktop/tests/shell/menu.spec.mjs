@@ -37,21 +37,21 @@ test.describe.serial('menus', () => {
     expect(await menuLabels(app, ['Edit'])).toEqual(expect.arrayContaining(['Undo', 'Redo', 'Cut', 'Copy', 'Paste', 'Select All']));
     const view = (await menuLabels(app, ['View'])).join(' ');
     expect(view).not.toMatch(/reload|devtools|developer/i);
-    expect(await menuLabels(app, ['Help'])).toEqual(expect.arrayContaining(['OpenDoc on GitHub', 'About opendoc-desktop']));
+    expect(await menuLabels(app, ['Help'])).toEqual(expect.arrayContaining(['OpenDoc on GitHub', 'About OpenDoc Desktop']));
   });
 
   test('About credits the original project, with its link, the version and the build number', async () => {
-    await clickItem(app, ['Help', 'About opendoc-desktop']);
+    await clickItem(app, ['Help', 'About OpenDoc Desktop']);
     await waitFor(async () => (await nativeCalls(app)).messages.length > 0, { what: 'the About dialog' });
     const [about] = (await nativeCalls(app)).messages;
-    expect(about.title).toBe('About opendoc-desktop');
-    expect(about.message).toBe('opendoc-desktop 0.6.1');
+    expect(about.title).toBe('About OpenDoc Desktop');
+    expect(about.message).toBe('OpenDoc Desktop 0.6.1');
     expect(about.detail).toContain('Build 7');
     expect(about.detail).toContain('0123456789ab');
     expect(about.detail).toContain('original OpenDoc project by RyanYahya');
     expect(about.detail).toContain('https://github.com/RyanYahya/OpenDoc');
     await setNative(app, { messageChoice: 1 });
-    await clickItem(app, ['Help', 'About opendoc-desktop']);
+    await clickItem(app, ['Help', 'About OpenDoc Desktop']);
     await waitFor(async () => (await nativeCalls(app)).external.includes('https://github.com/RyanYahya/OpenDoc'), { what: 'the project link' });
     await setNative(app, { messageChoice: 0 });
   });

@@ -9,14 +9,15 @@ import { workDir } from './paths.mjs';
 
 let counter = 0;
 
-/** `commands`: which fake vendor commands exist (`claude`, `codex`, `agy`). `mode`: a FAKE_MODE for them (`policy`, `fail-install`...). */
-export async function integrationsWorld({ commands = ['claude', 'codex', 'agy'], mode = '' } = {}) {
+/** `commands`: which fake vendor commands exist (`claude`, `codex`, `agy`). `mode`: a FAKE_MODE for them (`policy`, `fail-install`...).
+ *  `delayMs`: every fake command answers that much later, for the app's launches only (a module made with `world.options()` stays quick). */
+export async function integrationsWorld({ commands = ['claude', 'codex', 'agy'], mode = '', delayMs = 0 } = {}) {
   const world = await scratch();
   for (const name of commands) await fakeCommand(world, name);
   // The module's data folder is the app's own (inside the app's scratch HOME), so the options file leaves it out.
   /** The environment variable that points an app launch at this world, with the fake commands in `mode` (a failure to try). */
   world.appEnvironmentFor = async (fakeMode = '') => {
-    const { dataDirectory, ...options } = world.options({ env: world.env(fakeMode ? { FAKE_MODE: fakeMode } : {}) });
+    const { dataDirectory, ...options } = world.options({ env: world.env({ ...(fakeMode ? { FAKE_MODE: fakeMode } : {}), ...(delayMs ? { FAKE_DELAY_MS: String(delayMs) } : {}) }) });
     await mkdir(workDir, { recursive: true });
     const file = join(workDir, `integrations-options-${++counter}.json`);
     await writeFile(file, JSON.stringify(options));

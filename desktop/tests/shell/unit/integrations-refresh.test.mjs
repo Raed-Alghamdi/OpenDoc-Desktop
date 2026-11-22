@@ -11,9 +11,9 @@ import { fakeCommand, scratch } from './integrations-support.mjs';
 async function setup(extraEnv = {}) {
   const world = await scratch();
   for (const name of ['claude', 'codex', 'agy']) await fakeCommand(world, name);
-  world.claudeConfig = join(world.root, 'claude-config');
+  world.claudeConfig = join(world.home, '.claude'); // the default folder: the `claude` target
   world.codexHome = join(world.root, 'codex-home');
-  world.create = (options = {}) => createIntegrations(world.options({ env: world.env({ CLAUDE_CONFIG_DIR: world.claudeConfig, CODEX_HOME: world.codexHome, ...extraEnv }), ...options }));
+  world.create = (options = {}) => createIntegrations(world.options({ env: world.env({ CODEX_HOME: world.codexHome, ...extraEnv }), ...options }));
   world.integrations = world.create();
   world.skillFile = join(world.source, 'skills', 'opendoc', 'SKILL.md');
   return world;

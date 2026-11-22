@@ -10,7 +10,10 @@ const marketplaceFolder = ctx => join(ctx.copyDirectory, 'codex');
 async function readState(ctx, labelSuffix = '') {
   const marketplaces = await readJson(ctx, `List the marketplaces Codex knows${labelSuffix}`, ['plugin', 'marketplace', 'list', '--json']);
   if (!marketplaces.ok) return { failure: marketplaces.result };
-  const plugins = await readJson(ctx, `List the plugins Codex has installed${labelSuffix}`, ['plugin', 'list', '--json']);
+  // `--marketplace` keeps Codex to this one marketplace. Without it, a Codex signed in with ChatGPT (0.160 and later) first downloads
+  // OpenAI's whole plugin catalog (about 85 MB, which it keeps for three hours): over a minute on a home connection, every three hours.
+  // With it, Codex reads only its own settings. `opendoc@opendoc` always belongs to that marketplace, so nothing it needs is filtered out.
+  const plugins = await readJson(ctx, `List the plugins Codex has installed${labelSuffix}`, ['plugin', 'list', '--marketplace', marketplaceName, '--json']);
   if (!plugins.ok) return { failure: plugins.result };
   if (!Array.isArray(marketplaces.value?.marketplaces) || !Array.isArray(plugins.value?.installed)) {
     ctx.failLastStep('The list had an unexpected shape.');

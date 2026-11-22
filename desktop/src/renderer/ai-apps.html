@@ -8,16 +8,41 @@
 </head>
 <body class="ai-apps">
 <main class="wide">
-  <h1>Connect your AI apps</h1>
-  <p class="lede">Connect OpenDoc to the AI apps you use, so that a session in Claude Code, Codex or another app can find OpenDoc and make documents with it. Nothing is changed until you press Connect, and every result is shown here. You can disconnect at any time.</p>
+  <button id="back" class="back" type="button" aria-label="Back to all AI apps" hidden>&larr; All AI apps</button>
+  <h1 id="title" tabindex="-1">Connect your AI apps</h1>
+  <p id="lede" class="lede">Pick an AI app to connect OpenDoc to it, so that a session in that app can find OpenDoc and make documents with it. Nothing is changed until you press Connect, and every result is shown here. You can disconnect at any time.</p>
   <div class="scroll">
-  <div id="checking" class="checking" role="status"><span class="spinner" aria-hidden="true"></span><span>Looking for AI apps on this computer&hellip;</span></div>
+  <div id="checking" class="checking" role="status" hidden><span class="spinner" aria-hidden="true"></span><span></span></div>
   <div id="problem" class="error" role="alert" hidden></div>
-  <ul id="apps" class="apps" hidden></ul>
-  <div id="results" aria-live="polite"></div>
+  <ul id="apps" class="apps" aria-label="AI apps"></ul>
+  <section id="page" hidden>
+    <div id="where"></div>
+    <h2 id="targets-heading">Settings folder</h2>
+    <ul id="targets" class="apps"></ul>
+    <div class="actions"><button id="connect" class="primary" type="button" disabled>Connect</button></div>
+    <div id="results" aria-live="polite"></div>
+    <section id="try" class="try" hidden>
+      <h2>Try it</h2>
+      <p id="try-text"></p>
+      <pre id="prompt" class="mono"></pre>
+      <div class="actions"><button id="copy-prompt" type="button">Copy</button><span id="copied" role="status"></span></div>
+    </section>
+  </section>
+  <section id="other" hidden>
+    <h2>The skill folder</h2>
+    <p>The plain skill that this app ships. It is a folder of files, with a SKILL.md that tells an agent how to use OpenDoc.</p>
+    <pre id="other-skill" class="mono"></pre>
+    <div class="actions"><button id="copy-skill" type="button">Copy path</button><span id="copied-skill" role="status"></span></div>
+    <h2>The opendoc command</h2>
+    <p id="other-command-text"></p>
+    <pre id="other-command" class="mono"></pre>
+    <div class="actions"><button id="copy-command" type="button">Copy path</button><span id="copied-command" role="status"></span></div>
+    <h2>How to use it</h2>
+    <p>Point your agent at this skill, or copy the folder to the place where your agent reads skills. The agent must be able to run the opendoc command.</p>
+    <p>Chat apps that cannot run programs on this computer, such as ChatGPT or the chat in the Claude app, cannot use OpenDoc.</p>
+  </section>
   </div>
   <div class="actions bar">
-    <button id="connect" class="primary" type="button" disabled>Connect</button>
     <button id="close" type="button">Close</button>
     <button id="recheck" type="button">Check again</button>
   </div>

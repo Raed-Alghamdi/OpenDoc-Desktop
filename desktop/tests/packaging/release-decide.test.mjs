@@ -207,7 +207,9 @@ test('a publication whose merge could not move into the branch, or that failed, 
 
 test('release notes credit the original OpenDoc and name the build', () => {
   const notes = releaseNotes({ version: '0.6.2', build: 1, kind: 'patch', upstreamSha: 'abcdef0123456789', commit: '0123456789abcdef' });
-  assert.match(notes, /opendoc-desktop 0\.6\.2, build 1/);
+  assert.match(notes, /OpenDoc Desktop 0\.6\.2, build 1/);
+  assert.match(notes, /## Which file/);
+  assert.match(notes, /opendoc-desktop_0\.6\.2-1_amd64\.deb/);
   assert.match(notes, /https:\/\/github\.com\/RyanYahya\/OpenDoc/);
   assert.match(notes, /abcdef012345/);
   assert.ok(!notes.includes('\n\n\n'));

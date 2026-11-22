@@ -246,7 +246,10 @@ jobs:
           fi
           extra=()
           if [ "$PRERELEASE" = true ]; then extra+=(--prerelease); fi
+          # The notes say what the release is and how to install and update it (desktop/release/notes.mjs). upstream-watch replaces
+          # them with its own opening lines and the same install notes once its run has finished.
+          node desktop/release/notes.mjs --tag "$TAG" --commit "$BUILT_SHA" --repository "$GITHUB_REPOSITORY" --out "$RUNNER_TEMP/release-notes.md"
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft "${target[@]}" "${extra[@]}" \
-            --title "opendoc-desktop ${TAG#desktop-v}" \
-            --notes "Draft. Built from ${BUILT_SHA}. Read the files and the update metadata before publishing." \
+            --title "OpenDoc Desktop ${TAG#desktop-v}" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
             release/desktop-linux/* release/desktop-mac-*/* release/latest-mac.yml

@@ -46,15 +46,16 @@ test('the committed package files survive a render with their own values', () =>
 });
 
 test('a release gives the right PKGBUILD: version, pkgrel from the build number, and the real checksum', () => {
-  const pkgbuild = renderPkgbuild(readFileSync(path.join(template, 'PKGBUILD'), 'utf8'), { version: '0.6.2', build: 3, sha256: SHA });
-  assert.match(pkgbuild, /^pkgver=0\.6\.2$/m);
-  assert.match(pkgbuild, /^pkgrel=3$/m);
+  // A version and build the committed files never carry, so every one of the three lines has to move.
+  const pkgbuild = renderPkgbuild(readFileSync(path.join(template, 'PKGBUILD'), 'utf8'), { version: '9.8.7', build: 65, sha256: SHA });
+  assert.match(pkgbuild, /^pkgver=9\.8\.7$/m);
+  assert.match(pkgbuild, /^pkgrel=65$/m);
   assert.match(pkgbuild, new RegExp(`^sha256sums=\\('${SHA}'\\)$`, 'm'));
   assert.ok(!pkgbuild.includes('SKIP\')'), 'SKIP is gone');
   // Nothing else moves: the asset and URL are built from pkgver and pkgrel inside the file.
   const before = readFileSync(path.join(template, 'PKGBUILD'), 'utf8').split('\n');
   const changed = pkgbuild.split('\n').filter((line, index) => line !== before[index]);
-  assert.deepEqual(changed, ['pkgver=0.6.2', 'pkgrel=3', `sha256sums=('${SHA}')`]);
+  assert.deepEqual(changed, ['pkgver=9.8.7', 'pkgrel=65', `sha256sums=('${SHA}')`]);
 });
 
 test('the .SRCINFO follows: version, pkgrel, the file name, the release URL and the checksum', () => {

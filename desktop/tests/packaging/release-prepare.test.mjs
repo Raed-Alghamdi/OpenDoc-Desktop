@@ -48,6 +48,8 @@ function world() {
   git(work, 'checkout', '--quiet', '-b', 'roadmap');
   write(work, 'desktop/package.json', manifest('0.6.1', ',\n  "type": "module"'));
   cpSync(path.join(desktop, 'aur'), path.join(work, 'desktop', 'aur'), { recursive: true });
+  // The copied AUR files carry this checkout's version, which a release or a rehearsal moves on: give them the world's.
+  setDesktopVersion(work, '0.6.1', 1);
   write(work, 'README.md', 'line one\nroadmap line two\nline three\n');
   commit(work, 'Desktop app');
   git(work, 'push', '--quiet', 'origin', 'roadmap');

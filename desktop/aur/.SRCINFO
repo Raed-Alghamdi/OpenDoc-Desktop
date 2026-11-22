@@ -13,6 +13,7 @@ pkgbase = opendoc-desktop-bin
 	depends = libxss
 	depends = xdg-utils
 	depends = at-spi2-core
+	depends = openssl
 	provides = opendoc-desktop
 	conflicts = opendoc-desktop
 	noextract = opendoc-desktop-0.6.1-1-x64.pacman

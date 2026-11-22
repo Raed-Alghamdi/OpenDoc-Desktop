@@ -18,6 +18,7 @@ const mimeSource = readFileSync(path.join(desktop, 'resources', 'mime', 'opendoc
 const policyName = 'io.github.ryanyahya.opendocdesktop.install-update.policy';
 const policySource = readFileSync(path.join(desktop, 'resources', 'polkit', policyName), 'utf8');
 const helperSource = readFileSync(path.join(desktop, 'resources', 'updater', 'install-update'), 'utf8');
+const keySource = readFileSync(path.join(desktop, 'resources', 'updater', 'release-key.pem'), 'utf8');
 
 const which = (name) => {
   for (const folder of (process.env.PATH ?? '').split(path.delimiter)) {
@@ -30,7 +31,7 @@ const ar = which('ar');
 const bsdtar = which('bsdtar');
 
 // The files a package carries that the script reads, as a folder tree.
-function stage(root, kind, { mime = true, integrations = true, policy = policySource, helperMode = 0o755, menuName = 'OpenDoc Desktop' } = {}) {
+function stage(root, kind, { mime = true, integrations = true, policy = policySource, helperMode = 0o755, menuName = 'OpenDoc Desktop', key = keySource } = {}) {
   const write = (file, text) => { mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); writeFileSync(path.join(root, file), text); };
   write('usr/share/icons/hicolor/scalable/apps/opendoc-desktop.svg', '<svg/>');
   write('usr/share/icons/hicolor/symbolic/apps/opendoc-desktop-symbolic.svg', '<svg/>');
@@ -40,6 +41,7 @@ function stage(root, kind, { mime = true, integrations = true, policy = policySo
   if (mime) write('usr/share/mime/packages/opendoc-desktop.xml', mimeSource);
   write(`usr/share/polkit-1/actions/${policyName}`, policy);
   write('opt/opendoc-desktop/resources/updater/install-update', helperSource);
+  if (key !== null) write('opt/opendoc-desktop/resources/updater/release-key.pem', key);
   chmodSync(path.join(root, 'opt/opendoc-desktop/resources/updater/install-update'), helperMode);
   chmodSync(path.join(root, `usr/share/polkit-1/actions/${policyName}`), 0o644);
   if (integrations) {
@@ -178,6 +180,17 @@ test('a package whose menu entry has the product name instead of the menu name f
     assert.match(result.stdout, /^FAIL {2}pacman menu name: /m);
     assert.match(result.stdout, /^ok {4}deb file type: /m);
   });
+});
+
+test('a package without the release key beside the helper, or with another key, fails', { skip }, () => {
+  for (const key of [null, keySource.replace('MCow', 'MCoX')]) {
+    withDist({ key }, (scratch) => {
+      const result = run(scratch);
+      assert.equal(result.status, 1);
+      assert.match(result.stdout, /^FAIL {2}deb update prompt: the installed release key is missing or differs/m);
+      assert.match(result.stdout, /^FAIL {2}pacman update prompt: the installed release key is missing or differs/m);
+    });
+  }
 });
 
 test('a package whose update prompt is wrong fails: a policy that differs, a helper that is not 0755, or one owned by a user', { skip }, () => {

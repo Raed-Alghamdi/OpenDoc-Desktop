@@ -162,6 +162,9 @@ jobs:
       build: ${{ needs.prepare.outputs.build }}
       release_tag: ${{ needs.prepare.outputs.tag }}
       prerelease: ${{ needs.prepare.outputs.rehearsal == 'true' }}
+    # A called workflow gets no secrets unless they are passed here; desktop.yml's release job signs every installer with this one.
+    secrets:
+      DESKTOP_SIGNING_KEY: ${{ secrets.DESKTOP_SIGNING_KEY }}
 
   finish:
     needs: [prepare, verify, desktop]

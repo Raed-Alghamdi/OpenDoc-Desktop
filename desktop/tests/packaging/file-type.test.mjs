@@ -3,10 +3,11 @@
 // the real packages are checked by check-artifacts.mjs and check-packaged.mjs after a build.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { setWritable } from '../../runtime/permissions.mjs';
 import { builderConfig, desktop, documentTypeProblems, PACK_EXTENSION, PACK_MIME_TYPE } from './builder-support.mjs';
 
 const config = builderConfig();
@@ -104,6 +105,7 @@ test('check-packaged.mjs accepts the unpacked apps it should and names what is w
   const scratch = mkdtempSync(path.join(os.tmpdir(), 'opendoc-packaged-'));
   const script = path.join(desktop, 'tests', 'packaging', 'check-packaged.mjs');
   const run = (...args) => spawnSync(process.execPath, [script, '--dist', path.join(scratch, 'dist'), ...args], { encoding: 'utf8' });
+  const macRuntime = path.join(scratch, 'dist', 'mac-arm64', 'opendoc-desktop.app', 'Contents', 'Resources', 'runtime');
   const plist = (types) => `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>${types}</dict></plist>\n`;
   const goodTypes = `<key>CFBundleDocumentTypes</key><array><dict><key>CFBundleTypeName</key><string>OpenDoc design pack</string><key>LSItemContentTypes</key><array><string>${config.appId}.pack</string></array></dict></array>`
     + `<key>UTExportedTypeDeclarations</key><array><dict><key>UTTypeIdentifier</key><string>${config.appId}.pack</string><key>UTTypeConformsTo</key><array><string>public.zip-archive</string></array><key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>${PACK_EXTENSION}</string></array><key>public.mime-type</key><array><string>${PACK_MIME_TYPE}</string></array></dict></dict></array>`;
@@ -114,9 +116,20 @@ test('check-packaged.mjs accepts the unpacked apps it should and names what is w
     }
     cpSync(path.join(desktop, 'resources', 'updater'), path.join(scratch, 'dist', 'linux-unpacked', 'resources', 'updater'), { recursive: true });
     writeFileSync(path.join(scratch, 'dist', 'mac-arm64', 'opendoc-desktop.app', 'Contents', 'Info.plist'), plist(goodTypes));
+    mkdirSync(path.join(macRuntime, 'node_modules', 'opendoc'), { recursive: true });
+    writeFileSync(path.join(macRuntime, 'node_modules', 'opendoc', 'font.ttf'), 'a font');
+    setWritable(macRuntime, false);
     const good = run('--require', 'linux', '--require', 'mac');
     assert.equal(good.status, 0, good.stdout + good.stderr);
-    assert.equal(good.stdout.match(/^ok /gm).length, 6);
+    assert.equal(good.stdout.match(/^ok /gm).length, 7);
+    assert.match(good.stdout, /^ok {4}mac-arm64\/opendoc-desktop\.app runtime is read-only: nothing writable$/m);
+
+    // A runtime the signing hooks left writable, in part or as a whole.
+    chmodSync(path.join(macRuntime, 'node_modules', 'opendoc', 'font.ttf'), 0o644);
+    assert.match(run('--require', 'mac').stdout, /FAIL {2}mac-arm64\/opendoc-desktop\.app runtime is read-only: 1 writable entries in .*, first: node_modules\/opendoc\/font\.ttf/);
+    setWritable(macRuntime, true);
+    assert.match(run('--require', 'mac').stdout, /FAIL {2}mac-arm64\/opendoc-desktop\.app runtime is read-only: 4 writable entries/);
+    setWritable(macRuntime, false);
 
     // A release key that is not the repository's, or none at all.
     const keyFile = path.join(scratch, 'dist', 'linux-unpacked', 'resources', 'updater', 'release-key.pem');
@@ -141,9 +154,11 @@ test('check-packaged.mjs accepts the unpacked apps it should and names what is w
 
     // Nothing to check is a failure too, and a required platform must be present.
     assert.notEqual(spawnSync(process.execPath, [script, '--dist', path.join(scratch, 'empty')], { encoding: 'utf8' }).status, 0);
+    setWritable(macRuntime, true);
     rmSync(path.join(scratch, 'dist', 'mac-arm64'), { recursive: true });
     assert.match(run('--require', 'mac').stdout, /FAIL {2}mac: no unpacked app/);
   } finally {
+    if (existsSync(macRuntime)) setWritable(macRuntime, true);
     rmSync(scratch, { recursive: true, force: true });
   }
 });

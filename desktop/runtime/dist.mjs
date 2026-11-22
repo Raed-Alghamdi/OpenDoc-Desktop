@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { addBuildFields } from './release-metadata.mjs';
 import { testBuildArguments, testBuildField, testBuildVariable } from './test-build.mjs';
+import { builderEnvironment } from './builder-environment.mjs';
 
 const desktop = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const runtime = path.join(desktop, 'build', 'runtime', `${process.platform}-${process.arch}`);
@@ -40,7 +41,7 @@ const build = String(info.build);
 const result = spawnSync('pnpm', [
   'exec', 'electron-builder', ...forwarded,
   `-c.buildNumber=${build}`, `-c.mac.bundleVersion=${build}`,
-], { cwd: desktop, stdio: 'inherit', env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: process.env.CSC_IDENTITY_AUTO_DISCOVERY ?? 'false' } });
+], { cwd: desktop, stdio: 'inherit', env: builderEnvironment(process.env, process.platform) });
 if (result.status !== 0) process.exit(result.status ?? 1);
 
 const dist = path.join(desktop, 'dist');

@@ -120,6 +120,10 @@ rpm:
 appImage:
   # No version in the name: electron-updater then replaces the file in place, so launchers and the opendoc shim keep working.
   artifactName: ${productName}-${arch}.${ext}
+# The runtime is read-only, and codesign writes into the files it signs: on macOS these hooks open the runtime inside the .app just
+# before signing and close it right after (runtime/mac-signing.mjs). They do nothing for the Linux builds.
+afterPack: ./runtime/mac-signing.mjs
+afterSign: ./runtime/mac-signing.mjs
 mac:
   icon: resources/icons/icon.icns
   category: public.app-category.productivity

@@ -151,7 +151,8 @@ async function downloadFrom({ sig, loopback = true, type = 'deb' }) {
   const server = createServer((request, response) => {
     const path = request.url.split('?')[0];
     requests.push(path);
-    if (path === '/latest-linux.yml') {
+    // electron-updater names the channel file after the platform it runs on (latest-linux.yml, latest-mac.yml on a Mac test runner).
+    if (/^\/latest(-[a-z0-9]+)*\.yml$/.test(path)) {
       response.end(`version: 0.6.1\nbuild: 2\nfiles:\n  - url: ${name}\n    sha512: ${createHash('sha512').update(bytes).digest('base64')}\n    size: ${bytes.length}\npath: ${name}\nsha512: x\nreleaseDate: '2026-11-18T12:00:00.000Z'\n`);
     } else if (path === `/${name}`) response.end(bytes);
     else if (path === `/${name}.sig` && sig !== null) response.end(sig);
@@ -176,7 +177,7 @@ test('after the package is downloaded its .sig is fetched from the same folder a
   for (const type of ['deb', 'rpm', 'pacman']) {
     const result = await downloadFrom({ sig, type });
     assert.deepEqual(result.signature, sig, type);
-    assert.deepEqual(result.requests.map(url => url.replace(/^\/opendoc-desktop.*(\.sig)$/, '/package$1')), ['/latest-linux.yml', result.requests[1], '/package.sig'], type);
+    assert.deepEqual(result.requests.map(url => url.replace(/^\/latest.*\.yml$/, '/latest.yml').replace(/^\/opendoc-desktop.*(\.sig)$/, '/package$1')), ['/latest.yml', result.requests[1], '/package.sig'], type);
     assert.deepEqual((await readdir(dirname(result.file))).filter(name => name.endsWith('.part')), []);
   }
 });

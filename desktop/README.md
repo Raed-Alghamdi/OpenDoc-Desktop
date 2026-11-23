@@ -243,7 +243,7 @@ Tests of a packaged app (the updater specs against a real package, the AppImage 
 | `windows.mjs` | Window security settings, the navigation and new-window rules, the unsaved-edits guard, window state. |
 | `policy.mjs` | The rules above as pure functions (tested without Electron). |
 | `config.mjs`, `desktop-record.mjs`, `lock.mjs`, `service-session.mjs`, `window-state.mjs` | The files the app reads and writes, each with its own tests. |
-| `menu.mjs`, `about.mjs` | The application menu and the About dialog. |
+| `menu.mjs`, `about.mjs` | The application menu and the About dialog. The menu items are listed in [Menus](../docs/DESKTOP.md#menus) in the user guide. |
 | `workspace/` | Linking a workspace to the app's OpenDoc, the version table, the upgrade, backups and the AppImage's runtime copy (see [Workspaces and versions](#workspaces-and-versions)). |
 | `runtime.mjs`, `process-info.mjs`, `identity.mjs`, `shell-pages.mjs` | Where the runtime is and how to run its CLI; questions about other processes; names; the app's own pages. |
 
@@ -410,10 +410,6 @@ A journal found at the next open of the workspace, or on the backups page, is ac
 - "Show in folder" for a document export is the service's own route: the host starts the file manager (`xdg-open`; `open -R` on macOS). The service removes `ELECTRON_RUN_AS_NODE` from the environment of programs it starts for the user (`externalEnv()`, `src/server/external-env.ts`); `workspace-flow.spec.mjs` checks that a stub `xdg-open` does not see it.
 - The window title is the page title followed by `OpenDoc Desktop`, the name the app shows people in titles, About, the menus and its messages (`displayName` in `identity.mjs`). Files, folders, the process and the package keep `opendoc-desktop` (`appName`). On macOS the app menu's title comes from the bundle's name, which is still `opendoc-desktop`.
 - The window cannot be made smaller than 640 by 480, the same floor a saved size is restored with.
-
-### Menus
-
-File: Open Workspace, New Workspace (a new or empty folder, made with the CLI's `init`), Open Recent, Import Design Pack… (a `.opendoc.zip`, while a workspace is open), Reveal Workspace, Workspace Backups…, Show Log, Quit. Edit: the standard roles (macOS needs them for copy and paste). View: zoom and full screen only, with no reload and no developer tools. Window. Help: a link to the original project; About OpenDoc Desktop shows the version, the build number and commit, and credits the original OpenDoc project with its link. Where the install updates itself, the Help menu (the app menu on macOS) also has "Check for Updates…", the checkbox "Check for Updates Automatically", and "Restart to Update" while a downloaded update is waiting. "Connect AI Apps…" (see [AI apps](../docs/DESKTOP.md#ai-apps)) is the last item of the Help menu, and on macOS sits in the app menu after "Install Command-Line Tool…".
 
 ### How the updater works
 

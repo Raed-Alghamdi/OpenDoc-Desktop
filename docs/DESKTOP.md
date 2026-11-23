@@ -14,6 +14,9 @@ This page is the user guide. The app's package lives in [`desktop/`](../desktop/
 | Know which workspaces it opens | [Which workspaces open](#which-workspaces-open) |
 | Let an agent use OpenDoc | [The `opendoc` command](#the-opendoc-command) and [AI apps](#ai-apps) |
 | Open a design pack | [Design packs](#design-packs) |
+| Find the menu items | [Menus](#menus) |
+| See what it writes on your disk | [Files the app writes](#files-the-app-writes) |
+| Know the risks it accepts | [Security and trust](#security-and-trust) |
 | Remove it completely | [Uninstall](#uninstall) |
 
 ## Install
@@ -538,26 +541,101 @@ After you export a pack, the result offers **Show in folder** (in the app only; 
 
 The app reveals a file only when it is a file inside the open workspace's `output/packs/` folder once every link in its path is resolved. Anything else (a path with `..`, a link that leads out, another folder or another workspace) is refused and logged, and nothing opens.
 
+## Menus
+
+| Menu | Items |
+|---|---|
+| File | Open Workspace; New Workspace (a new or empty folder, made with the CLI's `init`); Open Recent; Import Design Pack… (a `.opendoc.zip`, while a workspace is open); Reveal Workspace; Workspace Backups…; Show Log; Quit. |
+| Edit | The standard roles (macOS needs them for copy and paste). |
+| View | Zoom and full screen only, with no reload and no developer tools. |
+| Help | A link to the original project. **About OpenDoc Desktop** shows the version, the build number and commit, and credits the original OpenDoc project with its link. |
+
+The menu bar also has a Window menu.
+
+Where the install updates itself, the Help menu (the app menu on macOS) also has:
+
+- **Check for Updates…**;
+- the checkbox **Check for Updates Automatically**;
+- **Restart to Update**, while a downloaded update is waiting.
+
+**Connect AI Apps…** (see [AI apps](#ai-apps)) is the last item of the Help menu. On macOS it sits in the app menu after **Install Command-Line Tool…**.
+
+## Files the app writes
+
+This is what the app puts on your disk. Linux paths follow the XDG variables when you set them; the macOS paths come after the semicolon. [Uninstall](#uninstall) says how to remove each item.
+
+| What | Where (Linux; macOS) | What it holds |
+|---|---|---|
+| The profile folder | `${XDG_CONFIG_HOME:-$HOME/.config}/opendoc-desktop/`; `~/Library/Application Support/opendoc-desktop/` | `config.json`, `window-state.json` and `logs/` |
+| The data folder | `${XDG_DATA_HOME:-$HOME/.local/share}/opendoc-desktop/`; on macOS the same folder as the profile | `backups/`, `runtime/` (an AppImage only), `integrations/` and `integrations.json` |
+| The update cache | `${XDG_CACHE_HOME:-$HOME/.cache}/opendoc-desktop-updater/`; `~/Library/Caches/opendoc-desktop-updater/` | The downloaded installer, under `pending/` |
+| The `opendoc` command | AppImage: `~/.local/bin/opendoc`. macOS: `/usr/local/bin/opendoc` or `~/.local/bin/opendoc`. | A small script (see [The `opendoc` command](#the-opendoc-command)) |
+| Each open workspace | `.opendoc/desktop.json` inside the workspace | Written while the workspace is open, removed when you quit |
+
+What the files hold:
+
+- `config.json`: `defaultWorkspace`, `recentWorkspaces` (at most 10, newest first), the update switches (`checkForUpdates` and `updateFeed`, see [Updates](#updates)) and the keys of other parts of the app. Opening a workspace makes it the default, because the router skill and the agents use the default.
+- `window-state.json`: size, position and maximised state of the workspace window. A saved position off every connected display is dropped.
+- `logs/workspace-<id>.log`: what the service printed, and when the app started and restarted it. The crash screen and the Help menu link to it.
+- `backups/`: one folder per upgrade or restore (see [Backups](#backups)).
+- `runtime/`: an AppImage's runtime copies and the `current` link. Packages and macOS make none.
+- `integrations/` and `integrations.json`: the stable copy of the plugin files, and the record of what the AI apps screen connected (see [AI apps](#ai-apps)).
+
+**Keep `config.json` private to your account.** The app writes it with mode 0600. Anything that can write it can choose where updates come from.
+
+[Uninstall](#uninstall) lists everything else the app may leave behind, and what it changed inside a workspace.
+
+## Security and trust
+
+The app accepts the risks below because removing them would break something it needs. This is what they mean for you. The technical version, with the exact switches and checks, is under [Hardening](../desktop/README.md#hardening) on the developer page.
+
+- **The app can run as Node.** The `opendoc` command, the service and the render workers run on the app's own executable, so you need no separate Node. Any program that can already start the app as you can therefore run JavaScript with your rights, which it could do with any interpreter. On macOS, such a process also inherits permissions macOS granted to OpenDoc; OpenDoc asks for none beyond the Electron defaults.
+- **Opening a workspace runs its code.** A workspace can contain themes, templates and its own `opendoc` command, and OpenDoc runs them when you open or render the workspace. Open workspaces and install packs only from sources you trust. Installing a pack always asks you to confirm, and inspecting a pack never runs it.
+- **Whoever can write `config.json` can choose where updates come from.** Keep `config.json` private to your account. An installed app accepts only an `https` address, and the restart prompt names an address that is not the built-in one. A deb, rpm or pacman update is installed only when its release signature verifies, so a changed address cannot get its own package installed as root. If you do not want any request, switch updates off (see [Turn automatic checks off](#turn-automatic-checks-off)).
+- **An older signed build can still be offered.** The signature proves a build came from the release key, not that it is the newest. Whoever controls the update address can offer a genuinely signed older build, and the helper installs it. The signing key protects against a package nobody at the project made, not against a rollback.
+- **AppImage and macOS updates are checked by SHA-512 only.** They are written as you, with no administrator password and no root helper, so a bad one gains no privilege. Nothing there proves who published the file beyond HTTPS and the controller of the address. The release still carries `.sig` files for them, which you can check by hand (see [Check a download](#check-a-download)).
+- **If the release key leaks, it has to be replaced.** Until you install a build that ships the new public key, updates signed with the new key are refused.
+- **Linux has no ASAR integrity check.** Electron enforces ASAR integrity validation on macOS and Windows only. On Linux the package manager's own checks and the file permissions of the install folder are the protection.
+- **The page allows inline styles.** Scripts are limited to the app's own files and one hashed boot script.
+- **AI apps can be steered by document content.** The AI apps screen only runs the vendor commands it lists, with fixed arguments. The skill it installs is text that your AI app reads. Content from documents you open can try to steer that app, so keep the app's own permission prompts on.
+- **Restoring a backup and opening a file are checked.** A restore refuses a backup whose entries would resolve (through links) outside the workspace, and "open with" passes on only `.zip` pack files.
+
 ## Uninstall
 
 Removing the app's package leaves your workspaces, their backups and the app's own settings in place on purpose. This section lists exactly what stays, and how to remove each item. Do the steps in this order.
 
-**1. Undo the AI integration first**, while the app and the `opendoc` command still exist: open **Connect AI Apps…** and press **Disconnect** for each connected app, or use the "Undo by hand" list in [AI apps](#ai-apps). If you never connected any, skip this step.
+### 1. Undo the AI integration
 
-**2. Quit the app** (File > Quit). A quit removes `.opendoc/desktop.json` from the open workspace; no process of the app is left running.
+Do this first, while the app and the `opendoc` command still exist. Open **Connect AI Apps…** and press **Disconnect** for each connected app, or use the [Undo by hand](#undo-by-hand) list. If you never connected any, skip this step.
 
-**3. Remove the app itself.**
+### 2. Quit the app
+
+Choose File > Quit. A quit removes `.opendoc/desktop.json` from the open workspace; no process of the app is left running.
+
+### 3. Remove the app itself
 
 | Installed as | Command | What it removes |
 |---|---|---|
 | AUR package | `sudo pacman -Rns opendoc-desktop-bin` | Everything the package installed: `/opt/opendoc-desktop/`, `/usr/bin/opendoc`, `/usr/bin/opendoc-desktop`, the menu entry, the icons and the licence files. |
 | pacman file installed by hand | `sudo pacman -Rns opendoc-desktop` | The same, and the AppArmor profile if one was installed. |
-| deb | `sudo apt remove opendoc-desktop` | `/opt/opendoc-desktop/` (with the update helper `resources/updater/install-update`), `/usr/bin/opendoc`, the `/usr/bin/opendoc-desktop` link, the menu entry and icons, the polkit action `/usr/share/polkit-1/actions/io.github.ryanyahya.opendocdesktop.install-update.policy`, and `/etc/apparmor.d/opendoc-desktop` (the package's removal script unloads and deletes it). `purge` adds nothing to the files: the package has no configuration files. Until you purge, dpkg lists the package as `rc`; and the compiled AppArmor cache is not deleted by either (see step 4). |
+| deb | `sudo apt remove opendoc-desktop` | The files listed below the table. |
 | rpm | `sudo dnf remove opendoc-desktop` (Fedora) or `sudo zypper remove opendoc-desktop` (openSUSE) | The same files as the deb, including the update helper and the polkit action. |
-| AppImage | Delete the `.AppImage` file. | Only that file. Its other traces are in the table below. |
-| macOS | Quit the app, then drag opendoc-desktop from Applications to the Trash. | Only the app. Its other traces are in the table below. |
+| AppImage | Delete the `.AppImage` file. | Only that file. Its other traces are in the table of step 4. |
+| macOS | Quit the app, then drag opendoc-desktop from Applications to the Trash. | Only the app. Its other traces are in the table of step 4. |
 
-**4. What stays behind, and how to remove it.** Nothing here is needed by anything else, and nothing runs. Linux paths follow the XDG variables when you set them; the macOS paths come after the semicolon.
+`apt remove` removes:
+
+- `/opt/opendoc-desktop/`, with the update helper `resources/updater/install-update`;
+- `/usr/bin/opendoc` and the `/usr/bin/opendoc-desktop` link;
+- the menu entry and icons;
+- the polkit action `/usr/share/polkit-1/actions/io.github.ryanyahya.opendocdesktop.install-update.policy`;
+- `/etc/apparmor.d/opendoc-desktop` (the package's removal script unloads and deletes it).
+
+`purge` adds nothing to the files: the package has no configuration files. Until you purge, dpkg lists the package as `rc`. The compiled AppArmor cache is not deleted by either (see step 4).
+
+### 4. What stays behind, and how to remove it
+
+Nothing here is needed by anything else, and nothing runs. Linux paths follow the XDG variables when you set them; the macOS paths come after the semicolon.
 
 | What | Where (Linux; macOS) | Remove with |
 |---|---|---|
@@ -568,12 +646,24 @@ Removing the app's package leaves your workspaces, their backups and the app's o
 | The private working folder the AI apps module runs vendor commands from, if you connected an AI app (the last Disconnect removes it) | `.../opendoc-desktop/integrations-work/` in the data folder | `rmdir "${XDG_DATA_HOME:-$HOME/.local/share}/opendoc-desktop/integrations-work"` |
 | The data folder itself, once it is empty | `${XDG_DATA_HOME:-$HOME/.local/share}/opendoc-desktop/` | `rmdir "${XDG_DATA_HOME:-$HOME/.local/share}/opendoc-desktop"` |
 | Downloaded updates (the installer the updater fetched, under `pending/`). Only an app that updates itself has this. | `${XDG_CACHE_HOME:-$HOME/.cache}/opendoc-desktop-updater/`; `~/Library/Caches/opendoc-desktop-updater/` | `rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/opendoc-desktop-updater"` |
-| The `opendoc` command an AppImage or a Mac wrote itself (a shell script). A package install has none: its `/usr/bin/opendoc` went with the package. | `~/.local/bin/opendoc` (AppImage; the app creates `~/.local/bin` itself if it was missing, and leaves that folder after removing the script); `/usr/local/bin/opendoc` or `~/.local/bin/opendoc` (macOS) | Only if it is ours: `grep -q 'opendoc-desktop agent command' ~/.local/bin/opendoc && rm ~/.local/bin/opendoc`. A file without those words is somebody else's: leave it. |
+| The `opendoc` command an AppImage or a Mac wrote itself (a shell script). A package install has none: its `/usr/bin/opendoc` went with the package. | `~/.local/bin/opendoc` (AppImage); `/usr/local/bin/opendoc` or `~/.local/bin/opendoc` (macOS) | Only if it is ours: `grep -q 'opendoc-desktop agent command' ~/.local/bin/opendoc && rm ~/.local/bin/opendoc`. A file without those words is somebody else's: leave it. |
 | Node's compile cache, written by the processes that run on the app's executable as Node (the CLI, the service host, render workers). Shared by name, so it is the same folder for any user of the machine who ran them. | `/tmp/node-compile-cache/` (Linux; `$TMPDIR/node-compile-cache` on macOS) | `rm -rf /tmp/node-compile-cache` (a reboot also clears it where `/tmp` is a memory disk) |
-| The deb's compiled AppArmor profile cache. `apt remove` and `apt purge` unload and delete `/etc/apparmor.d/opendoc-desktop`, but the cache `apparmor_parser` wrote stays. It is root-owned, so removing it needs root. Only on distributions with AppArmor (Debian, Ubuntu). | `/var/cache/apparmor/<hash>/opendoc-desktop`, where `<hash>` is a folder named by the system | As root: `find /var/cache/apparmor -name opendoc-desktop -type f` to see it, then delete what that lists (`sudo find /var/cache/apparmor -name opendoc-desktop -type f -delete`). Harmless if left. |
+| The deb's compiled AppArmor profile cache. It is root-owned, so removing it needs root. Only on distributions with AppArmor (Debian, Ubuntu). | `/var/cache/apparmor/<hash>/opendoc-desktop`, where `<hash>` is a folder named by the system | As root: `find /var/cache/apparmor -name opendoc-desktop -type f` to see it, then delete what that lists. Harmless if left. |
 | The dpkg record of a removed deb: after `apt remove`, `dpkg -l opendoc-desktop` shows state `rc` (removed, configuration records kept) until you purge. | dpkg's database | `sudo apt purge opendoc-desktop` (it removes no files of yours; the package has no configuration files) |
-| The AI integration, if you did not undo it in step 1 | Claude Code: each config folder you connected (`~/.claude`, a `~/.claude-<name>` folder, or `$CLAUDE_CONFIG_DIR`), the marketplace `opendoc` and plugin `opendoc@opendoc`. Codex: `$CODEX_HOME` (default `~/.codex`), the same names. Antigravity: `~/.gemini/config/plugins/opendoc/`. Cursor: `~/.cursor/skills/opendoc/`. Copilot CLI: `~/.copilot/skills/opendoc/`. | The "Undo by hand" list in [AI apps](#ai-apps). Once the app is gone, the `claude` and `codex` commands still work; run the first four lines of that list. |
-| Per workspace, see below | Inside each workspace folder | See below |
+| The AI integration, if you did not undo it in step 1 | The apps you connected, listed below the table | The [Undo by hand](#undo-by-hand) list |
+| Per workspace | Inside each workspace folder | See step 5 |
+
+Notes on the table:
+
+- On an AppImage, the app creates `~/.local/bin` itself if it was missing, and leaves that folder after removing the script.
+- `apt remove` and `apt purge` unload and delete `/etc/apparmor.d/opendoc-desktop`, but the cache `apparmor_parser` wrote stays. To delete what `find` lists: `sudo find /var/cache/apparmor -name opendoc-desktop -type f -delete`.
+- Where the AI integration is, if you connected it:
+  - Claude Code: each config folder you connected (`~/.claude`, a `~/.claude-<name>` folder, or `$CLAUDE_CONFIG_DIR`), the marketplace `opendoc` and plugin `opendoc@opendoc`.
+  - Codex: `$CODEX_HOME` (default `~/.codex`), the same names.
+  - Antigravity: `~/.gemini/config/plugins/opendoc/`.
+  - Cursor: `~/.cursor/skills/opendoc/`.
+  - Copilot CLI: `~/.copilot/skills/opendoc/`.
+- Once the app is gone, the `claude` and `codex` commands still work. Run the first four lines of the Undo by hand list.
 
 The same on Linux, in one block (it keeps your backups; add the last line when you are sure):
 
@@ -593,16 +683,26 @@ On a Mac the profile and the data folder are the same folder, `~/Library/Applica
 
 Other files in your home folder that the app's engine may have made, such as `~/.pki` or `~/.local/share/pki/nssdb` (certificate stores) and graphics shader caches, are shared with other programs. Leave them.
 
-**5. Each workspace you opened.** A workspace is yours; the uninstall never touches it. The app added or changed only these things inside it:
+### 5. Each workspace you opened
 
-- `node_modules`: a symbolic link to the app's runtime (`/opt/opendoc-desktop/resources/runtime/node_modules` for packages; `.../opendoc-desktop/runtime/current/node_modules` in the data folder for an AppImage). After the uninstall it points at nothing. To go back to plain npm, delete the link and install OpenDoc the usual way, in that workspace: `rm node_modules && npm install` (it needs Node 24 and npm; npm then writes a real `node_modules` and a `package-lock.json`).
+A workspace is yours; the uninstall never touches it. The app added or changed only these things inside it:
+
+- `node_modules`: a symbolic link to the app's runtime (`/opt/opendoc-desktop/resources/runtime/node_modules` for packages; `.../opendoc-desktop/runtime/current/node_modules` in the data folder for an AppImage). After the uninstall it points at nothing. To go back to plain npm, delete the link and install OpenDoc the usual way, in that workspace: `rm node_modules && npm install`. It needs Node 24 and npm; npm then writes a real `node_modules` and a `package-lock.json`.
 - `.opendoc/workspace.json` carries `"managed": true`. Leave it: OpenDoc acts on that flag only when it finds the app's runtime, and otherwise treats the workspace as an npm one.
 - `package.json`: the `opendoc` pin may have moved up to the version of the app that opened it. It is never lowered.
-- `.opendoc/desktop.json` exists only while the app has the workspace open, and `.opendoc/update.lock` only while a workspace is opening or a command such as `opendoc update` runs. A normal quit leaves neither. If the app was killed, one of them can stay behind, stale and harmless: delete it if the `opendoc` command names it in an error.
-- `.opendoc/pack-uploads/` and `.opendoc/locks/`: folders the service makes while it works (it stages uploaded and inspected pack files in the first and keeps lock files for media changes and comments in the second). The app removes them again, when empty, if its session made them in a workspace that had none; one that was there before, or holds a file, stays. They are part of the workspace, not of the app: harmless, and used by `opendoc` itself, so leave them. A `.opendoc/current.json` is the service's record of what you last looked at; it stays too.
+- `.opendoc/desktop.json` and `.opendoc/update.lock`:
+  - `desktop.json` exists only while the app has the workspace open.
+  - `update.lock` exists only while a workspace is opening or a command such as `opendoc update` runs.
+  - A normal quit leaves neither. If the app was killed, one of them can stay behind, stale and harmless: delete it if the `opendoc` command names it in an error.
+- `.opendoc/pack-uploads/` and `.opendoc/locks/`: folders the service makes while it works. It stages uploaded and inspected pack files in the first and keeps lock files for media changes and comments in the second.
+  - The app removes them again, when empty, if its session made them in a workspace that had none. One that was there before, or holds a file, stays.
+  - They are part of the workspace, not of the app: harmless, and used by `opendoc` itself, so leave them.
+  - A `.opendoc/current.json` is the service's record of what you last looked at; it stays too.
 - `.claude/skills`, when the workspace has `.agents/skills`: a link to `../.agents/skills`, inside the workspace. It is OpenDoc's own convention. Leave it.
 
-**6. Check that nothing is left.** After removing the items above, this should print only your workspaces and backups (if you kept them), and nothing else of the app's:
+### 6. Check that nothing is left
+
+After removing the items above, this should print only your workspaces and backups (if you kept them), and nothing else of the app's:
 
 ```sh
 find "${XDG_CONFIG_HOME:-$HOME/.config}" "${XDG_DATA_HOME:-$HOME/.local/share}" "${XDG_CACHE_HOME:-$HOME/.cache}" -maxdepth 2 -iname '*opendoc*' 2>/dev/null

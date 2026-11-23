@@ -41,7 +41,7 @@ test.describe('a package install updates through one pkexec call', () => {
 
       // Nothing was installed while the offer was pending, and the download is in the app's cache folder.
       expect(await tools.calls('pkexec')).toEqual([]);
-      expect(await readdir(join(run.updaterCache, 'pending'))).toEqual(expect.arrayContaining([deb.name, `${deb.name}.sig`]));
+      expect(await readdir(join(run.updaterCache, 'pending'))).toEqual(expect.arrayContaining([deb.name, `${deb.name}.ed25519.sig`]));
 
       await clickItem(run.app, ['Help', 'Restart to Update']);
       expect(await exited(run.app, 60_000)).toBe(true);
@@ -56,7 +56,7 @@ test.describe('a package install updates through one pkexec call', () => {
       expect(call[5]).toBe(join(run.updaterCache, 'pending', deb.name));
       expect(call[6]).toBe(Buffer.from(sha512(deb.bytes), 'base64').toString('hex'));
       expect(call[7]).toBe('deb');
-      expect(call[8]).toBe(join(run.updaterCache, 'pending', `${deb.name}.sig`));
+      expect(call[8]).toBe(join(run.updaterCache, 'pending', `${deb.name}.ed25519.sig`));
       expect(call).toHaveLength(9);
       // The script carries the stand-in release key, and the key the checks use is not an argument.
       expect(call[3]).toContain(key.publicPem.trimEnd());

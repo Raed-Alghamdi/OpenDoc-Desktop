@@ -76,7 +76,7 @@ async function downloadedDeb(updater, signature) {
   const folder = await scratch('pending');
   const file = join(folder, 'update.deb');
   await writeFile(file, 'package');
-  if (signature) await writeFile(`${file}.sig`, signature);
+  if (signature) await writeFile(`${file}.ed25519.sig`, signature);
   updater.downloadedUpdateHelper = { file, downloadedFileInfo: { fileName: 'update.deb', sha512: sha } };
   return file;
 }
@@ -88,7 +88,7 @@ test('installDownloaded hands the downloaded file, its metadata checksum and its
   const file = await downloadedDeb(updater, Buffer.alloc(64, 1));
   assert.deepEqual(await updater.installDownloaded(), { outcome: 'cancelled' });
   assert.equal(calls.length, 1);
-  assert.deepEqual([calls[0].type, calls[0].file, calls[0].sha512, calls[0].signature], ['deb', file, sha, `${file}.sig`]);
+  assert.deepEqual([calls[0].type, calls[0].file, calls[0].sha512, calls[0].signature], ['deb', file, sha, `${file}.ed25519.sig`]);
 });
 
 test('with no signature file the install tries once more to fetch it, and installs nothing if it still cannot', async () => {
@@ -100,7 +100,7 @@ test('with no signature file the install tries once more to fetch it, and instal
   assert.deepEqual(await updater.installDownloaded(), { outcome: 'failed', reason: 'no-signature', message: noSignatureMessage });
   assert.deepEqual(fetches, ['https://example.invalid/releases/update.deb.sig'], 'one more try');
   assert.deepEqual(installs, []);
-  assert.equal(await stat(`${file}.sig`).catch(() => null), null);
+  assert.equal(await stat(`${file}.ed25519.sig`).catch(() => null), null);
   assert.equal(noSignatureMessage, 'This update has no signature, so it was not installed. Download it from the release page and install it by hand.');
 });
 
@@ -110,8 +110,8 @@ test('the second try at install time can succeed: the signature is stored and th
   const file = await downloadedDeb(updater);
   updater.signatureSource = { packageAddress: 'https://example.invalid/releases/update.deb' };
   assert.equal((await updater.installDownloaded()).outcome, 'installed');
-  assert.equal(installs[0].signature, `${file}.sig`);
-  assert.deepEqual(await readFile(`${file}.sig`), Buffer.alloc(64, 7));
+  assert.equal(installs[0].signature, `${file}.ed25519.sig`);
+  assert.deepEqual(await readFile(`${file}.ed25519.sig`), Buffer.alloc(64, 7));
 });
 
 test('a stored signature that is not 64 bytes is not used, and with no way to fetch another nothing is installed', async () => {
@@ -168,7 +168,7 @@ async function downloadFrom({ sig, loopback = true, type = 'deb' }) {
     assert.equal(checked.isUpdateAvailable, true);
     await updater.downloadUpdate(checked.cancellationToken);
     const file = updater.downloaded().file;
-    return { updater, file, requests, signature: await readFile(`${file}.sig`).catch(() => null) };
+    return { updater, file, requests, signature: await readFile(`${file}.ed25519.sig`).catch(() => null) };
   } finally { server.close(); }
 }
 
@@ -179,6 +179,8 @@ test('after the package is downloaded its .sig is fetched from the same folder a
     assert.deepEqual(result.signature, sig, type);
     assert.deepEqual(result.requests.map(url => url.replace(/^\/latest.*\.yml$/, '/latest.yml').replace(/^\/opendoc-desktop.*(\.sig)$/, '/package$1')), ['/latest.yml', result.requests[1], '/package.sig'], type);
     assert.deepEqual((await readdir(dirname(result.file))).filter(name => name.endsWith('.part')), []);
+    // Never <file>.sig: pacman -U would read that as the package's PGP signature and refuse the package (the hand-install command).
+    assert.equal(await stat(`${result.file}.sig`).catch(() => null), null, type);
   }
 });
 

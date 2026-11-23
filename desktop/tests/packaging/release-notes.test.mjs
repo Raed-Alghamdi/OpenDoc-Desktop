@@ -42,7 +42,7 @@ test('the install notes name every file of this version and build the way electr
     assert.ok(notes.includes(fact), fact);
   }
   // The signature files: what they are, the command to check one by hand, and where the public key is.
-  for (const fact of ['`<file>.sig`', 'Ed25519', 'openssl pkeyutl -verify -pubin -inkey release-key.pem -rawin -in <file> -sigfile <file>.sig', 'desktop/resources/updater/release-key.pem', 'before it installs a deb, rpm or pacman update']) {
+  for (const fact of ['`<file>.sig`', 'Ed25519', 'openssl pkeyutl -verify -pubin -inkey release-key.pem -rawin -in <file> -sigfile <file>.sig', 'desktop/resources/updater/release-key.pem', 'before it installs a deb, rpm or pacman update', 'Keep its `.sig` in another folder']) {
     assert.ok(notes.includes(fact), fact);
   }
   assert.ok(!notes.includes('themselves are not signed'), 'the old "not signed" sentence is gone');

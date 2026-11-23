@@ -161,36 +161,62 @@ The packages carry no signature of their own that your package manager knows (no
 
 ## First run
 
-1. Start OpenDoc Desktop (the menu entry, `opendoc-desktop` in a terminal for a package install, or the AppImage file). With an AppImage the first start takes a few seconds longer while it copies its runtime.
-2. A window titled "Choose a workspace" asks for a folder. A workspace is a folder that holds your documents, themes and templates; the app opens one at a time.
+1. Start OpenDoc Desktop: the menu entry, `opendoc-desktop` in a terminal for a package install, or the AppImage file. With an AppImage the first start takes a few seconds longer while it copies its runtime.
+2. A window titled "Choose a workspace" asks for a folder. A workspace is a folder that holds your documents, themes and templates; the app opens one at a time. Choose one of:
    - **Create new workspace...** asks for a new or empty folder, and creates the workspace there with OpenDoc's own `init` command. It needs no network and no npm: the new folder's `node_modules` is a link to the app's runtime, and its marker file `.opendoc/workspace.json` says `"managed": true`.
-   - **Open existing workspace...** opens a folder that already is one. A folder synced from another device (it has a `package.json` pinning OpenDoc but no `.opendoc/workspace.json` yet) is adopted after a question, "Use this workspace on this device?". A real `node_modules` folder in it is never deleted without asking. [Which workspaces open](#which-workspaces-open) says what happens when its OpenDoc version differs from the app's.
+   - **Open existing workspace...** opens a folder that already is one. [Which workspaces open](#which-workspaces-open) says what happens when its OpenDoc version differs from the app's.
 3. The workspace opens in the window: the library of documents, the editor, comments, export. Nothing listens on a network port; the window talks to OpenDoc inside the app.
 4. The folder you opened becomes the default workspace (`defaultWorkspace` in `config.json`). The next start opens it again, and the [AI apps' skill](#ai-apps) uses it. File > Open Recent switches workspace.
 
-While a workspace is open the app writes `.opendoc/desktop.json` in it, so the `opendoc` command knows the app has it, and removes it when you quit. A workspace is open in only one place at a time: if a browser-edition `opendoc start` is running on the same folder, the app refuses and offers to run `opendoc stop`.
+If you open a folder synced from another device (it has a `package.json` pinning OpenDoc but no `.opendoc/workspace.json` yet), the app asks "Use this workspace on this device?" and adopts it when you say yes. A real `node_modules` folder in it is never deleted without asking.
 
-The File menu also has Reveal Workspace, Workspace Backups... and Show Log (the service's log, the first place to look when something goes wrong).
+### While a workspace is open
+
+- The app writes `.opendoc/desktop.json` in the workspace, so the `opendoc` command knows the app has it, and removes it when you quit.
+- A workspace is open in only one place at a time. If a browser-edition `opendoc start` is running on the same folder, the app refuses and offers to run `opendoc stop`.
+- The File menu has Reveal Workspace, Workspace Backups... and Show Log. The log is the service's log, the first place to look when something goes wrong.
+- Closing the window (or quitting) while the page holds an unsaved text draft asks Leave or Stay. Stay keeps the window, the service and the draft.
 
 ## Updates
 
-The app checks for a new build only while it is open: once at launch, then once a day. Nothing runs while it is closed. The address it asks is this repository's releases, unless `config.json` has an `updateFeed` (https only). A release is an update when its version is higher, or when it is the same version with a higher build number. What the app does next depends on how it was installed:
+The app checks for a new build only while it is open: once at launch, then once a day. Nothing runs while it is closed.
+
+The address it asks is this repository's releases, unless `config.json` has an `updateFeed` (https only). A release is an update when its version is higher, or when it is the same version with a higher build number.
+
+What the app does next depends on how it was installed:
 
 | Install | What you do | What happens |
 |---|---|---|
 | AUR package | Nothing in the app. Update the system as usual (`yay -Syu`). | The package carries an empty file `resources/update-disabled`, so the in-app updater does not exist and the app makes no update requests. |
-| AppImage | Nothing. | The new file is downloaded in the background (only the changed blocks, when the server allows it) and replaces the AppImage when you quit. The next start is the new build, with no password. The `opendoc` command keeps working. The AppImage's folder must be writable and have room for another copy; if not, nothing is downloaded and you are told once. |
-| deb, rpm, or a pacman file installed by hand | Click **Restart to Update** (a dialog, and a menu item that stays until used), then type your system password. | The package is downloaded in the background, together with the release's signature for it (`<package>.sig`). Installing a system package needs administrator rights, so the password prompt (polkit `pkexec`) cannot be avoided. As root, the installer checks the package against its SHA-512 and its signature against the release key, and installs it only if both hold. A release without a signature for the file is not installed (the app says so, and asks for no password); you can download it from the release page and install it by hand. Cancelling the prompt keeps the download and offers it again. |
-| macOS | Click **Restart to Update**. | The app downloads the new build, checks it, replaces itself and restarts. It does this only when it runs from a writable folder such as Applications and not from a temporary copy; otherwise a notice offers a button to the release page, and you download, drag it to Applications and use Open Anyway again. |
+| AppImage | Nothing. | The new file is downloaded in the background (only the changed blocks, when the server allows it) and replaces the AppImage when you quit. The next start is the new build, with no password. The `opendoc` command keeps working. |
+| deb, rpm, or a pacman file installed by hand | Click **Restart to Update** (a dialog, and a menu item that stays until used), then type your system password. | The package is downloaded in the background, together with the release's signature for it (`<package>.sig`). As root, the installer checks the package against its SHA-512 and its signature against the release key, and installs it only if both hold. |
+| macOS | Click **Restart to Update**. | The app downloads the new build, checks it, replaces itself and restarts. |
 
-Rules that hold for every install:
+### Things to know for each install
+
+- **AppImage:** its folder must be writable and have room for another copy. If not, nothing is downloaded and you are told once.
+- **deb, rpm, pacman file:**
+  - Installing a system package needs administrator rights, so the password prompt (polkit `pkexec`) cannot be avoided.
+  - A release without a signature for the file is not installed. The app says so, and asks for no password. You can download the file from the release page and install it by hand.
+  - Cancelling the prompt keeps the download and offers it again.
+- **macOS:** the app updates itself only when it runs from a writable folder such as Applications and not from a temporary copy. Otherwise a notice offers a button to the release page, and you download the app, drag it to Applications and use Open Anyway again.
+
+### Rules for every install
 
 - A download is accepted only from the configured address, over HTTPS, and only when it matches the SHA-512 in that release's update information. The checksum proves the file is the one the release names; it does not prove who published it.
-- A deb, rpm or pacman update is also installed only when its signature verifies: the release publishes `<file>.sig` (an Ed25519 signature made with the release key, whose public half ships with the app), and the root-owned helper checks it before any package tool runs. A feed, a cache folder or a release asset that was changed therefore cannot get a package of its own installed as root. AppImage and macOS updates are checked against the SHA-512 only: they install without administrator rights, so they gain no privilege, and the macOS app checks the bundle's own signature and identifier as before.
+- A deb, rpm or pacman update is also installed only when its signature verifies. The release publishes `<file>.sig` (an Ed25519 signature made with the release key, whose public half ships with the app), and the root-owned helper checks it before any package tool runs. A feed, a cache folder or a release asset that was changed therefore cannot get a package of its own installed as root.
+- AppImage and macOS updates are checked against the SHA-512 only. They install without administrator rights, so they gain no privilege, and the macOS app checks the bundle's own signature and identifier as before.
 - A release offers an update to an install type only when its update information lists a file for that type.
-- To turn automatic checks off, clear **Check for Updates Automatically** (in the Help menu, and in the app menu on macOS) or set `"checkForUpdates": false` in `config.json`. **Check for Updates...** then still runs one check when you click it.
 - After an update, the first start says once "OpenDoc Desktop was updated to <version>, build <build>", with a link to the release.
-- The details (install type detection, redirects, failures) are in [How the updater works](../desktop/README.md#how-the-updater-works).
+
+The details (install type detection, redirects, failures) are in [How the updater works](../desktop/README.md#how-the-updater-works).
+
+### Turn automatic checks off
+
+1. Clear **Check for Updates Automatically**. It is in the Help menu, and in the app menu on macOS.
+2. Or set `"checkForUpdates": false` in `config.json`.
+
+**Check for Updates...** then still runs one check when you click it.
 
 ## Which workspaces open
 
@@ -203,13 +229,45 @@ A workspace's OpenDoc version is the `opendoc` pin in its `package.json` (`npm:@
 | On an older minor (0.5 against 0.6) | One dialog: **Upgrade** (a backup first), **Open read-only**, or Cancel. A box, "Upgrade my workspaces without asking from now on", removes the dialog for later releases. |
 | On a newer minor than the app (another device's app upgraded it) | It opens read-only with "This workspace was upgraded by OpenDoc x.y. Update the app to edit it." |
 
-Read-only means a banner at the top, and no edits: documents, themes, templates, assets, comments, history and the pin cannot be changed. You can still read, preview and export. The `opendoc` command applies the same table: where the app would upgrade, it says "open this workspace in opendoc-desktop to upgrade it" and never tells you to run `npm install`.
+### Read-only
 
-**An upgrade** copies the workspace to a backup first, runs the upgrade steps if the release has any, moves the pin, and then runs `check` and `review` on every document. If all pass, the workspace opens and a message says where the backup is. If a document fails, you see which, and can **Copy prompt for your agent** (to fix it under the new version) or **Restore backup** (the workspace goes back to how it was and opens read-only).
+Read-only means a banner at the top, and no edits: documents, themes, templates, assets, comments, history and the pin cannot be changed. You can still read, preview and export.
 
-Backups are in the data folder, `~/.local/share/opendoc-desktop/backups/<workspace>-<date and time>/` on Linux and `~/Library/Application Support/opendoc-desktop/backups/` on macOS. A backup holds everything except `node_modules`, `.opendoc`, `output` and the metadata of version control and file sync. The app never deletes a backup by itself. File > Workspace Backups... lists them with their sizes, **Reveal** and **Delete** (to the trash, after a question). To go back to one outside an upgrade, choose Reveal and copy the files in its `workspace` folder over the workspace folder.
+The `opendoc` command applies the same table: where the app would upgrade, it says "open this workspace in opendoc-desktop to upgrade it" and never tells you to run `npm install`.
 
-Mixed devices: a copy of the workspace on plain npm OpenDoc 0.6.1 keeps working beside the app as long as the pin has not moved up. Once the app has moved it, an npm device fails loudly at its next `npm ci`, which is the signal to install the app there too.
+### An upgrade
+
+An upgrade does this, in order:
+
+1. It copies the workspace to a backup.
+2. It runs the upgrade steps, if the release has any.
+3. It moves the pin.
+4. It runs `check` and `review` on every document.
+
+If all pass, the workspace opens and a message says where the backup is. If a document fails, you see which, and can choose:
+
+- **Copy prompt for your agent**, to fix it under the new version;
+- **Restore backup**: the workspace goes back to how it was and opens read-only.
+
+### Backups
+
+Backups are in the data folder:
+
+- Linux: `~/.local/share/opendoc-desktop/backups/<workspace>-<date and time>/`
+- macOS: `~/Library/Application Support/opendoc-desktop/backups/`
+
+A backup holds everything except `node_modules`, `.opendoc`, `output` and the metadata of version control and file sync. The app never deletes a backup by itself.
+
+File > Workspace Backups... lists them with their sizes, **Reveal** and **Delete** (to the trash, after a question).
+
+To go back to a backup outside an upgrade:
+
+1. Choose **Reveal** for it.
+2. Copy the files in its `workspace` folder over the workspace folder.
+
+### Mixed devices
+
+A copy of the workspace on plain npm OpenDoc 0.6.1 keeps working beside the app as long as the pin has not moved up. Once the app has moved it, an npm device fails loudly at its next `npm ci`, which is the signal to install the app there too.
 
 ## The `opendoc` command
 

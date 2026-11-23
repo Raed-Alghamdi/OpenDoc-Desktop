@@ -270,7 +270,17 @@ A workspace is a folder the user owns; the OpenDoc that runs it is the app's. Ev
 
 #### Where the runtime is
 
-The deb, rpm, pacman and macOS builds run from `resources/runtime`, which stays put. An AppImage's resources live in a mount that goes away with the app, so at launch the app copies `resources/runtime` to `<data>/runtime/<version>-<build>/` (`<data>` is `$XDG_DATA_HOME/opendoc-desktop`, else `~/.local/share/opendoc-desktop`; `~/Library/Application Support/opendoc-desktop` on macOS) and runs the service host and `runCli` from the copy. The copy is made in a `.tmp.XXXXXX` folder beside it and renamed, so it is whole or absent (when another process finished the same copy first, that complete copy is kept and the temp is dropped; the agent command follows the same rule); it is skipped when a copy with the same `build-info.json` is there (the agent command makes the same copy by the same rule); a copy that fails (a full disk) is shown when a workspace is opened and is never half-used. Other copies are pruned at every launch, but only `<version>-<build>` folders that hold a `build-info.json` (and stale temps of its own), and never one that a running process uses (`/proc/*/cmdline`, matched as a path and as the percent-encoded `file://` form the service host carries), and a `runtime/current` link, switched atomically, always points at the copy of this build: workspace links name `<data>/runtime/current/node_modules`, so pruning never breaks a workspace. `OPENDOC_DESKTOP_RUNTIME` still names a runtime for development and tests, and the copy is made whenever the `APPIMAGE` variable is set.
+The deb, rpm, pacman and macOS builds run from `resources/runtime`, which stays put.
+
+An AppImage's resources live in a mount that goes away with the app. So at launch the app copies `resources/runtime` to `<data>/runtime/<version>-<build>/` (`<data>` is `$XDG_DATA_HOME/opendoc-desktop`, else `~/.local/share/opendoc-desktop`; `~/Library/Application Support/opendoc-desktop` on macOS) and runs the service host and `runCli` from the copy. The copy follows these rules:
+
+- It is made in a `.tmp.XXXXXX` folder beside it and renamed, so it is whole or absent. When another process finished the same copy first, that complete copy is kept and the temp is dropped. The agent command follows the same rule.
+- It is skipped when a copy with the same `build-info.json` is there. The agent command makes the same copy by the same rule.
+- A copy that fails (a full disk) is shown when a workspace is opened and is never half-used.
+- Other copies are pruned at every launch, but only `<version>-<build>` folders that hold a `build-info.json` (and stale temps of its own), and never one that a running process uses (`/proc/*/cmdline`, matched as a path and as the percent-encoded `file://` form the service host carries).
+- A `runtime/current` link, switched atomically, always points at the copy of this build. Workspace links name `<data>/runtime/current/node_modules`, so pruning never breaks a workspace.
+
+`OPENDOC_DESKTOP_RUNTIME` still names a runtime for development and tests, and the copy is made whenever the `APPIMAGE` variable is set.
 
 #### The link
 
@@ -301,11 +311,53 @@ The pin only ever moves up: `writePin` reads the file again and refuses to lower
 
 #### Read-only
 
-The app passes `readOnly: { reason, message }` (`reason` is `newer-patch`, `newer-minor`, `declined-upgrade` or `restored-backup`) to the service's `prepareOpenDocService` on every host start, restarts included. The service refuses every write with 403 and `workspace-read-only`, reports `readOnly` in `GET /api/session` (an absent key means writable), and shows the app's `message` in a banner exactly as given; the app writes every message (`versions.mjs`; the newer-patch and newer-minor wording is the CLI's too). While the workspace is open read-only the app also writes `readOnly: { reason, message }` into `.opendoc/desktop.json`, which the CLI reads: `opendoc check` works, a write command is refused with that message, and the key is gone when the workspace is writable or the app quits. A read-only open writes nothing in the workspace but the `node_modules` link: no marker (a synced folder with no `.opendoc/workspace.json` opens read-only without one, and without the adoption question), no pin, no history. `declined-upgrade` and `restored-backup` exist only while the app holds the workspace; the CLI's own table (a managed workspace, run from the app's runtime) answers for the others, and gives the app's answer for every row of the table. A service says it can do this by returning `readOnlySupported: true` from `prepareOpenDocService`. The app checks that before anything is changed (the runtime's `service.ts` says it), and again inside the host before the service starts: while it is missing, a workspace that would open read-only is refused with the same message and "Back to workspaces", so a workspace is never opened writable by mistake.
+The app passes `readOnly: { reason, message }` to the service's `prepareOpenDocService` on every host start, restarts included. `reason` is `newer-patch`, `newer-minor`, `declined-upgrade` or `restored-backup`.
+
+What the service does with it:
+
+- It refuses every write with 403 and `workspace-read-only`.
+- It reports `readOnly` in `GET /api/session` (an absent key means writable).
+- It shows the app's `message` in a banner exactly as given. The app writes every message (`versions.mjs`; the newer-patch and newer-minor wording is the CLI's too).
+
+What the CLI sees: while the workspace is open read-only the app also writes `readOnly: { reason, message }` into `.opendoc/desktop.json`, which the CLI reads. `opendoc check` works, a write command is refused with that message, and the key is gone when the workspace is writable or the app quits. `declined-upgrade` and `restored-backup` exist only while the app holds the workspace; the CLI's own table (a managed workspace, run from the app's runtime) answers for the others, and gives the app's answer for every row of the table.
+
+What a read-only open writes: nothing in the workspace but the `node_modules` link. No marker (a synced folder with no `.opendoc/workspace.json` opens read-only without one, and without the adoption question), no pin, no history.
+
+How the app knows the service can do this: a service says so by returning `readOnlySupported: true` from `prepareOpenDocService`. The app checks that before anything is changed (the runtime's `service.ts` says it), and again inside the host before the service starts. While it is missing, a workspace that would open read-only is refused with the same message and "Back to workspaces", so a workspace is never opened writable by mistake. The probe (`readOnlySupported`) ignores comments and types in the runtime's `service.ts`.
 
 #### Upgrade
 
-Back up, run the registry's steps (`workspace/registry.mjs`; empty for now, and a missing entry still upgrades), move the pin, then run `check` and `review` on every document with the workspace as the working directory. The backup is `<data>/backups/<workspace>-<YYYY-MM-DD-HHMMSS>/` (the name never starts with a dot, so a workspace folder called `.notes` still lists) with `backup.json` (source, from and to versions, time, file count, bytes) and `workspace/`, a copy of everything except the top-level `node_modules`, `.opendoc` and `output` and the metadata of version control and file sync, which is neither backed up nor restored (`.git`, `.hg`, `.svn`, `.jj`, `.sync_*.db*`, `._sync_*.db*`, `.csync_journal.db*`, `.owncloudsync.log*`, `.nextcloudsync.log*`, `.~lock.*`, `.stfolder`, `.stignore`, `.stversions`, `.dropbox*`, at any depth: restoring an old `.git` would silently roll back commits); free space is checked first. It is built in `.<name>.partial` and renamed, and a `.partial` folder older than ten minutes (a crash; it is only a copy) is removed when the app starts and when the backups page opens. If everything passes the workspace opens, and a message says where the backup is. Otherwise a result screen lists each failing document with its message and offers **Copy prompt for your agent**, **Restore backup** and Close (and "Open anyway" when only checks and reviews failed). Restore works file by file and never moves a file across filesystems. It checks the free space (for the safety copy and for the new files), then writes `.opendoc/restore-journal.json` before the first change; it copies (never moves) the current version of every file that will change or disappear into a new `before-restore` backup (`scope: "changed-files"`), replaces files one at a time atomically, removes the files the backup lacks, and leaves identical files alone (same inode). If any step fails it rolls back from the safety copy, and the safety copy is deleted only when the rollback fully succeeded; if it did not, the error names the folder that holds it and keeps the journal. Rollback and recovery are one routine that reads the state of each path and does only what is still needed, so they can run again from any state (a kill in the middle of the restore or of the rollback, a file that became a folder or the other way round): the temporary files of the plan's paths are removed at any depth, files that already equal their saved copy are not rewritten (no room needed on a full disk), and a folder the backup lacks that holds version control or sync metadata stays and is named in the result. A journal found at the next open of the workspace, or on the backups page, is acted on: the restore is undone from the safety copy, and the result is shown (a copy that is still needed cannot be deleted from the backups page). If recovery still cannot finish, the open shows a dialog that names the safety copy and offers **Open anyway** (the journal is set aside inside the safety copy, so nothing is rolled back later over new edits) or Cancel (nothing changes); the user is never locked out of the workspace. After a restore the workspace counts as read-only. Backups are never deleted automatically; File > Workspace Backups… lists them with Reveal and Delete (to the trash, after a question). Before the pin moves, the upgrade writes `.opendoc/upgrade-pending.json`, and removes it after `check` and `review`; if it is still there at the next open (a crash after the pin moved), the checks run again and the result screen is shown. A crash before that leaves the backup, and the next open sees the older pin and asks again. The read-only probe (`readOnlySupported`) ignores comments and types in the runtime's `service.ts`.
+Back up, run the registry's steps (`workspace/registry.mjs`; empty for now, and a missing entry still upgrades), move the pin, then run `check` and `review` on every document with the workspace as the working directory.
+
+If everything passes the workspace opens, and a message says where the backup is. Otherwise a result screen lists each failing document with its message and offers **Copy prompt for your agent**, **Restore backup** and Close (and "Open anyway" when only checks and reviews failed).
+
+Before the pin moves, the upgrade writes `.opendoc/upgrade-pending.json`, and removes it after `check` and `review`. If it is still there at the next open (a crash after the pin moved), the checks run again and the result screen is shown. A crash before that leaves the backup, and the next open sees the older pin and asks again.
+
+#### Backups
+
+The backup is `<data>/backups/<workspace>-<YYYY-MM-DD-HHMMSS>/`. The name never starts with a dot, so a workspace folder called `.notes` still lists. It holds:
+
+- `backup.json`: source, from and to versions, time, file count, bytes.
+- `workspace/`: a copy of everything except the top-level `node_modules`, `.opendoc` and `output` and the metadata of version control and file sync.
+
+That metadata is neither backed up nor restored: `.git`, `.hg`, `.svn`, `.jj`, `.sync_*.db*`, `._sync_*.db*`, `.csync_journal.db*`, `.owncloudsync.log*`, `.nextcloudsync.log*`, `.~lock.*`, `.stfolder`, `.stignore`, `.stversions`, `.dropbox*`, at any depth. Restoring an old `.git` would silently roll back commits.
+
+Free space is checked first. The backup is built in `.<name>.partial` and renamed. A `.partial` folder older than ten minutes (a crash; it is only a copy) is removed when the app starts and when the backups page opens. Backups are never deleted automatically; File > Workspace Backups… lists them with Reveal and Delete (to the trash, after a question).
+
+#### Restore
+
+Restore works file by file and never moves a file across filesystems. In order:
+
+1. It checks the free space (for the safety copy and for the new files).
+2. It writes `.opendoc/restore-journal.json` before the first change.
+3. It copies (never moves) the current version of every file that will change or disappear into a new `before-restore` backup (`scope: "changed-files"`).
+4. It replaces files one at a time atomically, removes the files the backup lacks, and leaves identical files alone (same inode).
+
+If any step fails it rolls back from the safety copy. The safety copy is deleted only when the rollback fully succeeded; if it did not, the error names the folder that holds it and keeps the journal. After a restore the workspace counts as read-only.
+
+Rollback and recovery are one routine that reads the state of each path and does only what is still needed, so they can run again from any state (a kill in the middle of the restore or of the rollback, a file that became a folder or the other way round). The temporary files of the plan's paths are removed at any depth, files that already equal their saved copy are not rewritten (no room needed on a full disk), and a folder the backup lacks that holds version control or sync metadata stays and is named in the result.
+
+A journal found at the next open of the workspace, or on the backups page, is acted on: the restore is undone from the safety copy, and the result is shown (a copy that is still needed cannot be deleted from the backups page). If recovery still cannot finish, the open shows a dialog that names the safety copy and offers **Open anyway** (the journal is set aside inside the safety copy, so nothing is rolled back later over new edits) or Cancel (nothing changes). The user is never locked out of the workspace.
 
 ### Files
 
@@ -330,7 +382,11 @@ Back up, run the registry's steps (`workspace/registry.mjs`; empty for now, and 
 - No `file://` page and no cookies: the session token travels in a header, as in the browser edition.
 - The service hands its token to any caller of `GET /api/session` and does not check Origin. So the main process lets a request that changes something (any method but GET and HEAD under `/api/`) through only when the app's own page made it: Electron's web request hook reports the starting origin as `initiatorOrigin` (it does not pass the Origin header to a protocol handler), and a request with none, or with another one, is cancelled. Every answer from a transport is wrapped: a throw becomes a 500, and a transport that was stopped (or whose host is gone) answers 503. Any host other than `app://opendoc` answers 403.
 - One session partition per workspace (`persist:ws-<hash of the path>`), so workspaces never share browser storage. Which window may call the service: every request passes through the main process, which answers only the one session that belongs to the open workspace, and the `initiatorOrigin` rule above decides who may change things.
-- **Invariant: the service never serves user-supplied bytes inline as HTML, JavaScript or SVG.** Every file window of a workspace shares the workspace's session (and so its token and its origin, `app://opendoc`), so a user file that ran as a page would run with the full rights of the app. The inline answers the service gives today are only: a PDF the service made itself, PNG, JPEG and WebP images (the logo, cover and media routes, sent with `X-Content-Type-Options: nosniff`), a font (`font/ttf`, `font/otf`), and the app's own files from its `dist` (`client.ts`). Everything else is an attachment: an SVG asset (`attachment` plus `default-src 'none'; sandbox`), a file from a document's media folder (`application/octet-stream`, `attachment`), PPTX and the exports. The service also refuses an `.html`, a `.js` and an `.svg` that carries a script as an upload. `inline-content.spec.mjs` holds the service to it: an `.html`, a `.js` and an `.svg` are added through the logo, font and media routes and put in a media folder by hand, then fetched back through `app://opendoc`, and each answer must be refused, an attachment or a type that cannot run script, with `nosniff`. Known gap (the service is not editable from the shell): the PDF routes send no `nosniff`; their bytes are generated by the service, not supplied by a user.
+- **Invariant: the service never serves user-supplied bytes inline as HTML, JavaScript or SVG.** Every file window of a workspace shares the workspace's session (and so its token and its origin, `app://opendoc`), so a user file that ran as a page would run with the full rights of the app.
+  - The inline answers the service gives today are only: a PDF the service made itself, PNG, JPEG and WebP images (the logo, cover and media routes, sent with `X-Content-Type-Options: nosniff`), a font (`font/ttf`, `font/otf`), and the app's own files from its `dist` (`client.ts`).
+  - Everything else is an attachment: an SVG asset (`attachment` plus `default-src 'none'; sandbox`), a file from a document's media folder (`application/octet-stream`, `attachment`), PPTX and the exports. The service also refuses an `.html`, a `.js` and an `.svg` that carries a script as an upload.
+  - `inline-content.spec.mjs` holds the service to it: an `.html`, a `.js` and an `.svg` are added through the logo, font and media routes and put in a media folder by hand, then fetched back through `app://opendoc`, and each answer must be refused, an attachment or a type that cannot run script, with `nosniff`.
+  - Known gap (the service is not editable from the shell): the PDF routes send no `nosniff`; their bytes are generated by the service, not supplied by a user.
 
 #### Accepted risks
 
@@ -374,7 +430,28 @@ Once at launch and then once a day while the app is open (when the switch is on)
 
 #### Where it looks
 
-The address in `resources/app-update.yml` (the fork's GitHub releases) unless `config.json` has `"updateFeed"`. The value is one of: a `https://github.com/<owner>/<repo>` address, a folder address ending in `/` that holds `latest-linux.yml` (or `latest-mac.yml`) and the files, or, for tests, `http://127.0.0.1:<port>/github-like`. `https:` is accepted everywhere. Plain `http:` for 127.0.0.1, localhost and [::1] is accepted only by an unpackaged run or a test build (see [Test builds](#test-builds)); an installed app refuses it, logs that, and never contacts it. Anything else (other schemes, an address with a user name or password) is refused, logged and never contacted. When the feed is not the built-in address (the `updateFeed` of `config.json`), the app's own "Restart to Update" prompt and the AppImage's "update is ready" notice name it (its origin, or `https://github.com/<owner>/<repo>`), so a changed address is visible before the user agrees to an install. Redirects are followed only to https (a loopback feed may also be redirected to loopback http); a redirect to plain http is refused and logged. This holds for the metadata, the block maps, the full download and the differential (ranged) download, which GitHub release downloads use: every request is made with manual redirect handling and each redirect is checked before it is followed, and as a catch-all a filter on the updater's own session cancels any request or redirect hop to plain http (except loopback http for a loopback feed). The metadata's file entries must be plain names next to the metadata: a release is not offered when any entry contains whitespace, a control character or a backslash, or when resolving it against the feed (or, for a feed set in `config.json`, against that feed's own address too) would leave the feed's host (an absolute address, `//host/...`, or a scheme such as `file:`). Metadata whose file list has an entry that is not an object with a text address (a YAML list, a number), or whose `path` is not text, is refused as a whole.
+The address in `resources/app-update.yml` (the fork's GitHub releases) unless `config.json` has `"updateFeed"`. The value is one of:
+
+- a `https://github.com/<owner>/<repo>` address;
+- a folder address ending in `/` that holds `latest-linux.yml` (or `latest-mac.yml`) and the files;
+- for tests, `http://127.0.0.1:<port>/github-like`.
+
+Which schemes are accepted:
+
+- `https:` is accepted everywhere.
+- Plain `http:` for 127.0.0.1, localhost and [::1] is accepted only by an unpackaged run or a test build (see [Test builds](#test-builds)). An installed app refuses it, logs that, and never contacts it.
+- Anything else (other schemes, an address with a user name or password) is refused, logged and never contacted.
+
+When the feed is not the built-in address (the `updateFeed` of `config.json`), the app's own "Restart to Update" prompt and the AppImage's "update is ready" notice name it (its origin, or `https://github.com/<owner>/<repo>`), so a changed address is visible before the user agrees to an install.
+
+Redirects are followed only to https (a loopback feed may also be redirected to loopback http); a redirect to plain http is refused and logged. This holds for the metadata, the block maps, the full download and the differential (ranged) download, which GitHub release downloads use: every request is made with manual redirect handling and each redirect is checked before it is followed, and as a catch-all a filter on the updater's own session cancels any request or redirect hop to plain http (except loopback http for a loopback feed).
+
+The metadata's file entries must be plain names next to the metadata. A release is not offered when:
+
+- any entry contains whitespace, a control character or a backslash; or
+- resolving it against the feed (or, for a feed set in `config.json`, against that feed's own address too) would leave the feed's host (an absolute address, `//host/...`, or a scheme such as `file:`).
+
+Metadata whose file list has an entry that is not an object with a text address (a YAML list, a number), or whose `path` is not text, is refused as a whole.
 
 #### What counts as an update
 
@@ -382,9 +459,65 @@ A higher version always does. The same version does when the metadata's top-leve
 
 #### What happens next, by install type
 
-- **AppImage:** the file is downloaded in the background (a differential download when the feed supports ranges) and swapped in when the app quits, so the next launch is the new build, with no prompt. The swap never leaves the user without an AppImage: the download is copied beside the AppImage under a temporary name, checked against the metadata's SHA-512 again, made executable and synced, and only then renamed over the AppImage (atomic, same folder). Nothing is unlinked first and the new AppImage is never run; on any failure the temporary file is removed and the old AppImage is untouched (the download is kept, and the next check tries again). The reason is recorded in `config.json` (`updateNotices.swapFailed`), and the next launch says so once in a notice that names the folder and the reason, without blocking anything. The file keeps its name (it has no version in it), so `~/.local/bin/opendoc` keeps working; if a build ever renames it, the shim is pointed at the new path. Before downloading, the app checks that the AppImage's folder is writable and has room for another copy (and checks the room again before staging); if not, nothing is downloaded and the user is told once.
-- **deb, rpm, pacman:** the file is downloaded in the background and "Restart to Update" is offered (a dialog, and a menu item that stays until used). It runs one asynchronous `pkexec` call, so the window never freezes behind the password prompt. Once electron-updater has downloaded and checked the package, the app fetches `<the package's own address>.sig` under the same rules as the package (https only, a loopback feed only in a test build, the guarded redirects), checks that it is 64 bytes and stores it beside the download as `<package>.ed25519.sig` (not `<package>.sig`, which `pacman -U` would take for a PGP signature if the file is installed by hand). If it cannot be had then, "Restart to Update" tries once more; if it still cannot, nothing is installed, `pkexec` is never started and the app says "This update has no signature, so it was not installed. Download it from the release page and install it by hand." The call copies the file and its signature to a root-owned folder, checks the file's SHA-512 again as root (the checksum comes from the metadata the app already verified; exit 70), checks the signature against the release public key with `openssl pkeyutl -verify -pubin -inkey release-key.pem -rawin` (a signature that does not verify, or a missing key file: exit 71; no `openssl`: exit 72; nothing is installed in any of these cases), then runs `dpkg -i` (and `apt-get install -f -y` to settle dependencies), the `zypper`, `dnf`, `yum` or `rpm` equivalent, or `pacman -U --noconfirm`. A cancelled password prompt (exit 126 or 127) says "Update cancelled" and keeps the download; a failure shows the command to run by hand (except when the signature was missing or did not verify: that file is not one to install by hand). The deb, rpm and Arch packages (which depend on `openssl`) install a root-owned helper, `/opt/opendoc-desktop/resources/updater/install-update`, the release public key beside it (`release-key.pem`, read by the helper from its own folder), and a polkit action, `/usr/share/polkit-1/actions/io.github.ryanyahya.opendocdesktop.install-update.policy`; `pkexec` runs the helper through that action and the password prompt reads "Authentication is required to install an OpenDoc Desktop update." Both files are removed with the package. The AUR package has neither (its updater is off, so it never asks). An install without the helper (a build older than the helper) still shows the long command in the prompt, which then holds the release public key text as well (the app reads it from its own resources and the script writes it to its root-owned temporary folder itself; no value from the feed or the cache reaches the key). After a successful install the downloaded installer and its `update-info.json` are deleted from the updater's `pending/` folder (so a root-installed package does not sit in your cache), and the next check that finds nothing newer clears it too. The AppImage and macOS updates use the same cleanup at that next check, which removes what their swap left in `pending/` (the AppImage's `update-info.json`, the macOS zip); a download that still waits to be installed is never cleared. The app then restarts itself.
-- **macOS:** unpacks the downloaded zip with `ditto`, checks its signature and bundle identifier, and replaces the bundle in place through a small helper that waits (at most 60 seconds, then gives up without swapping, and logs that to a file the next launch copies into the updater's log; the next check offers the update again) for the app to quit and puts the old bundle back if the swap fails. The new bundle is the one in the zip with the running app's bundle identifier, whatever its file name, and its version and build must be the ones the release announced. It does this only when the app is not running translocated and its folder is writable; otherwise the user gets a notice with a button to the release page. (Only its decisions are unit-tested; see [What the tests cover](#what-the-tests-cover).)
+##### AppImage
+
+The file is downloaded in the background (a differential download when the feed supports ranges) and swapped in when the app quits, so the next launch is the new build, with no prompt.
+
+Before downloading, the app checks that the AppImage's folder is writable and has room for another copy (and checks the room again before staging). If not, nothing is downloaded and the user is told once.
+
+The swap never leaves the user without an AppImage:
+
+1. The download is copied beside the AppImage under a temporary name, checked against the metadata's SHA-512 again, made executable and synced.
+2. Only then is it renamed over the AppImage (atomic, same folder).
+
+Nothing is unlinked first and the new AppImage is never run. On any failure the temporary file is removed and the old AppImage is untouched (the download is kept, and the next check tries again). The reason is recorded in `config.json` (`updateNotices.swapFailed`), and the next launch says so once in a notice that names the folder and the reason, without blocking anything.
+
+The file keeps its name (it has no version in it), so `~/.local/bin/opendoc` keeps working; if a build ever renames it, the shim is pointed at the new path.
+##### deb, rpm, pacman
+
+The file is downloaded in the background and "Restart to Update" is offered (a dialog, and a menu item that stays until used). It runs one asynchronous `pkexec` call, so the window never freezes behind the password prompt.
+
+**The signature file.** Once electron-updater has downloaded and checked the package, the app fetches `<the package's own address>.sig` under the same rules as the package (https only, a loopback feed only in a test build, the guarded redirects). It checks that the file is 64 bytes and stores it beside the download as `<package>.ed25519.sig` (not `<package>.sig`, which `pacman -U` would take for a PGP signature if the file is installed by hand).
+
+If the signature cannot be had then, "Restart to Update" tries once more. If it still cannot, nothing is installed, `pkexec` is never started and the app says "This update has no signature, so it was not installed. Download it from the release page and install it by hand."
+
+**The install call.** The call copies the file and its signature to a root-owned folder and then:
+
+1. checks the file's SHA-512 again as root (the checksum comes from the metadata the app already verified);
+2. checks the signature against the release public key with `openssl pkeyutl -verify -pubin -inkey release-key.pem -rawin`;
+3. runs `dpkg -i` (and `apt-get install -f -y` to settle dependencies), the `zypper`, `dnf`, `yum` or `rpm` equivalent, or `pacman -U --noconfirm`.
+
+Exit codes of the helper:
+
+| Exit | Meaning | Result |
+|---|---|---|
+| 70 | The SHA-512 check failed | Nothing is installed. |
+| 71 | The signature does not verify, or the key file is missing | Nothing is installed. |
+| 72 | There is no `openssl` | Nothing is installed. |
+| 126 or 127 | The password prompt was cancelled | The app says "Update cancelled" and keeps the download. |
+
+A failure shows the command to run by hand, except when the signature was missing or did not verify: that file is not one to install by hand.
+
+**The helper.** The deb, rpm and Arch packages (which depend on `openssl`) install three things:
+
+- a root-owned helper, `/opt/opendoc-desktop/resources/updater/install-update`;
+- the release public key beside it (`release-key.pem`, read by the helper from its own folder);
+- a polkit action, `/usr/share/polkit-1/actions/io.github.ryanyahya.opendocdesktop.install-update.policy`.
+
+`pkexec` runs the helper through that action, and the password prompt reads "Authentication is required to install an OpenDoc Desktop update." Both files are removed with the package. The AUR package has neither (its updater is off, so it never asks).
+
+An install without the helper (a build older than the helper) still shows the long command in the prompt, which then holds the release public key text as well. The app reads the key from its own resources and the script writes it to its root-owned temporary folder itself; no value from the feed or the cache reaches the key.
+
+**Cleanup.** After a successful install the downloaded installer and its `update-info.json` are deleted from the updater's `pending/` folder (so a root-installed package does not sit in your cache), and the next check that finds nothing newer clears it too. The AppImage and macOS updates use the same cleanup at that next check, which removes what their swap left in `pending/` (the AppImage's `update-info.json`, the macOS zip). A download that still waits to be installed is never cleared. The app then restarts itself.
+##### macOS
+
+The app unpacks the downloaded zip with `ditto`, checks its signature and bundle identifier, and replaces the bundle in place through a small helper.
+
+- The helper waits for the app to quit, for at most 60 seconds. Then it gives up without swapping, and logs that to a file the next launch copies into the updater's log. The next check offers the update again.
+- It puts the old bundle back if the swap fails.
+- The new bundle is the one in the zip with the running app's bundle identifier, whatever its file name, and its version and build must be the ones the release announced.
+
+It does this only when the app is not running translocated and its folder is writable; otherwise the user gets a notice with a button to the release page. (Only its decisions are unit-tested; see [What the tests cover](#what-the-tests-cover).)
 
 Every download is checked against the SHA-512 in the update metadata before it is used. A file that does not match is deleted and refused. The SHA-512 proves the file is the one the metadata names; it does not prove who published it. For deb, rpm and pacman the release signature does (above): the package tools themselves still run with their own signature checks off (`dpkg` has none, and the rpm tools get `--nogpgcheck` or `--allow-unsigned-rpm`), because the packages carry no signature those tools know, and the helper has already verified the release key's signature on the exact copy it installs. The AppImage and macOS updates rest on the SHA-512, TLS and whoever controls the feed (they install without administrator rights).
 
@@ -416,7 +549,18 @@ Not covered by the tests (they need a person on a real display): native Wayland 
 
 The agent command has its own spec, `command.spec.mjs`, run against a linux-unpacked layout (this worktree's Electron renamed `opendoc-desktop`, the test runtime in `resources/runtime`, the launchers in `resources/cli`). Point `OPENDOC_SHELL_TEST_UNPACKED` at a real `linux-unpacked` folder to test a real build instead (it is copied, never changed). Every command test uses a scratch `HOME`, and a tripwire `node`, `npm` and `npx` first on the PATH proves that no system Node is used.
 
-The AI apps screen has `unit/ai-apps.test.mjs` (the module's options, the rows and badges, Connect, Disconnect, Forget, blocked, failed and absent apps, the refresh at launch and the first-run flag, all with fake `claude`, `codex` and `agy` commands in a scratch home), `unit/integrations-targets.test.mjs` (the list that runs no vendor command and reads the login shell once, which Claude Code folders are found, connecting in a second folder, records from before folders were targets, ids a page may not invent, the refresh with two folders) and `ai-apps.spec.mjs` (the screen in the app: first run, Skip, the menu item, the list showing while a fake vendor command is slow, Claude Code with two folders, Try it, the Other app page, Connect and Disconnect, a blocked result). Every one of those runs keeps the module away from the real home, config folders and login shell (`support/integrations.mjs`); the tests' own `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are scratch folders too. Opening a pack has `unit/pack-import.test.mjs` (arguments, the 64 MiB limit, the queue, and every refusal of Show in folder) and `pack-import.spec.mjs` (a launch argument, a second launch, `open-file`, the File menu, a pack that waits for a workspace, Show in folder).
+The AI apps screen has three test files:
+
+- `unit/ai-apps.test.mjs` (the module's options, the rows and badges, Connect, Disconnect, Forget, blocked, failed and absent apps, the refresh at launch and the first-run flag, all with fake `claude`, `codex` and `agy` commands in a scratch home);
+- `unit/integrations-targets.test.mjs` (the list that runs no vendor command and reads the login shell once, which Claude Code folders are found, connecting in a second folder, records from before folders were targets, ids a page may not invent, the refresh with two folders);
+- `ai-apps.spec.mjs` (the screen in the app: first run, Skip, the menu item, the list showing while a fake vendor command is slow, Claude Code with two folders, Try it, the Other app page, Connect and Disconnect, a blocked result).
+
+Every one of those runs keeps the module away from the real home, config folders and login shell (`support/integrations.mjs`); the tests' own `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are scratch folders too.
+
+Opening a pack has two test files:
+
+- `unit/pack-import.test.mjs` (arguments, the 64 MiB limit, the queue, and every refusal of Show in folder);
+- `pack-import.spec.mjs` (a launch argument, a second launch, `open-file`, the File menu, a pack that waits for a workspace, Show in folder).
 
 The updater has its own unit tests and Electron specs, a local feed server and a hand-run AppImage update (build 1 to build 2); [Testing updates](#testing-updates) says how to run them. They use loopback feeds only, never GitHub. The macOS swap is covered only by tests of its decisions, because it needs a Mac.
 
@@ -428,7 +572,20 @@ The updater has its own unit tests and Electron specs, a local feed server and a
 
 #### Requests
 
-`protocol.handle('app')` (one handler per session) serves `app://shell/` itself and forwards `app://opendoc/` to the transport. A request goes to the host as a message (method, path and query, headers with `host: opendoc`); an upload follows as body pieces, an abort as an abort message. The host builds Node's request and response objects (`src/host/service-host.mjs`), calls `service.handle(req, res)` and sends back the status line and headers, then the body in pieces; both directions are flow-controlled by credit: the host writes at most 4 MiB of a response that the page has not taken (the response is a `ReadableStream` whose `pull` sends a `credit` message back, so a slow or stopped reader holds the host to one window of an endless answer), and the main process sends at most 4 MiB of an upload that the service has not read (the host sends `body-credit` as the service reads). When a response ends, is cancelled or fails, the upload loop is cancelled and the host told to abort. What Electron 45 does and does not tell the handler (measured, `integration.spec.mjs` and the unit tests): a page that cancels a download makes it cancel the response stream (so the host is told to abort, though Chromium has by then pulled up to about 8 MB ahead of a slow page, which is why a fast host may have sent a whole 12 MB file before a kill lands); a page that aborts a `fetch` does not set `request.signal` (the listener is kept for other Electron versions), and Electron has already handed over the whole upload body, so the service finishes a request it received in full, as a web server would. Requests made by dedicated and shared workers do not reach the `webRequest` hook at all (the protocol handler sees them, with no origin), so the caller guard cannot police them; what keeps a worker of another origin out is that no page of another origin can start one (the shell's pages have `worker-src 'none'`, and every other page is the workspace itself). Full requests, `Range` headers (a 206 and its `Content-Range` are carried through as the service sent them; today the service ignores `Range` and pdf.js loads PDFs whole), uploads of up to the service's 100 MB cap, and downloads all use this path. Everything the host sends is checked before it is used: a status outside 200 to 599, a header name or value that is not valid, too many or too large headers, an oversize chunk, or a message of the wrong shape answers 502 (the request fails, the host keeps serving). A host that dies fails every request waiting for it (503) and later ones too, until the supervisor has started a new one.
+`protocol.handle('app')` (one handler per session) serves `app://shell/` itself and forwards `app://opendoc/` to the transport. Full requests, `Range` headers (a 206 and its `Content-Range` are carried through as the service sent them; today the service ignores `Range` and pdf.js loads PDFs whole), uploads of up to the service's 100 MB cap, and downloads all use this path.
+
+A request goes to the host as a message (method, path and query, headers with `host: opendoc`); an upload follows as body pieces, an abort as an abort message. The host builds Node's request and response objects (`src/host/service-host.mjs`), calls `service.handle(req, res)` and sends back the status line and headers, then the body in pieces.
+
+Both directions are flow-controlled by credit. The host writes at most 4 MiB of a response that the page has not taken (the response is a `ReadableStream` whose `pull` sends a `credit` message back, so a slow or stopped reader holds the host to one window of an endless answer). The main process sends at most 4 MiB of an upload that the service has not read (the host sends `body-credit` as the service reads). When a response ends, is cancelled or fails, the upload loop is cancelled and the host told to abort.
+
+What Electron 45 does and does not tell the handler (measured, `integration.spec.mjs` and the unit tests):
+
+- A page that cancels a download makes it cancel the response stream (so the host is told to abort, though Chromium has by then pulled up to about 8 MB ahead of a slow page, which is why a fast host may have sent a whole 12 MB file before a kill lands).
+- A page that aborts a `fetch` does not set `request.signal` (the listener is kept for other Electron versions), and Electron has already handed over the whole upload body, so the service finishes a request it received in full, as a web server would.
+
+Requests made by dedicated and shared workers do not reach the `webRequest` hook at all (the protocol handler sees them, with no origin), so the caller guard cannot police them; what keeps a worker of another origin out is that no page of another origin can start one (the shell's pages have `worker-src 'none'`, and every other page is the workspace itself).
+
+Everything the host sends is checked before it is used: a status outside 200 to 599, a header name or value that is not valid, too many or too large headers, an oversize chunk, or a message of the wrong shape answers 502 (the request fails, the host keeps serving). A host that dies fails every request waiting for it (503) and later ones too, until the supervisor has started a new one.
 
 #### Bridge
 
@@ -443,7 +600,15 @@ The subscriptions return a function that stops listening. `src/app/main.tsx` use
 
 #### Never left behind
 
-Three guards, because a host can die of the app's death in three different states. (1) `watchdog.mjs` is loaded first (`--import data:...`, from text, so nothing is read from `app.asar`), before tsx and the service: if the channel is already closed it ends at once, and when the channel closes it kills the host's process group. (2) The same file starts a worker thread that polls the parent id every 300 ms and kills the group when it changes, which works while the host's main thread is stuck in a synchronous loop (where 'disconnect' never runs). (3) The main process starts a small shell sentinel (`/bin/sh`, in its own session; the script is `sentinelScript` in `transport.mjs`, written for every POSIX shell in the one form they all accept, `kill -0 "-$2"` and `kill -KILL "-$2"`: dash, the `/bin/sh` of Debian and Ubuntu, rejects `kill -0 -- -PID` and `kill -s 0 -PID`, and busybox sh rejects any `--`; `unit/sentinel.test.mjs` runs the script under each shell the machine has, which in CI includes dash and busybox on Ubuntu) that checks every second that the app and the host's group are still there and kills the group when the app is gone first; it covers a host that is stopped (SIGSTOP), runs nothing, and the render workers it started, and it exits as soon as the group is gone. The group is signalled only from the sentinel's check and once, from the host's exit event, never later: a group number cannot be given to anything else while any of its members lives. A start in progress is cancelled by an abort signal (the app is quitting, or the supervisor was stopped), which kills the host. Windows has no process groups: the channel and the parent id check remain.
+Three guards, because a host can die of the app's death in three different states.
+
+1. **The watchdog.** `watchdog.mjs` is loaded first (`--import data:...`, from text, so nothing is read from `app.asar`), before tsx and the service. If the channel is already closed it ends at once, and when the channel closes it kills the host's process group.
+2. **The parent check.** The same file starts a worker thread that polls the parent id every 300 ms and kills the group when it changes. This works while the host's main thread is stuck in a synchronous loop (where 'disconnect' never runs).
+3. **The sentinel.** The main process starts a small shell sentinel (`/bin/sh`, in its own session). It checks every second that the app and the host's group are still there, and kills the group when the app is gone first. It covers a host that is stopped (SIGSTOP), runs nothing, and the render workers it started, and it exits as soon as the group is gone.
+
+The sentinel's script is `sentinelScript` in `transport.mjs`, written for every POSIX shell in the one form they all accept, `kill -0 "-$2"` and `kill -KILL "-$2"`. dash, the `/bin/sh` of Debian and Ubuntu, rejects `kill -0 -- -PID` and `kill -s 0 -PID`, and busybox sh rejects any `--`. `unit/sentinel.test.mjs` runs the script under each shell the machine has, which in CI includes dash and busybox on Ubuntu.
+
+The group is signalled only from the sentinel's check and once, from the host's exit event, never later: a group number cannot be given to anything else while any of its members lives. A start in progress is cancelled by an abort signal (the app is quitting, or the supervisor was stopped), which kills the host. Windows has no process groups: the channel and the parent id check remain.
 
 #### Supervision
 

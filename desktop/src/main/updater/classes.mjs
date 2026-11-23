@@ -150,13 +150,16 @@ export function createUpdaterClass(type, { getBuild, getFeedBase = () => null, i
         return result;
       }
 
-      /** Where the signature of the downloaded file is stored. */
+      /**
+       * Where the signature of the downloaded file is stored: <file>.ed25519.sig, not <file>.sig. pacman -U reads a <file>.sig beside a
+       * package as its PGP signature and refuses the package as corrupted, which would break the command shown to install it by hand.
+       */
       get signatureFile() {
         const file = this.downloadedUpdateHelper?.file;
-        return file ? `${file}.sig` : null;
+        return file ? `${file}.ed25519.sig` : null;
       }
 
-      /** Download <package address>.sig next to the downloaded file. Throws with a plain message when it cannot be had. */
+      /** Download <package address>.sig and store it as signatureFile. Throws with a plain message when it cannot be had. */
       async fetchSignature() {
         const target = this.signatureFile;
         const url = this.signatureSource ? signatureUrl(this.signatureSource.packageAddress) : null;

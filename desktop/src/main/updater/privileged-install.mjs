@@ -99,7 +99,7 @@ export async function readReleaseKey({ resourcesPath = process.resourcesPath, re
  * The arguments for pkexec. --disable-internal-agent: without a graphical agent pkexec fails instead of asking in a terminal.
  * With `helper` (the installed helper's path) pkexec runs that file, which reads the public key from its own folder; without, it
  * runs the script through /bin/sh -c, and `publicKey` (the key text, see readReleaseKey) goes into that script.
- * `signature` is the downloaded <file>.sig.
+ * `signature` is the downloaded signature file (the app stores the release's <file>.sig as <file>.ed25519.sig).
  */
 export function pkexecArguments({ type, file, sha512, signature, helper = null, publicKey }) {
   const hex = sha512Hex(sha512);

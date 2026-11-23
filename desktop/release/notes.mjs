@@ -41,7 +41,7 @@ export function installNotes({ version, build, repository = '', commit = '' }) {
     `- **Ubuntu 24.04:** prefer the deb. It installs an AppArmor profile, so the app runs in Chromium's sandbox; the AppImage starts without that sandbox there.`,
     `- **deb:** \`sudo apt install ./opendoc-desktop_${version}-${build}_amd64.deb\``,
     `- **rpm:** \`sudo dnf install --nogpgcheck ./opendoc-desktop-${version}-${build}.x86_64.rpm\` (openSUSE: \`sudo zypper install --allow-unsigned-rpm ...\`). The flag is needed because the rpm has no signature your package manager knows; the release signature below is a separate file.`,
-    `- **Arch:** \`sudo pacman -U ./opendoc-desktop-${version}-${build}-x64.pacman\`.`,
+    `- **Arch:** \`sudo pacman -U ./opendoc-desktop-${version}-${build}-x64.pacman\`. Keep its \`.sig\` in another folder: pacman reads a \`.sig\` beside the package as a PGP signature and refuses the package.`,
     '- **macOS:** open the `.dmg` and drag opendoc-desktop to Applications; don\'t run it from the disk image or from Downloads. The app is not notarized, so macOS blocks the first launch: open it once, then in System Settings > Privacy & Security click **Open Anyway** next to "opendoc-desktop was blocked" (on macOS 14 and earlier: Control-click the app, then **Open**). Or run `xattr -dr com.apple.quarantine /Applications/opendoc-desktop.app` once.',
     '',
     'The deb, rpm and pacman installs put the app in `/opt/opendoc-desktop/`, add the "OpenDoc Desktop" menu entry and the `opendoc` command. On macOS, choose **Install Command-Line Tool...** in the app menu for the `opendoc` command.',

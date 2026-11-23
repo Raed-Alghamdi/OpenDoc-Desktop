@@ -10,8 +10,6 @@ Status: the shell runs OpenDoc's service (`createOpenDocService`) in a child pro
 
 Releases are on the repository's releases page, `https://github.com/Raed-Alghamdi/OpenDoc-Desktop/releases`. A release is named `desktop-v<version>-<build>` (for example `desktop-v0.6.1-2`). The version is OpenDoc's own. The build number is raised when the app is rebuilt without a new OpenDoc version.
 
-> Until the first release is published there is nothing to download. Build the installers yourself with [`desktop/README.md`](../desktop/README.md).
-
 | System | File to download |
 |---|---|
 | Linux, any distribution (x86_64) | `opendoc-desktop-x86_64.AppImage` |

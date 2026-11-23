@@ -150,13 +150,13 @@ Every installer in a release carries a detached signature, `<file>.sig`: the raw
 
 ## Release automation (one-time setup)
 
-`.github/workflows/upstream-watch.yml` watches OpenDoc upstream and prepares each new app build; `aur-bump.yml` keeps the AUR package in step. Both stay inert until switched on, and publish nothing on their own unless the repository variable `DESKTOP_AUTO_PUBLISH` is `true`. Even then a release publishes itself only when all of these hold: it is an upstream patch release, the merge was clean, every check is green, and an earlier release of the same x.y line has already gone out by hand. Everything else (a new minor version, a rebuild, a conflict resolved by hand, a red check) waits as a draft release, with an issue in this repository that mentions the owner. Tags are `desktop-v<version>-<build>`; the build number counts up per version.
+`.github/workflows/upstream-watch.yml` watches OpenDoc upstream once a day (and whenever it is run by hand) and prepares each new app build; `aur-bump.yml` keeps the AUR package in step when a release is published. Neither publishes anything on its own unless the repository variable `DESKTOP_AUTO_PUBLISH` is `true`. Even then a release publishes itself only when all of these hold: it is an upstream patch release, the merge was clean, every check is green, and an earlier release of the same x.y line has already gone out by hand. Everything else (a new minor version, a rebuild, a conflict resolved by hand, a red check) waits as a draft release, with an issue in this repository that mentions the owner. Tags are `desktop-v<version>-<build>`; the build number counts up per version.
 
 `aur-bump.yml` makes the new `PKGBUILD` and `.SRCINFO` from a published release's pacman file and uploads them as an artifact. It pushes them to the AUR only when the secret `AUR_SSH_KEY`, the variable `AUR_HOST_KEY_SHA256` (the AUR host key's fingerprint) and the variable `AUR_PUSH` set to `true` all exist; none does until the first AUR publication is approved.
 
 Two things the fork's owner has to do, because GitHub does not do them:
 
-1. The daily schedule is committed commented out (it stays off until the first release has gone out by hand). To switch it on, un-comment the `schedule:` block in `upstream-watch.yml`, push it to `roadmap`, and run `gh workflow enable upstream-watch.yml --repo <owner>/OpenDoc-Desktop` once: a fork's scheduled workflows start disabled.
+1. A fork's scheduled workflows start disabled, so the daily schedule (the `schedule:` block in `upstream-watch.yml`) needs `gh workflow enable upstream-watch.yml --repo <owner>/OpenDoc-Desktop` once.
 2. GitHub switches a scheduled workflow off after 60 days without repository activity, so make sure something is committed at least every 60 days, or re-enable it with the same command.
 
 `roadmap` is the repository's default branch, which is where GitHub runs schedules from, so the workflow file must be on it. The schedule uses an odd minute because the top of the hour is busy and runs get dropped. A run that stops (a conflict, or a red check) also fails, so GitHub's failure mail reaches the owner.

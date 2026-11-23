@@ -1,7 +1,7 @@
 name: Upstream watch
 
-# Watches OpenDoc upstream and turns a new release into a new app build. Run it by hand (workflow_dispatch);
-# the daily schedule is committed commented out and stays off until the first release has gone out by hand.
+# Watches OpenDoc upstream and turns a new release into a new app build. It runs once a day (schedule) and by hand
+# (workflow_dispatch).
 #
 # What a run does, in order (the decisions are in desktop/release/*.mjs, with tests in desktop/tests/packaging/):
 #   prepare  fetches upstream's main and mirrors it to the `main` branch (a plain copy, never forced). When upstream's version differs,
@@ -45,12 +45,12 @@ on:
         description: Rehearsal only. Pretend an earlier release of this x.y line has gone out (a real one has to have)
         type: boolean
         default: false
-  # The daily check stays off until the first release has gone out by hand. To switch it on: remove the two leading "# " below, push to
-  # roadmap, then run `gh workflow enable upstream-watch.yml --repo <owner>/OpenDoc-Desktop` once (a fork's scheduled workflows start
-  # disabled). GitHub also pauses a schedule after 60 days without repository activity: re-enable it the same way. The odd minute
-  # is on purpose (the hour's start is busy and runs get dropped). Notifications go to whoever last changed the cron line.
-  # schedule:
-  #   - cron: '17 3 * * *'
+  # The daily check. GitHub runs schedules only from the default branch (roadmap), and a fork's scheduled workflows start disabled:
+  # run `gh workflow enable upstream-watch.yml --repo <owner>/OpenDoc-Desktop` once. GitHub also pauses a schedule after 60 days without
+  # repository activity: re-enable it the same way. The odd minute is on purpose (the hour's start is busy and runs get dropped).
+  # Notifications go to whoever last changed the cron line.
+  schedule:
+    - cron: '17 3 * * *'
 
 permissions:
   contents: read

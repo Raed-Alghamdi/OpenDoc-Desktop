@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { environment } from './identity.mjs';
 
-/** The field a test build has in the app's package.json (packaged into the app's archive; see docs/DESKTOP.md, "Test builds"). */
+/** The field a test build has in the app's package.json (packaged into the app's archive; see desktop/README.md, "Test builds"). */
 export const testBuildField = 'opendocTestBuild';
 
 /** Every environment variable that changes which code, which feed or which folders a run uses. */

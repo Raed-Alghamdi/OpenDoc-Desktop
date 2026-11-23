@@ -1,4 +1,4 @@
-// The invariant behind "file windows share the workspace session" (docs/DESKTOP.md): the service never serves
+// The invariant behind "file windows share the workspace session" (desktop/README.md, "Hardening"): the service never serves
 // user-supplied bytes inline as HTML, script or SVG. An .html, a .js and an .svg (with a script in it) are added through
 // the normal routes (logo and font uploads, a media import) or placed in a document's media folder the way a user
 // would, then fetched back through app://opendoc. Whatever the service accepted must come back as an attachment or as

@@ -271,38 +271,166 @@ A copy of the workspace on plain npm OpenDoc 0.6.1 keeps working beside the app 
 
 ## The `opendoc` command
 
-Agents run `opendoc`, not `npx opendoc`, so the app puts a command on the user's machine. Each one runs the CLI inside the app's runtime with the app's own executable as Node (`ELECTRON_RUN_AS_NODE=1`), so no system Node or npm is needed, and it works with the app open or closed.
+Agents run `opendoc`, not `npx opendoc`, so the app puts a command on your machine. Each one runs the CLI inside the app's runtime with the app's own executable as Node (`ELECTRON_RUN_AS_NODE=1`), so no system Node or npm is needed, and it works with the app open or closed.
 
-- **Linux packages (deb, rpm, pacman):** `resources/cli/opendoc` is installed as `/usr/bin/opendoc`. It finds the app in `$OPENDOC_DESKTOP_HOME` (tests), beside itself (`resources/cli/../..`, which also covers a symlink to it), or in `/opt/opendoc-desktop`, and replaces itself with the CLI (`exec`), so arguments, standard input, signals and exit codes pass through.
-- **AppImage:** an AppImage's files exist only while it runs, so the app writes `~/.local/bin/opendoc` at every launch from `resources/cli/opendoc-appimage.sh`, with the AppImage's path filled in (`cli-shim.mjs`, `command-line-tool.mjs`). The file is written atomically (a temp file in the same folder, then a rename), only if it is absent or already ours (the words "opendoc-desktop agent command" mark it); a command that is not ours is never replaced, and the user is told once. Each call mounts the AppImage with its own `--appimage-mount` under `setpriv --pdeathsig TERM` (running `AppRun` fails on Ubuntu 24.04), makes the runtime copy under `~/.local/share/opendoc-desktop/runtime/<version>-<build>/` when it is missing or from another build, and runs the CLI; a moved or deleted AppImage gets a message saying to open the app once. The app checks that `~/.local/bin` is on the PATH the app has, a login shell has or an interactive shell has, and tells the user once, with the line to add, when it is on none of them.
-- **macOS:** the app menu offers "Install Command-Line Tool". It writes a small launcher into `/usr/local/bin` when that is writable without administrator rights, otherwise `~/.local/bin`, refuses to replace an `opendoc` that is not ours, refuses when the app runs translocated, and explains a PATH problem in the same dialog. At launch an installed command is pointed at the app's current place.
-- Neither the app nor the launchers use flags that start with `--appimage-` (the AppImage runtime reserves them).
-- **Check it.** `opendoc --version` prints the version and `opendoc --help` lists the commands. `opendoc --workspace <folder> status --json` says whether a workspace is in use: `{"running":false,"mode":null}` when nothing has it open, and `"mode":"desktop"` while the app does. If `which -a opendoc` lists another `opendoc` first (one from `npm install -g`, for example), that one runs instead. A package's `/usr/bin/opendoc` goes with the package; the file an AppImage or a Mac wrote stays until you delete it (see [Uninstall](#uninstall)). If `/opt/opendoc-desktop` is gone, the package's command exits with 127 and says to reinstall the package.
+| Install | The command | Where it comes from |
+|---|---|---|
+| deb, rpm, pacman | `/usr/bin/opendoc` | The package installs it. |
+| AppImage | `~/.local/bin/opendoc` | The app writes it at every launch. |
+| macOS | `/usr/local/bin/opendoc` or `~/.local/bin/opendoc` | **Install Command-Line Tool...** in the app menu writes it. |
+
+### Linux packages (deb, rpm, pacman)
+
+`resources/cli/opendoc` is installed as `/usr/bin/opendoc`. It finds the app in `$OPENDOC_DESKTOP_HOME` (tests), beside itself (`resources/cli/../..`, which also covers a symlink to it), or in `/opt/opendoc-desktop`. Then it replaces itself with the CLI (`exec`), so arguments, standard input, signals and exit codes pass through.
+
+### AppImage
+
+An AppImage's files exist only while it runs, so the app writes `~/.local/bin/opendoc` at every launch from `resources/cli/opendoc-appimage.sh`, with the AppImage's path filled in. The file is written atomically (a temp file in the same folder, then a rename), only if it is absent or already ours (the words "opendoc-desktop agent command" mark it). A command that is not ours is never replaced, and the user is told once.
+
+Each call of the command:
+
+1. mounts the AppImage with its own `--appimage-mount` under `setpriv --pdeathsig TERM` (running `AppRun` fails on Ubuntu 24.04);
+2. makes the runtime copy under `~/.local/share/opendoc-desktop/runtime/<version>-<build>/` when it is missing or from another build;
+3. runs the CLI.
+
+A moved or deleted AppImage gets a message saying to open the app once.
+
+The app checks that `~/.local/bin` is on the PATH the app has, a login shell has or an interactive shell has. When it is on none of them, the app tells the user once, with the line to add.
+
+### macOS
+
+The app menu offers "Install Command-Line Tool". It writes a small launcher into `/usr/local/bin` when that is writable without administrator rights, otherwise `~/.local/bin`.
+
+It refuses to replace an `opendoc` that is not ours, refuses when the app runs translocated, and explains a PATH problem in the same dialog. At launch an installed command is pointed at the app's current place.
+
+### Check it
+
+1. `opendoc --version` prints the version and `opendoc --help` lists the commands.
+2. `opendoc --workspace <folder> status --json` says whether a workspace is in use. It prints `{"running":false,"mode":null}` when nothing has it open, and `"mode":"desktop"` while the app does.
+
+If it does not behave as you expect:
+
+- If `which -a opendoc` lists another `opendoc` first (one from `npm install -g`, for example), that one runs instead.
+- A package's `/usr/bin/opendoc` goes with the package. The file an AppImage or a Mac wrote stays until you delete it (see [Uninstall](#uninstall)).
+- If `/opt/opendoc-desktop` is gone, the package's command exits with 127 and says to reinstall the package.
 
 ## AI apps
 
-Coding agents (Claude Code, Codex and others) drive OpenDoc through the `opendoc` command. To let an agent find your workspace from any folder, each app gets one small "router skill": it reads `defaultWorkspace` from the app's `config.json` (`${XDG_CONFIG_HOME:-$HOME/.config}/opendoc-desktop/config.json` on Linux, `~/Library/Application Support/opendoc-desktop/config.json` on macOS), asks you when there is none, then runs `opendoc --workspace <that folder>` and follows that workspace's own `AGENTS.md` and skills. It copies nothing from the workspace. The files are in [`desktop/integrations/`](../desktop/integrations/README.md): a Claude Code plugin and a Codex plugin (marketplace `opendoc`, plugin `opendoc`), and a plain copy of the skill for apps without plugins.
+Coding agents (Claude Code, Codex and others) drive OpenDoc through the `opendoc` command. To let an agent find your workspace from any folder, each app gets one small "router skill". It does this, in order:
 
-**The easy way: the "Connect your AI apps" screen.** It looks for the apps on your computer, installs OpenDoc's files into the ones you choose, and shows exactly what it did.
+1. It reads `defaultWorkspace` from the app's `config.json`: `${XDG_CONFIG_HOME:-$HOME/.config}/opendoc-desktop/config.json` on Linux, `~/Library/Application Support/opendoc-desktop/config.json` on macOS.
+2. It asks you when there is none.
+3. It runs `opendoc --workspace <that folder>`.
+4. It follows that workspace's own `AGENTS.md` and skills.
 
-- **When it appears.** Once, after the first workspace opens (the app records that it has been shown as `aiAppsOffered` in `config.json`, whatever you chose, so closing it or pressing **Skip** counts too), and at any time from **Connect AI Apps…**: in the app menu on macOS, in the Help menu elsewhere.
-- **What it shows.** A list that opens at once, because nothing on it runs an app's own commands: one row each for Claude Code, Codex, Antigravity, Cursor and Copilot CLI, then "Other app". A row says whether the app is installed, and, from this app's own record, whether OpenDoc is connected in it ("Connected", or for Claude Code "Connected in 1 of 2 folders"), "Needs attention" (a connect that did not finish, or an app that is gone) and "Update available". The app is looked up on your search path and never run to find out. The list reads your login shell once and reuses what it learned for a minute; **Check again** reads it afresh.
-- **An app's page.** Each row opens a page for that app (a **Back** button returns to the list). It says where the app is installed (and with what, for example mise); an app that is not installed says where to get it and offers **Check again**. The read-only check "is OpenDoc connected?" runs here, for this app only, under a "Checking..." line while the page stays usable, and again for this app only after each Connect, Disconnect, Update or Forget. Folders you can connect have a tick box, and nothing is ticked at the start (an app with one folder has it ticked, since you came here to connect it). Nothing is changed until you press **Connect**, and every result is shown. After a connect, a **Try it** box offers a prompt to paste (with a Copy button): start a new session of that app in any folder and paste it.
-- **Other app.** For an agent the screen does not know, this page shows the folder of the plain skill the app ships (`desktop/integrations/skills/opendoc` in a checkout, `<resources>/integrations/skills/opendoc` in an installed app) and the `opendoc` command, if it is on your search path, each with a Copy button. Point your agent at that skill, or copy the folder to where it reads skills; the agent must be able to run `opendoc`. Chat apps that cannot run programs on your computer, such as ChatGPT or the chat in the Claude app, cannot use OpenDoc.
-- **What Connect does** for each ticked app, through the app's own commands:
-  - Claude Code and Codex: registers a marketplace called `opendoc` from a copy of the files kept in the app's data folder, and installs the plugin `opendoc@opendoc`.
-  - Antigravity: `agy plugin install` of the same plugin.
-  - Cursor and Copilot CLI: copies the one skill file into the one folder each reads. It never runs either program.
-  - It then asks the app whether OpenDoc is really there, and undoes everything it added if not.
-- **The result.** Each app gets a line: connected, blocked, or did not work. For a result that is not connected, the screen shows the app's own words from the step that failed (an organisation's policy can block plugins; the message is the vendor's, unchanged). Under **Details** it lists every step with the exact command that ran and its output.
-- **Disconnect** is the undo, in the row of each connected app. It uses the same commands and the record of what was added, and it leaves alone anything it did not add: a file you changed is kept and reported, and an OpenDoc that was already installed some other way is shown as "Already set up elsewhere" and never touched. **Forget** appears for an app that has been uninstalled since: it drops the app's record without running anything. A connect that was cut short shows as "Needs attention", and Disconnect cleans it up.
-- **Which settings folder.** Codex may keep its settings somewhere other than the default (`CODEX_HOME`): the app asks your login shell first, then uses its own environment, then the default folder, and uses the same folder when it disconnects. Claude Code can be connected in more than one folder, each with its own record, Connect and Disconnect: `~/.claude` (the one the `claude` command in a terminal uses, unless `CLAUDE_CONFIG_DIR` is set), every `~/.claude-<name>` folder that holds Claude Code settings (a `settings.json`, `projects`, `plugins`, `.credentials.json`, `CLAUDE.md` or similar; an empty folder or a plain file is not one; the Claude desktop app keeps a profile in a folder like this), and the folder `CLAUDE_CONFIG_DIR` names when it is none of those. The commands for a folder run with `CLAUDE_CONFIG_DIR` set to it (and without it for `~/.claude`). A record made before this existed still works as the `~/.claude` one. The page sends the app an id for a folder, never a path, and the app accepts only the folders it found or has a record of.
-- **What the app keeps.** `integrations.json` and the folder `integrations/` in the app's data folder (`~/.local/share/opendoc-desktop` on Linux, `~/Library/Application Support/opendoc-desktop` on macOS). They go away with the last Disconnect.
-- **Staying current.** At launch the app checks whether its own integration files changed (an app update brings new ones) and brings what is connected up to date. Claude Code reads the files in place, in every folder it is connected in, so only the records move on; Codex and Antigravity are installed again; Cursor and Copilot CLI get the file again. It says nothing when it works or when nothing is connected. If it fails for an app that is still connected, a message says so and offers the screen; a row that still has older files shows "Update available", and its page has an **Update** button.
+The skill copies nothing from the workspace. The files are in [`desktop/integrations/`](../desktop/integrations/README.md): a Claude Code plugin and a Codex plugin (marketplace `opendoc`, plugin `opendoc`), and a plain copy of the skill for apps without plugins.
 
-**By hand.** The screen runs the commands below, so you can do the same yourself (for a script, or for an app the screen cannot see). Before you start, check that `opendoc --version` works in a terminal (see [The `opendoc` command](#the-opendoc-command)) and that you have opened a workspace in the app once, so there is a default.
+You can connect an app with the screen in the app (the easy way) or with commands (by hand).
 
-**1. Put a stable copy where the apps can keep reading it.** Claude Code reads a plugin from the folder you register, in place, so that folder must not be inside an app bundle or an AppImage mount, which move or vanish. The files come with the app: `/opt/opendoc-desktop/resources/integrations` for the deb, rpm and pacman packages, `/Applications/opendoc-desktop.app/Contents/Resources/integrations` on macOS, and `desktop/integrations/` in a checkout of this repository. (An AppImage keeps them inside its image: use the screen, or a checkout.)
+### The "Connect your AI apps" screen
+
+The screen looks for the apps on your computer, installs OpenDoc's files into the ones you choose, and shows exactly what it did.
+
+#### When it appears
+
+- Once, after the first workspace opens. The app records that it has been shown as `aiAppsOffered` in `config.json`, whatever you chose, so closing it or pressing **Skip** counts too.
+- At any time from **Connect AI Apps…**: in the app menu on macOS, in the Help menu elsewhere.
+
+#### What the list shows
+
+The list opens at once, because nothing on it runs an app's own commands. It has one row each for Claude Code, Codex, Antigravity, Cursor and Copilot CLI, then "Other app".
+
+A row says whether the app is installed. From this app's own record, it also says whether OpenDoc is connected in it:
+
+- "Connected", or for Claude Code "Connected in 1 of 2 folders";
+- "Needs attention": a connect that did not finish, or an app that is gone;
+- "Update available".
+
+The app is looked up on your search path and never run to find out. The list reads your login shell once and reuses what it learned for a minute; **Check again** reads it afresh.
+
+#### An app's page
+
+Each row opens a page for that app. A **Back** button returns to the list.
+
+- It says where the app is installed (and with what, for example mise). An app that is not installed says where to get it and offers **Check again**.
+- The read-only check "is OpenDoc connected?" runs here, for this app only, under a "Checking..." line while the page stays usable. It runs again for this app only after each Connect, Disconnect, Update or Forget.
+- Folders you can connect have a tick box, and nothing is ticked at the start (an app with one folder has it ticked, since you came here to connect it).
+- Nothing is changed until you press **Connect**, and every result is shown.
+- After a connect, a **Try it** box offers a prompt to paste (with a Copy button): start a new session of that app in any folder and paste it.
+
+#### Other app
+
+For an agent the screen does not know, this page shows two things, each with a Copy button:
+
+- the folder of the plain skill the app ships (`desktop/integrations/skills/opendoc` in a checkout, `<resources>/integrations/skills/opendoc` in an installed app);
+- the `opendoc` command, if it is on your search path.
+
+Point your agent at that skill, or copy the folder to where it reads skills; the agent must be able to run `opendoc`. Chat apps that cannot run programs on your computer, such as ChatGPT or the chat in the Claude app, cannot use OpenDoc.
+
+#### What Connect does
+
+For each ticked app, through the app's own commands:
+
+- Claude Code and Codex: registers a marketplace called `opendoc` from a copy of the files kept in the app's data folder, and installs the plugin `opendoc@opendoc`.
+- Antigravity: `agy plugin install` of the same plugin.
+- Cursor and Copilot CLI: copies the one skill file into the one folder each reads. It never runs either program.
+
+It then asks the app whether OpenDoc is really there, and undoes everything it added if not.
+
+#### The result
+
+Each app gets a line: connected, blocked, or did not work. For a result that is not connected, the screen shows the app's own words from the step that failed (an organisation's policy can block plugins; the message is the vendor's, unchanged). Under **Details** it lists every step with the exact command that ran and its output.
+
+#### Disconnect and Forget
+
+**Disconnect** is the undo, in the row of each connected app. It uses the same commands and the record of what was added, and it leaves alone anything it did not add:
+
+- A file you changed is kept and reported.
+- An OpenDoc that was already installed some other way is shown as "Already set up elsewhere" and never touched.
+
+A connect that was cut short shows as "Needs attention", and Disconnect cleans it up.
+
+**Forget** appears for an app that has been uninstalled since. It drops the app's record without running anything.
+
+#### Which settings folder
+
+Codex may keep its settings somewhere other than the default (`CODEX_HOME`). The app asks your login shell first, then uses its own environment, then the default folder, and uses the same folder when it disconnects.
+
+Claude Code can be connected in more than one folder, each with its own record, Connect and Disconnect:
+
+- `~/.claude` (the one the `claude` command in a terminal uses, unless `CLAUDE_CONFIG_DIR` is set);
+- every `~/.claude-<name>` folder that holds Claude Code settings (a `settings.json`, `projects`, `plugins`, `.credentials.json`, `CLAUDE.md` or similar; an empty folder or a plain file is not one; the Claude desktop app keeps a profile in a folder like this);
+- the folder `CLAUDE_CONFIG_DIR` names when it is none of those.
+
+The commands for a folder run with `CLAUDE_CONFIG_DIR` set to it (and without it for `~/.claude`). A record made before this existed still works as the `~/.claude` one. The page sends the app an id for a folder, never a path, and the app accepts only the folders it found or has a record of.
+
+#### What the app keeps
+
+`integrations.json` and the folder `integrations/` in the app's data folder (`~/.local/share/opendoc-desktop` on Linux, `~/Library/Application Support/opendoc-desktop` on macOS). They go away with the last Disconnect.
+
+#### Staying current
+
+At launch the app checks whether its own integration files changed (an app update brings new ones) and brings what is connected up to date:
+
+- Claude Code reads the files in place, in every folder it is connected in, so only the records move on.
+- Codex and Antigravity are installed again.
+- Cursor and Copilot CLI get the file again.
+
+It says nothing when it works or when nothing is connected. If it fails for an app that is still connected, a message says so and offers the screen. A row that still has older files shows "Update available", and its page has an **Update** button.
+
+### By hand
+
+The screen runs the commands below, so you can do the same yourself (for a script, or for an app the screen cannot see). Before you start, check that `opendoc --version` works in a terminal (see [The `opendoc` command](#the-opendoc-command)) and that you have opened a workspace in the app once, so there is a default.
+
+#### Step 1: put a stable copy where the apps can keep reading it
+
+Claude Code reads a plugin from the folder you register, in place, so that folder must not be inside an app bundle or an AppImage mount, which move or vanish. The files come with the app:
+
+- `/opt/opendoc-desktop/resources/integrations` for the deb, rpm and pacman packages;
+- `/Applications/opendoc-desktop.app/Contents/Resources/integrations` on macOS;
+- `desktop/integrations/` in a checkout of this repository.
+
+An AppImage keeps them inside its image: use the screen, or a checkout.
 
 ```sh
 mkdir -p ~/.local/share/opendoc-desktop/integrations
@@ -311,7 +439,9 @@ cp -r /opt/opendoc-desktop/resources/integrations/. ~/.local/share/opendoc-deskt
 
 On macOS the folder is `~/Library/Application Support/opendoc-desktop/integrations` instead. Below, `<copy>` stands for that folder.
 
-**2. Register it in each app you use** (one app, one place; see the table in [`desktop/integrations/README.md`](../desktop/integrations/README.md#one-copy-per-app)). Run these in a shell that has the same `CLAUDE_CONFIG_DIR` or `CODEX_HOME` as the app you use, if you set one:
+#### Step 2: register it in each app you use
+
+One app, one place; see the table in [`desktop/integrations/README.md`](../desktop/integrations/README.md#one-copy-per-app). Run these in a shell that has the same `CLAUDE_CONFIG_DIR` or `CODEX_HOME` as the app you use, if you set one:
 
 ```sh
 # Claude Code
@@ -334,11 +464,27 @@ mkdir -p ~/.copilot/skills/opendoc && cp <copy>/skills/opendoc/SKILL.md ~/.copil
 
 Never copy the skill into `~/.agents/skills`, `~/.claude/skills` or `~/.codex/skills`: several apps read those folders, so an app could load the skill twice.
 
-**3. Check it** (this applies to the screen too). From a folder that is not the workspace, ask the agent: "Make a one-page PDF with OpenDoc: a short memo titled Test." It should read the config, run commands that start with `opendoc` (never `npx`), read the workspace's `AGENTS.md`, and say where the PDF is. If there is no default workspace it should ask you for one and stop.
+#### Step 3: check it
 
-**Refreshing by hand after an app update:** run the `cp` line of step 1 again, then `codex plugin add opendoc@opendoc` and `agy plugin install <copy>/codex/opendoc` again; Claude Code picks the new files up at its next start.
+This applies to the screen too. From a folder that is not the workspace, ask the agent: "Make a one-page PDF with OpenDoc: a short memo titled Test." It should:
 
-**Undo by hand**, for the apps you registered (in this order, the copy last). Connected with the screen, press Disconnect instead:
+- read the config;
+- run commands that start with `opendoc` (never `npx`);
+- read the workspace's `AGENTS.md`;
+- say where the PDF is.
+
+If there is no default workspace it should ask you for one and stop.
+
+#### Refresh by hand after an app update
+
+1. Run the `cp` line of step 1 again.
+2. Run `codex plugin add opendoc@opendoc` and `agy plugin install <copy>/codex/opendoc` again.
+
+Claude Code picks the new files up at its next start.
+
+#### Undo by hand
+
+For the apps you registered, in this order (the copy last). If you connected with the screen, press Disconnect instead.
 
 ```sh
 claude plugin uninstall opendoc@opendoc
@@ -356,16 +502,41 @@ Claude Code's `marketplace remove` also uninstalls its plugins, so the second li
 
 A design pack is a `.opendoc.zip` file with themes and templates that one workspace exports and another imports (see [PACKS.md](PACKS.md)). The app opens one in the **Import** dialog, at the review step: the pack's name, what is in it, and what would change. Nothing is installed until you tick the trust box and press **Install**.
 
-Ways to open a pack in the app:
+### Ways to open a pack
 
-- **Double-click** it in the file manager (Linux; works from the deb, rpm and Arch packages). They register the pack file type with the system, so the file manager offers OpenDoc Desktop; the path reaches the app as a launch argument, or goes to the app that is already running (a second launch hands the file over and exits). The file manager may pass a path or a `file://` address (the `.desktop` file's `Exec` uses `%U`); the app accepts both. The AppImage carries the same `.desktop` entry but cannot install the shared-mime type, so a double-click goes to the archive manager unless a desktop integrator for AppImages registers it, or you add the type yourself: copy `opendoc-desktop.xml` (in a checkout, `desktop/resources/mime/`) to `~/.local/share/mime/packages/` and run `update-mime-database ~/.local/share/mime`. Otherwise use File > Import, drop the file on the window, or Open With (choosing the AppImage), which work with every install.
-- **macOS:** the app declares a document type for `.opendoc.zip` and never claims plain `.zip` files, which stay with Archive Utility. macOS matches a file by its last extension only, so Finder may still open a `.opendoc.zip` with Archive Utility. If it does, use one of the others until a check on a Mac says otherwise: right-click the file, **Open With**, opendoc-desktop (or **Other…**), or the two below.
 - **File > Import Design Pack…** asks for a file (filtered to `.opendoc.zip`; macOS can only filter on `.zip`). It is available while a workspace is open.
 - **Drop** the file on the window.
+- **Open With**, choosing OpenDoc Desktop (for an AppImage, choosing the AppImage). Open With works with every install.
+- **Double-click** it in the file manager. See below for Linux and macOS.
 
-The app reads a pack file itself and hands the page its name and bytes, at most 64 MiB; a larger file gets a message from the app and is not opened. A pack opened while no workspace is open waits until one is: the workspace picker says so, and the first workspace that opens receives it. The Import dialog reviews one pack at a time, so a pack opened while another is still waiting replaces it.
+#### Double-click on Linux
 
-**Show in folder.** After you export a pack, the result offers **Show in folder** (in the app only; the browser edition shows the path with a copy button). The app reveals a file only when it is a file inside the open workspace's `output/packs/` folder once every link in its path is resolved. Anything else (a path with `..`, a link that leads out, another folder or another workspace) is refused and logged, and nothing opens.
+This works from the deb, rpm and Arch packages. They register the pack file type with the system, so the file manager offers OpenDoc Desktop. The path reaches the app as a launch argument, or goes to the app that is already running (a second launch hands the file over and exits). The file manager may pass a path or a `file://` address (the `.desktop` file's `Exec` uses `%U`); the app accepts both.
+
+The AppImage carries the same `.desktop` entry but cannot install the shared-mime type, so a double-click goes to the archive manager. Either let a desktop integrator for AppImages register it, or add the type yourself:
+
+1. Copy `opendoc-desktop.xml` (in a checkout, `desktop/resources/mime/`) to `~/.local/share/mime/packages/`.
+2. Run `update-mime-database ~/.local/share/mime`.
+
+Otherwise use File > Import, drop the file on the window, or Open With (choosing the AppImage), which work with every install.
+
+#### Double-click on macOS
+
+The app declares a document type for `.opendoc.zip` and never claims plain `.zip` files, which stay with Archive Utility. macOS matches a file by its last extension only, so Finder may still open a `.opendoc.zip` with Archive Utility.
+
+If it does, use one of the others until a check on a Mac says otherwise: right-click the file, **Open With**, opendoc-desktop (or **Other…**), or the two below.
+
+### Limits and waiting
+
+- The app reads a pack file itself and hands the page its name and bytes, at most 64 MiB. A larger file gets a message from the app and is not opened.
+- A pack opened while no workspace is open waits until one is: the workspace picker says so, and the first workspace that opens receives it.
+- The Import dialog reviews one pack at a time, so a pack opened while another is still waiting replaces it.
+
+### Show in folder
+
+After you export a pack, the result offers **Show in folder** (in the app only; the browser edition shows the path with a copy button).
+
+The app reveals a file only when it is a file inside the open workspace's `output/packs/` folder once every link in its path is resolved. Anything else (a path with `..`, a link that leads out, another folder or another workspace) is refused and logged, and nothing opens.
 
 ## Uninstall
 

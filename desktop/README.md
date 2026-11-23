@@ -6,6 +6,15 @@ This package is private to the repository: OpenDoc's npm packages do not include
 
 This page is for people who build, test and release the app, and for people who work on its code. What the app does, how to install and remove it, and what it writes to disk is in the user guide, [docs/DESKTOP.md](../docs/DESKTOP.md).
 
+| You want to | Go to |
+|---|---|
+| Build the installers | [Build](#build) |
+| Tag, publish and sign a release | [Versions and build numbers](#versions-and-build-numbers), [Tags and releases](#tags-and-releases), [Signing releases](#signing-releases) |
+| Know what CI runs | [What `desktop.yml` runs](#what-desktopyml-runs) and [Release automation](#release-automation-one-time-setup) |
+| Run the tests | [Tests](#tests) and [Testing updates](#testing-updates) |
+| Run the app from a checkout | [Run it from a checkout](#run-it-from-a-checkout) |
+| Understand how the app works | [How the app works](#how-the-app-works) |
+
 ## Layout
 
 - `src/main/`: the Electron main process (the shell). `src/main/workspace/` holds the workspace link, the version table, the upgrade with its backups, and the AppImage's runtime copy.

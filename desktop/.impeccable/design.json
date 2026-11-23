@@ -1,0 +1,528 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-23T07:56:57Z",
+  "title": "Design System: OpenDoc Desktop",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Document Blue",
+        "canonical": "oklch(56% 0.138 250)",
+        "dark": "#8ac4f2",
+        "tonalRamp": [
+          "#002245",
+          "#003c6d",
+          "#005799",
+          "#2474be",
+          "#4693df",
+          "#6ab3fe",
+          "#a9d2fe",
+          "#e3f0fe"
+        ]
+      },
+      "accent-ink": {
+        "role": "primary",
+        "displayName": "Deep Ink Blue",
+        "canonical": "oklch(46% 0.110 250)",
+        "dark": "#9acbf2",
+        "tonalRamp": [
+          "#002243",
+          "#003c6c",
+          "#19588f",
+          "#3975af",
+          "#5794d0",
+          "#76b3f1",
+          "#a8d2fe",
+          "#e3f0ff"
+        ]
+      },
+      "status-final": {
+        "role": "secondary",
+        "displayName": "Settled Green",
+        "canonical": "oklch(52% 0.136 148)",
+        "dark": "#7ccf91",
+        "tonalRamp": [
+          "#002b0a",
+          "#004818",
+          "#016827",
+          "#2a8641",
+          "#4ca55e",
+          "#6cc57c",
+          "#8de69b",
+          "#c8ffcf"
+        ]
+      },
+      "destructive": {
+        "role": "tertiary",
+        "displayName": "Brick Warning Red",
+        "canonical": "oklch(50% 0.182 30)",
+        "dark": "#ff9285",
+        "tonalRamp": [
+          "#490000",
+          "#740000",
+          "#a20501",
+          "#c53629",
+          "#e95948",
+          "#ff8674",
+          "#ffbaaf",
+          "#fee9e5"
+        ]
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "Soft Paper Gray",
+        "canonical": "oklch(98% 0.000 90)",
+        "dark": "#181818",
+        "tonalRamp": [
+          "#222222",
+          "#3a3a3a",
+          "#555555",
+          "#717171",
+          "#8f8f8f",
+          "#aeaeae",
+          "#cecece",
+          "#eeeeee"
+        ]
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "Clean Page White",
+        "canonical": "oklch(100% 0.000 90)",
+        "dark": "#262626",
+        "tonalRamp": [
+          "#222222",
+          "#3a3a3a",
+          "#555555",
+          "#717171",
+          "#8f8f8f",
+          "#aeaeae",
+          "#cecece",
+          "#eeeeee"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Soft Charcoal",
+        "canonical": "oklch(27% 0.000 90)",
+        "dark": "#f0f0f0",
+        "tonalRamp": [
+          "#222222",
+          "#3a3a3a",
+          "#555555",
+          "#717171",
+          "#8f8f8f",
+          "#aeaeae",
+          "#cecece",
+          "#eeeeee"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Soft Charcoal, muted",
+        "canonical": "oklch(51% 0.000 90)",
+        "dark": "#a6a6a6",
+        "tonalRamp": [
+          "#222222",
+          "#3a3a3a",
+          "#555555",
+          "#717171",
+          "#8f8f8f",
+          "#aeaeae",
+          "#cecece",
+          "#eeeeee"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Hairline Gray",
+        "canonical": "oklch(90% 0.000 90)",
+        "dark": "#393939",
+        "tonalRamp": [
+          "#222222",
+          "#3a3a3a",
+          "#555555",
+          "#717171",
+          "#8f8f8f",
+          "#aeaeae",
+          "#cecece",
+          "#eeeeee"
+        ]
+      },
+      "shell-accent": {
+        "role": "primary",
+        "displayName": "Shell Blue",
+        "canonical": "oklch(50% 0.164 259)",
+        "dark": "#6ea0ee",
+        "tonalRamp": [
+          "#001d53",
+          "#003481",
+          "#0c4fae",
+          "#2e6ecf",
+          "#4d8df1",
+          "#7baffe",
+          "#b1d0ff",
+          "#e6effe"
+        ]
+      },
+      "shell-wash": {
+        "role": "neutral",
+        "displayName": "Shell Wash",
+        "canonical": "oklch(97% 0.003 265)",
+        "dark": "#15181c",
+        "tonalRamp": [
+          "#212223",
+          "#3a3a3c",
+          "#545557",
+          "#717173",
+          "#8e8f91",
+          "#adaeb0",
+          "#cdced0",
+          "#edeef0"
+        ]
+      },
+      "shell-ink": {
+        "role": "neutral",
+        "displayName": "Shell Ink",
+        "canonical": "oklch(23% 0.007 258)",
+        "dark": "#e8eaed",
+        "tonalRamp": [
+          "#202225",
+          "#383b3e",
+          "#535559",
+          "#6f7275",
+          "#8d8f93",
+          "#abaeb2",
+          "#cbced2",
+          "#eceff3"
+        ]
+      },
+      "shell-paper": {
+        "role": "neutral",
+        "displayName": "Shell Paper",
+        "canonical": "oklch(100% 0.000 90)",
+        "dark": "#1d2026",
+        "tonalRamp": [
+          "#222222",
+          "#3a3a3a",
+          "#555555",
+          "#717171",
+          "#8f8f8f",
+          "#aeaeae",
+          "#cecece",
+          "#eeeeee"
+        ]
+      },
+      "shell-danger": {
+        "role": "tertiary",
+        "displayName": "Shell Red",
+        "canonical": "oklch(47% 0.161 24)",
+        "dark": "#ff8d90",
+        "tonalRamp": [
+          "#480005",
+          "#73000e",
+          "#9b1d23",
+          "#bd4040",
+          "#e0605c",
+          "#fe857e",
+          "#ffbab4",
+          "#fee9e7"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "page-title": {
+        "displayName": "Page Title",
+        "purpose": "One per library page and each drilled-in side panel heading."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section and card titles, the reader's document title, dialog titles."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Buttons, field labels, tabs, filter choices."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Copy, fields and list text."
+      },
+      "menu": {
+        "displayName": "Menu",
+        "purpose": "Menu, select and sidebar rows."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Metadata and hints under fields."
+      },
+      "tag": {
+        "displayName": "Tag",
+        "purpose": "Tooltips, key hints, the sidebar footer. The floor for compact text."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Paths, commands and pack file names in both surfaces."
+      },
+      "shell-title": {
+        "displayName": "Shell Title",
+        "purpose": "The one h1 of each shell page."
+      },
+      "shell-body": {
+        "displayName": "Shell Body",
+        "purpose": "Shell page copy and buttons."
+      },
+      "shell-eyebrow": {
+        "displayName": "Shell Eyebrow",
+        "purpose": "Uppercase section headings on shell pages."
+      },
+      "shell-hint": {
+        "displayName": "Shell Hint",
+        "purpose": "Notes under shell rows and results."
+      },
+      "shell-mono": {
+        "displayName": "Shell Mono",
+        "purpose": "Paths and commands on shell pages."
+      }
+    },
+    "shadows": [
+      {
+        "name": "control",
+        "value": "0 1px 2px #00000014",
+        "purpose": "Primary and destructive buttons only."
+      },
+      {
+        "name": "popup",
+        "value": "0 4px 8px #00000008, 0 12px 32px #00000014",
+        "purpose": "Menus, selects, popovers, notifications."
+      },
+      {
+        "name": "dialog",
+        "value": "0 4px 12px #0000000d, 0 16px 40px #0000001f",
+        "purpose": "Dialogs, one step deeper than popups."
+      },
+      {
+        "name": "tooltip",
+        "value": "0 2px 6px #00000018",
+        "purpose": "Tooltips."
+      },
+      {
+        "name": "paper",
+        "value": "0 0 0 1px #00000014, 0 1px 3px #00000014, 0 10px 28px #00000014",
+        "purpose": "Document pages in the reader."
+      },
+      {
+        "name": "cover",
+        "value": "0 2px 5px #00000010, 0 9px 22px #00000010",
+        "purpose": "Document cards and pack previews."
+      },
+      {
+        "name": "thumbnail",
+        "value": "0 2px 5px #00000012",
+        "purpose": "Small page thumbnails."
+      },
+      {
+        "name": "panel-edge",
+        "value": "12px 0 30px #00000014",
+        "purpose": "The sidebar drawer sliding over the page."
+      }
+    ],
+    "motion": [
+      {
+        "name": "motion-quick",
+        "value": "140ms",
+        "purpose": "Hover, color and fill transitions on controls (--motion-quick)."
+      },
+      {
+        "name": "press",
+        "value": "scale 140ms cubic-bezier(0.2, 0, 0, 1)",
+        "purpose": "Press response: scale to 0.96. Switched off for static buttons and under reduced motion."
+      },
+      {
+        "name": "dialog",
+        "value": "160ms",
+        "purpose": "Dialog, backdrop, notification and drawer entry and exit."
+      },
+      {
+        "name": "shell-spin",
+        "value": "0.8s linear infinite",
+        "purpose": "The shell page checking spinner; stops under reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "wide",
+        "value": "1550px"
+      },
+      {
+        "name": "content",
+        "value": "1180px"
+      },
+      {
+        "name": "sidebar-drawer",
+        "value": "850px"
+      },
+      {
+        "name": "compact",
+        "value": "620px"
+      },
+      {
+        "name": "narrow",
+        "value": "520px"
+      },
+      {
+        "name": "phone",
+        "value": "480px"
+      },
+      {
+        "name": "touch",
+        "value": "pointer: coarse"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Default Button",
+      "kind": "button",
+      "refersTo": "button-default",
+      "description": "Standard action button, white with a hairline border.",
+      "html": "<button class=\"ds-btn\">Cancel</button>",
+      "css": ".ds-btn{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px;min-width:32px;min-height:32px;padding:6px 10px;border:1px solid var(--line,#dedede);border-radius:6px;background:var(--surface-raised,#fff);color:var(--ink,#262626);font:500 13px/18px \"OpenDoc UI\",system-ui,sans-serif;transition:background-color 140ms,scale 140ms cubic-bezier(0.2,0,0,1)}.ds-btn:hover{background:var(--control-hover,#eaeaea)}.ds-btn:active{background:var(--control-active,#e2e2e2);scale:.96}.ds-btn:focus-visible{outline:2px solid var(--focus-ring,#2777c1);outline-offset:3px}"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The main action of a screen: Document Blue fill with white text.",
+      "html": "<button class=\"ds-btn-primary\">Export pack</button>",
+      "css": ".ds-btn-primary{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:6px 10px;border:1px solid #2777c1;border-radius:6px;background:#2777c1;color:#fff;font:500 13px/18px \"OpenDoc UI\",system-ui,sans-serif;box-shadow:0 1px 2px #00000014;transition:background-color 140ms,scale 140ms cubic-bezier(0.2,0,0,1)}.ds-btn-primary:hover{background:#226aab;border-color:#226aab}.ds-btn-primary:active{background:#1d5b93;border-color:#1d5b93;scale:.96}.ds-btn-primary:focus-visible{outline:2px solid #2777c1;outline-offset:3px}.ds-btn-primary:disabled{background:#e2e2e2;border-color:#e2e2e2;color:#666;box-shadow:none;cursor:not-allowed}"
+    },
+    {
+      "name": "Destructive Button",
+      "kind": "button",
+      "refersTo": "button-destructive",
+      "description": "Confirms an action that removes something.",
+      "html": "<button class=\"ds-btn-danger\">Delete</button>",
+      "css": ".ds-btn-danger{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:6px 10px;border:1px solid #b42318;border-radius:6px;background:#b42318;color:#fff;font:500 13px/18px \"OpenDoc UI\",system-ui,sans-serif;box-shadow:0 1px 2px #00000014;transition:background-color 140ms}.ds-btn-danger:hover{background:#9e1f15;border-color:#9e1f15}.ds-btn-danger:active{background:#8a1b12;border-color:#8a1b12}.ds-btn-danger:focus-visible{outline:2px solid #2777c1;outline-offset:3px}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Boxed field with a visible control edge and a blue focus ring.",
+      "html": "<label class=\"ds-field\"><span>Pack name</span><input value=\"Civic pack\"></label>",
+      "css": ".ds-field{display:flex;flex-direction:column;gap:9px;font:500 13px/18px \"OpenDoc UI\",system-ui,sans-serif;color:#262626}.ds-field input{width:100%;min-height:32px;padding:5px 10px;border:1px solid #8c8c8c;border-radius:6px;background:#fff;color:#262626;font:400 13px/20px \"OpenDoc UI\",system-ui,sans-serif}.ds-field input:focus-visible{outline:2px solid #2777c1;outline-offset:-1px}"
+    },
+    {
+      "name": "Menu",
+      "kind": "nav",
+      "refersTo": "menu-popup",
+      "description": "Action menu: small popup with 32px rows and a highlighted row ringed for visibility.",
+      "html": "<div class=\"ds-menu\"><div class=\"ds-menu-item ds-hl\">Rename</div><div class=\"ds-menu-item\">Duplicate</div><div class=\"ds-menu-sep\"></div><div class=\"ds-menu-item ds-menu-danger\">Delete</div></div>",
+      "css": ".ds-menu{min-width:184px;padding:4px;border:1px solid #dedede;border-radius:6px;background:#fff;box-shadow:0 4px 8px #00000008,0 12px 32px #00000014;font:400 12.5px/18px \"OpenDoc UI\",system-ui,sans-serif;color:#262626}.ds-menu-item{display:flex;align-items:center;gap:8px;min-height:32px;padding:5px 8px;border-radius:4px;cursor:pointer}.ds-menu-item:hover,.ds-hl{background:#eaeaea;outline:2px solid #2777c1;outline-offset:-2px}.ds-menu-sep{height:1px;margin:3px 4px;background:#dedede}.ds-menu-danger{color:#b42318}"
+    },
+    {
+      "name": "Sidebar Row",
+      "kind": "nav",
+      "refersTo": "sidebar-row-selected",
+      "description": "Sidebar navigation row; the selected row is a gray fill with Deep Ink Blue text.",
+      "html": "<nav class=\"ds-side\"><a class=\"ds-row\">Documents</a><a class=\"ds-row ds-sel\">Templates</a></nav>",
+      "css": ".ds-side{width:216px;display:flex;flex-direction:column;gap:2px;font:400 12.5px/18px \"OpenDoc UI\",system-ui,sans-serif}.ds-row{display:flex;align-items:center;min-height:32px;padding:5px 12px;border-radius:6px;color:#666;cursor:pointer}.ds-row:hover{background:#eaeaea}.ds-sel{background:#e8e8e8;color:#1d5b93;font-weight:500}.ds-row:focus-visible{outline:2px solid #2777c1;outline-offset:3px}"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "chip",
+      "refersTo": "status-pill",
+      "description": "Outlined 20px pill with a colored dot for a document status.",
+      "html": "<span class=\"ds-pill\"><i class=\"ds-dot\"></i>Final</span>",
+      "css": ".ds-pill{display:inline-flex;align-items:center;gap:5px;min-height:20px;padding:0 7px;border:1px solid #dedede;border-radius:999px;color:#262626;font:500 12px/1 \"OpenDoc UI\",system-ui,sans-serif;white-space:nowrap}.ds-dot{width:6px;height:6px;border-radius:50%;background:#1c7c37}"
+    },
+    {
+      "name": "Dialog",
+      "kind": "card",
+      "refersTo": "dialog",
+      "description": "Centered dialog, 12px corners, hairline border, deep shadow, sticky action row.",
+      "html": "<div class=\"ds-dialog\"><h2>Export a pack</h2><p>1 theme and 1 template will go into one file that another workspace can import.</p><div class=\"ds-actions\"><button class=\"ds-d-btn\">Cancel</button><button class=\"ds-d-btn ds-d-primary\">Export pack</button></div></div>",
+      "css": ".ds-dialog{width:490px;max-width:100%;padding:36px;border:1px solid #dedede;border-radius:12px;background:#fff;color:#262626;box-shadow:0 4px 12px #0000000d,0 16px 40px #0000001f;font-family:\"OpenDoc UI\",system-ui,sans-serif}.ds-dialog h2{margin:0;font-size:16px;line-height:22px;font-weight:500;letter-spacing:-.01em}.ds-dialog p{margin:17px 0 0;font-size:14px;line-height:1.65;color:#666}.ds-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:30px}.ds-d-btn{min-height:32px;padding:6px 10px;border:1px solid #dedede;border-radius:6px;background:#fff;color:#262626;font:500 13px/18px inherit;cursor:pointer}.ds-d-primary{background:#2777c1;border-color:#2777c1;color:#fff}.ds-d-btn:focus-visible{outline:2px solid #2777c1;outline-offset:3px}"
+    },
+    {
+      "name": "Shell Card with Button",
+      "kind": "custom",
+      "refersTo": "shell-card",
+      "description": "A shell page: one white card on a pale wash with a bold title, muted lede and 8px-corner buttons.",
+      "html": "<div class=\"ds-shell\"><main class=\"ds-shell-card\"><h1>Choose a workspace</h1><p class=\"ds-lede\">A workspace is a folder that holds your documents, themes and templates.</p><div class=\"ds-shell-actions\"><button class=\"ds-shell-btn ds-shell-primary\">Open existing workspace&hellip;</button><button class=\"ds-shell-btn\">Create new workspace&hellip;</button></div></main></div>",
+      "css": ".ds-shell{padding:24px;background:#f4f5f7;font:15px/1.5 system-ui,-apple-system,\"Segoe UI\",sans-serif;color:#1c1e21}.ds-shell-card{width:min(640px,100%);padding:32px;border:1px solid #d9dde3;border-radius:12px;background:#fff}.ds-shell-card h1{margin:0 0 4px;font-size:22px;line-height:1.25}.ds-lede{margin:0 0 20px;color:#5d6470}.ds-shell-actions{display:flex;flex-wrap:wrap;gap:10px}.ds-shell-btn{font:inherit;padding:8px 14px;border:1px solid #d9dde3;border-radius:8px;background:#fff;color:#1c1e21;cursor:pointer}.ds-shell-btn:hover{border-color:#1f5fbf}.ds-shell-btn:focus-visible{outline:2px solid #1f5fbf;outline-offset:2px}.ds-shell-primary{background:#1f5fbf;border-color:#1f5fbf;color:#fff}"
+    },
+    {
+      "name": "Shell List Row",
+      "kind": "custom",
+      "refersTo": "shell-list-row",
+      "description": "Row in the AI apps list: bold name, outlined badge and a muted chevron, wash on hover.",
+      "html": "<ul class=\"ds-shell-list\"><li><button class=\"ds-shell-row\"><span class=\"ds-n\">Claude Code</span><span class=\"ds-b\">Installed</span><span class=\"ds-c\">&rsaquo;</span></button></li></ul>",
+      "css": ".ds-shell-list{list-style:none;margin:0;padding:0;border:1px solid #d9dde3;border-radius:8px;font:15px/1.5 system-ui,-apple-system,\"Segoe UI\",sans-serif;color:#1c1e21}.ds-shell-row{display:flex;width:100%;align-items:center;gap:8px;padding:12px 14px;border:0;border-radius:8px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}.ds-shell-row:hover{background:#f4f5f7}.ds-shell-row:focus-visible{outline:2px solid #1f5fbf;outline-offset:-2px}.ds-n{font-weight:600}.ds-b{font-size:12px;padding:1px 8px;border:1px solid #d9dde3;border-radius:999px;color:#5d6470}.ds-c{margin-left:auto;color:#5d6470;font-size:20px;line-height:1}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Desk",
+    "overview": "**Creative North Star: \"The Quiet Desk\"**\n\nThe desk is a neutral work surface that holds the paper and keeps still around it. The workspace UI is crisp, editorial and restrained: a page-first look set in Geist at 13px, on soft gray chrome with one blue accent, compact 32px controls and hairline borders. Library pages and the reader put the document forward, and the interface steps back. Documents (PDF pages) keep their own colors and never follow the app appearance.\n\nLight, dark and increased contrast are all first-class. The shell pages (chooser, upgrade, crash, backups and AI apps windows) are a plainer, larger set of single cards on a pale wash, set in the system font. They are described below in their own `shell-` tokens, as they are today.",
+    "keyCharacteristics": [
+      "The workspace UI is grayscale chrome with one blue accent, so that a document's own colors stand out.",
+      "13px body and control text, 32px controls (40px on touch screens), 6px control corners.",
+      "Light, dark and system appearance everywhere, with a stronger increased-contrast mode in the workspace UI.",
+      "English and Arabic side by side: Geist for Latin, Noto Naskh Arabic for Arabic letters, `dir=\"auto\"` on user text, logical properties, and a layout that is never mirrored.",
+      "Shell pages are styled separately today: system fonts, a 15px base size, one white card on a pale wash.",
+      "The brand is black and white: the wordmark and the app icon (a dark page with a folded corner and the wordmark's O) use ink `#21211F` and white only. The blue is an interface color, not a brand color."
+    ],
+    "rules": [
+      {
+        "name": "The One Blue Rule",
+        "body": "A screen has one blue. In the workspace UI it is Document Blue (`#2777c1`), with Deep Ink Blue (`#1d5b93`) as its text shade; the shell pages use Shell Blue (`#1f5fbf`). Do not mix them on one screen, and do not add a second accent.",
+        "section": "colors"
+      },
+      {
+        "name": "The Page Keeps Its Colors Rule",
+        "body": "Paper, media, theme swatches and exports keep their authored colors in every appearance. Only the interface around them changes. Never invert or tint a PDF page.",
+        "section": "colors"
+      },
+      {
+        "name": "The Words Carry Errors Rule",
+        "body": "In the workspace UI, a failure or a notice is stated in plain words on a gray surface with a gray border. Color may support it but is never the only signal. (The shell pages currently show errors as Shell Red text.)",
+        "section": "colors"
+      },
+      {
+        "name": "The Small And Quiet Rule",
+        "body": "The workspace UI sets everything at 13px or below except page and card titles. Steps are about a 1.25 ratio (11, 12, 13, 16, 20). Match density with these tokens, never with global zoom or a transform.",
+        "section": "typography"
+      },
+      {
+        "name": "The Auto Direction Rule",
+        "body": "Any text field or block that shows user or document text takes `dir=\"auto\"`; wrap such text in a `bdi` element when it shares a line with icons or labels; use logical properties around it. The app chrome stays left to right and is not mirrored.",
+        "section": "typography"
+      },
+      {
+        "name": "The Float Only Rule",
+        "body": "Shadows belong to things that float above the page. Content on the page, rows, cards and the shell pages stay flat and use a hairline border instead.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** choose the surface first. A screen inside the workspace window uses the workspace tokens (`src/app/colors.css`, `src/app/ui/ui.css`); a new desktop dialog or page uses the shell tokens (`desktop/src/renderer/shell.css`). Never mix the two palettes on one screen.",
+      "**Do** size workspace controls from `--control-hit-size` (32px, 40px on touch) rather than a fixed height.",
+      "**Do** use the semantic color roles by name (`--surface`, `--line`, `--accent-ink`) and let light, dark and increased contrast follow. Check any new screen in light and dark.",
+      "**Do** use `accent-ink` (`#1d5b93`) for blue text on gray surfaces, and the plain accent (`#2777c1`) for fills and focus.",
+      "**Do** keep user text and mixed Arabic and English intact: `dir=\"auto\"`, `bdi`, logical properties, and no mirroring of the chrome.",
+      "**Do** keep shadows to floating things: popups, dialogs, tooltips, notifications and document paper.",
+      "**Do** give every dialog a title and a description, and keep long paths and names wrapping (`overflow-wrap: anywhere`).",
+      "**Do** keep a visible focus ring on every control and honor `prefers-reduced-motion`.",
+      "**Do** let new shell work move toward the workspace tokens where it can. OpenDoc Desktop follows OpenDoc's existing look, and the shell pages' own values are today's state, not a second target."
+    ],
+    "donts": [
+      "**Don't** add a second accent color or tint chrome with a document's colors; PDF pages, theme swatches and media keep their own colors in both appearances.",
+      "**Don't** use uppercase micro-labels, decorative badges or floating arrow ornaments in the workspace UI. (The shell pages currently use small uppercase section headings; new shell work should move away from them.)",
+      "**Don't** signal an error with color alone. State it in words; in the workspace UI use the gray error or notice surface.",
+      "**Don't** fade a disabled primary button to a pale blue; use the neutral disabled fill.",
+      "**Don't** put app-wide settings such as appearance into a document's actions menu; they live in the sidebar footer and the Skills and appearance menu.",
+      "**Don't** override menu type, spacing or surfaces in domain styles; use the shared `ui-menu-*` and `ui-select-*` styles and the `--menu-*` tokens.",
+      "**Don't** apply global CSS zoom or a transform to the app to change density.",
+      "**Don't** treat the black-and-white icon as a place for color: do not recolor the sheet or the O, add a gradient, or outline the O."
+    ]
+  }
+}

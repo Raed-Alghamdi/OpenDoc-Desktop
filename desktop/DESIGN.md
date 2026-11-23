@@ -269,22 +269,22 @@ OpenDoc Desktop shows two visual surfaces, and this file records both as they ar
 1. **The workspace UI** fills the main window. It is OpenDoc's own web interface (the upstream code in `src/app/`), loaded unchanged by the desktop app. Its tokens live in `src/app/colors.css`, `src/app/ui/ui.css` and `src/app/ui/fonts.css`. The desktop package defines none of them. Dialogs for exporting and importing design packs belong here too (`src/app/packs.css`, `src/app/PackDialogs.tsx`).
 2. **The shell pages** are the desktop package's own small windows: the workspace chooser, the upgrade status and result pages, the crash page, the workspace backups list and "Connect your AI apps". They are plain HTML in `desktop/src/renderer/` and share one stylesheet, `desktop/src/renderer/shell.css`. They do not import the workspace UI's CSS, so they have their own palette, their own type and their own radii. The About box and the menus are native operating system UI and carry no styling from this file.
 
-In the token lists above, names with no prefix belong to the workspace UI, and names that start with `shell-` belong to the shell pages. The same role often has two different values (for example the accent blue); the shell pages are an independent, simpler system, not a copy of the workspace UI. A new screen should pick the surface it belongs to and use only that surface's tokens.
+In the token lists above, names with no prefix belong to the workspace UI, and names that start with `shell-` belong to the shell pages. The same role often has two different values today (for example the accent blue), because the shell pages are styled by their own stylesheet. A new screen should use one surface's tokens throughout and not mix the two sets.
 
 ## Overview
 
-**Creative North Star: "TODO(raed): pick a name for the whole system"**
+**Creative North Star: "The Quiet Desk"**
 
-TODO(raed): two or three sentences on the personality, in your words. What the code shows, to build on: the workspace UI is a dense, neutral gray tool at 13px with one blue accent, compact 32px controls, hairline borders, a sidebar at 240px, and fully supported light, dark and increased contrast appearances. Documents (PDF pages) keep their own colors and never follow the app appearance. The shell pages are a calmer, larger and plainer set of single cards, centered on a pale wash, with system fonts.
+The desk is a neutral work surface that holds the paper and keeps still around it. The workspace UI is crisp, editorial and restrained: a page-first look set in Geist at 13px, on soft gray chrome with one blue accent, compact 32px controls and hairline borders. Library pages and the reader put the document forward, and the interface steps back. Documents (PDF pages) keep their own colors and never follow the app appearance.
 
-TODO(raed): any visual anti-reference to record (none is stated in the code).
+Light, dark and increased contrast are all first-class. The shell pages (chooser, upgrade, crash, backups and AI apps windows) are a plainer, larger set of single cards on a pale wash, set in the system font. They are described below in their own `shell-` tokens, as they are today.
 
 **Key Characteristics:**
 - The workspace UI is grayscale chrome with one blue accent, so that a document's own colors stand out.
 - 13px body and control text, 32px controls (40px on touch screens), 6px control corners.
 - Light, dark and system appearance everywhere, with a stronger increased-contrast mode in the workspace UI.
 - English and Arabic side by side: Geist for Latin, Noto Naskh Arabic for Arabic letters, `dir="auto"` on user text, logical properties, and a layout that is never mirrored.
-- Shell pages are a separate, smaller system: system fonts, a 15px base size, one white card on a pale wash.
+- Shell pages are styled separately today: system fonts, a 15px base size, one white card on a pale wash.
 - The brand is black and white: the wordmark and the app icon (a dark page with a folded corner and the wordmark's O) use ink `#21211F` and white only. The blue is an interface color, not a brand color.
 
 ## Colors
@@ -292,26 +292,26 @@ TODO(raed): any visual anti-reference to record (none is stated in the code).
 Workspace palette: a grayscale scale from a near-white background down to a charcoal ink, with a single mid blue for action, focus and selection, and a deeper blue for small links and labels. Green and red appear only for status and destruction. All values below are the light appearance; dark and increased-contrast values follow in the tables.
 
 ### Primary
-- **TODO(raed): name** (#2777c1): the accent. Primary buttons, the focus ring, checkboxes, selection outlines and drop targets. Hover `#226aab`, pressed `#1d5b93`.
-- **TODO(raed): name** (#1d5b93): the accent as text (`accent-ink`): small interactive labels, links, the selected sidebar row, the selected select item. Hover `#174d7e`. Used instead of the plain accent whenever the blue sits on a gray surface as text, for contrast.
+- **Document Blue** (#2777c1): the accent. Primary buttons, the focus ring, checkboxes, selection outlines and drop targets. Hover `#226aab`, pressed `#1d5b93`.
+- **Deep Ink Blue** (#1d5b93): the accent as text (`accent-ink`): small interactive labels, links, the selected sidebar row, the selected select item. Hover `#174d7e`. Used instead of the plain accent whenever the blue sits on a gray surface as text, for contrast.
 
 ### Secondary
-- **TODO(raed): name** (#1c7c37): the "Final" document status (`status-final`). Badges use a pale green fill `#caface` with dark green text `#0e762c`.
+- **Settled Green** (#1c7c37): the "Final" document status (`status-final`). Badges use a pale green fill `#caface` with dark green text `#0e762c`.
 
 ### Tertiary
-- **TODO(raed): name** (#b42318): destructive actions only (`destructive`), the fill of a button that deletes something. Error and notice messages are deliberately not red in the workspace UI: they use gray surfaces (`error-surface`, `notice-surface`) with wording that names the problem, so that color is never the only signal.
+- **Brick Warning Red** (#b42318): destructive actions only (`destructive`), the fill of a button that deletes something. Error and notice messages are deliberately not red in the workspace UI: they use gray surfaces (`error-surface`, `notice-surface`) with wording that names the problem, so that color is never the only signal.
 
 ### Neutral
-- **TODO(raed): name** (#f8f8f8): page background. Sidebar and bars sit one step down on `#f2f2f2` (`surface`), the alternate wells on `#eeeeee`, the sidebar's navigation surface on `#e2e2e2`, and the reader canvas on `#e5e5e5` so off-white pages keep a visible edge.
-- **TODO(raed): name** (#ffffff): raised surfaces: fields, default buttons, popups, dialogs and document paper.
-- **TODO(raed): name** (#262626): text (`ink`). Secondary text is `#666666` (`muted`), placeholders `#707070`.
-- **TODO(raed): name** (#dedede): hairline borders (`line`). Stronger dividers `#b8b8b8`, and form controls draw their edge in `#8c8c8c` (`control-line`) so a field is clearly a field.
+- **Soft Paper Gray** (#f8f8f8): page background. Sidebar and bars sit one step down on `#f2f2f2` (`surface`), the alternate wells on `#eeeeee`, the sidebar's navigation surface on `#e2e2e2`, and the reader canvas on `#e5e5e5` so off-white pages keep a visible edge.
+- **Clean Page White** (#ffffff): raised surfaces: fields, default buttons, popups, dialogs and document paper.
+- **Soft Charcoal** (#262626): text (`ink`). Secondary text is a lighter Soft Charcoal, `#666666` (`muted`), and placeholders are `#707070`.
+- **Hairline Gray** (#dedede): hairline borders (`line`). Stronger dividers `#b8b8b8`, and form controls draw their edge in `#8c8c8c` (`control-line`) so a field is clearly a field.
 - Hover, pressed and selected states are small gray steps: `#eaeaea`, `#e2e2e2`, `#e8e8e8`. Text selection uses a pale blue `#d2e4f5`.
 - Tooltips invert the scheme: `#292929` with white text (`inverse-surface`, `inverse-ink`). The dimmed backdrop behind a dialog is `#00000045` (about 27 percent black).
 
 ### Dark appearance (workspace UI)
 
-Chosen with the `data-appearance="dark"` attribute on the root, set by the app from the user's Light, Dark or System choice (`src/app/colors.css`). The sidecar file carries these as extension values; they are listed here for readers.
+Chosen with the `data-appearance="dark"` attribute on the root, set by the app from the user's Light, Dark or System choice (`src/app/colors.css`). The sidecar (`.impeccable/design.json`) also carries the dark value of the key colors.
 
 | Role | Light | Dark |
 |---|---|---|
@@ -337,27 +337,27 @@ Increased contrast (`prefers-contrast: more`) pushes ink to `#000000` (white in 
 
 ### Shell palette
 
-The shell pages use a separate, cooler set of seven values, defined at the top of `desktop/src/renderer/shell.css`. They follow the system light or dark setting through `prefers-color-scheme`.
+The shell pages use a separate, cooler set of eight values, defined at the top of `desktop/src/renderer/shell.css`. They are a different set from the workspace palette, with their own names and values, and they follow the system light or dark setting through `prefers-color-scheme`.
 
-| Role | Light | Dark |
-|---|---|---|
-| `shell-ink` text | #1c1e21 | #e8eaed |
-| `shell-muted` secondary text | #5d6470 | #a0a7b3 |
-| `shell-line` borders | #d9dde3 | #3a3f47 |
-| `shell-paper` the card | #ffffff | #1d2026 |
-| `shell-wash` the page behind the card, hover fill | #f4f5f7 | #15181c |
-| `shell-accent` primary button, links, focus ring, checked state | #1f5fbf | #6ea0ee |
-| `shell-on-accent` text on the accent | #ffffff | #0d1520 |
-| `shell-danger` errors and broken states | #a3262a | #ff8d90 |
+| Name | Token | Role | Light | Dark |
+|---|---|---|---|---|
+| Shell Ink | `shell-ink` | text | #1c1e21 | #e8eaed |
+| Shell Muted | `shell-muted` | secondary text | #5d6470 | #a0a7b3 |
+| Shell Line | `shell-line` | borders | #d9dde3 | #3a3f47 |
+| Shell Paper | `shell-paper` | the card | #ffffff | #1d2026 |
+| Shell Wash | `shell-wash` | the page behind the card, hover fill | #f4f5f7 | #15181c |
+| Shell Blue | `shell-accent` | primary button, links, focus ring, checked state | #1f5fbf | #6ea0ee |
+| Shell On-Blue | `shell-on-accent` | text on Shell Blue | #ffffff | #0d1520 |
+| Shell Red | `shell-danger` | errors and broken states | #a3262a | #ff8d90 |
 
-TODO(raed): short descriptive names for the shell's blue and for its blue-gray neutrals, if you want them named differently from the workspace palette.
+In `shell.css` the on-blue color is called `--accent-ink`. That name means the opposite in the workspace palette, where `accent-ink` is the dark blue used as text, so this file calls the shell's value `shell-on-accent`.
 
 ### Named Rules
-**The One Blue Rule.** Each surface has exactly one blue. In the workspace UI it is `#2777c1`, with `#1d5b93` as its text shade; in the shell pages it is `#1f5fbf`. Do not use one surface's blue on the other, and do not add a second accent.
+**The One Blue Rule.** A screen has one blue. In the workspace UI it is Document Blue (`#2777c1`), with Deep Ink Blue (`#1d5b93`) as its text shade; the shell pages use Shell Blue (`#1f5fbf`). Do not mix them on one screen, and do not add a second accent.
 
 **The Page Keeps Its Colors Rule.** Paper, media, theme swatches and exports keep their authored colors in every appearance. Only the interface around them changes. Never invert or tint a PDF page.
 
-**The Words Carry Errors Rule.** In the workspace UI, a failure or a notice is stated in plain words on a gray surface with a gray border. Color may support it but is never the only signal. (The shell pages do use red text for errors; see Do's and Don'ts.)
+**The Words Carry Errors Rule.** In the workspace UI, a failure or a notice is stated in plain words on a gray surface with a gray border. Color may support it but is never the only signal. (The shell pages currently show errors as Shell Red text.)
 
 ## Typography
 
@@ -365,7 +365,7 @@ TODO(raed): short descriptive names for the shell's blue and for its blue-gray n
 **Shell font:** the operating system's UI font (`system-ui`, then `-apple-system` and Segoe UI). The shell pages do not load Geist or Noto Naskh Arabic.
 **Mono font:** the system monospace (`ui-monospace`, then Menlo and similar) for paths, commands and pack file names, in both surfaces.
 
-**Character:** TODO(raed): one or two sentences on the pairing. Facts to build on: Geist is a precise, neutral grotesque used small and quiet, with medium weight for labels; Noto Naskh Arabic gives Arabic labels the same weight steps as the Latin beside them; the shell pages read as plain system text.
+**Character:** A precise grotesque, set small, with Arabic that keeps its weight. Geist is neutral and exact, used small and quiet with medium weight for labels. Noto Naskh Arabic steps in for Arabic letters in real regular, medium, semibold and bold faces, so an Arabic label carries the same weight as the Latin beside it. The shell pages are set in plain system text.
 
 ### Hierarchy (workspace UI)
 - **Page title** (600, 20px, 26px line, -0.01em): one per library page and each drilled-in side panel heading.
@@ -398,7 +398,7 @@ Breakpoints used: 1550px, 1180px, 850px (the sidebar becomes a slide-in drawer o
 
 ## Elevation & Depth
 
-TODO(raed): confirm the philosophy in one phrase. What the code shows:
+**Flat on the page, lifted when floating.**
 
 The workspace UI is a hybrid. Surfaces are layered tonally and stay flat at rest: page background, then the sidebar and bars one gray step down, then white raised fields and dialogs. Shadows appear only on things that float above the page: popups, dialogs, tooltips, notifications, the sidebar drawer, and document paper and covers. Controls carry a barely visible one-pixel shadow only when they are primary or destructive. The shell pages are completely flat: they have no shadows at all, and show structure with one-pixel borders and a pale wash behind a white card.
 
@@ -423,7 +423,7 @@ The shell pages use 8px for buttons, lists and result blocks, 12px for the card,
 
 ## Components
 
-TODO(raed): one phrase for how buttons, cards and fields should feel. What the code shows: compact, flat and quiet, with a clear focus ring and a small press response (a 4 percent scale-down, switched off under reduced motion).
+**Compact, flat and quiet.** Controls are small, flat and unshowy, with a clear focus ring and a small press response (a 4 percent scale-down, switched off under reduced motion). The one accent marks the main action.
 
 ### Buttons
 - **Shape:** 6px corners, 32px minimum height (40px on touch), 6px 10px padding, 13px medium label, 1px `line` border (`.ui-button`, `src/app/ui/ui.css`).
@@ -485,14 +485,14 @@ TODO(raed): one phrase for how buttons, cards and fields should feel. What the c
 - **Do** keep shadows to floating things: popups, dialogs, tooltips, notifications and document paper.
 - **Do** give every dialog a title and a description, and keep long paths and names wrapping (`overflow-wrap: anywhere`).
 - **Do** keep a visible focus ring on every control and honor `prefers-reduced-motion`.
+- **Do** let new shell work move toward the workspace tokens where it can. OpenDoc Desktop follows OpenDoc's existing look, and the shell pages' own values are today's state, not a second target.
 
 ### Don't:
 - **Don't** add a second accent color or tint chrome with a document's colors; PDF pages, theme swatches and media keep their own colors in both appearances.
-- **Don't** use uppercase micro-labels, decorative badges or floating arrow ornaments in the workspace UI. (The shell pages do use small uppercase section headings; that is a known difference between the two surfaces, and new shell pages may follow the existing pattern.)
+- **Don't** use uppercase micro-labels, decorative badges or floating arrow ornaments in the workspace UI. (The shell pages currently use small uppercase section headings; new shell work should move away from them.)
 - **Don't** signal an error with color alone. State it in words; in the workspace UI use the gray error or notice surface.
 - **Don't** fade a disabled primary button to a pale blue; use the neutral disabled fill.
 - **Don't** put app-wide settings such as appearance into a document's actions menu; they live in the sidebar footer and the Skills and appearance menu.
 - **Don't** override menu type, spacing or surfaces in domain styles; use the shared `ui-menu-*` and `ui-select-*` styles and the `--menu-*` tokens.
 - **Don't** apply global CSS zoom or a transform to the app to change density.
-- **Don't** load web fonts in the shell pages or add shadows to them; they are flat and use the system font.
 - **Don't** treat the black-and-white icon as a place for color: do not recolor the sheet or the O, add a gradient, or outline the O.

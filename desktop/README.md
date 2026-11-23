@@ -19,7 +19,7 @@ This page is for people who build, test and release the app, and for people who 
 
 - `src/main/`: the Electron main process (the shell). `src/main/workspace/` holds the workspace link, the version table, the upgrade with its backups, and the AppImage's runtime copy.
 - `src/host/`: the service host, the code that runs in the child process beside the OpenDoc service and carries requests over its IPC channel (no port), and the watchdog that ends it when the app is gone.
-- `src/preload/`: the preload script. It gives the app's own pages their calls to the main process, and the workspace page its two bridge functions (`onChange`, `onHostState`).
+- `src/preload/`: the preload script. It gives the app's own pages their calls to the main process, and the workspace page its four bridge functions (`onChange`, `onHostState`, `onImportPack`, `showInFolder`).
 - `src/renderer/`: the app's own pages (workspace picker, crash screen, upgrade progress and result, the backups list).
 - `src/main/updater/`: the in-app updater (install type, build-aware comparison, feed address rules, schedule, package and macOS installs). How it behaves: [How the updater works](#how-the-updater-works).
 - `resources/cli/`: the `opendoc` command for agents: `opendoc` (installed as `/usr/bin/opendoc` by the Linux packages) and `opendoc-appimage.sh` (the template the app fills in and writes to `~/.local/bin/opendoc` for an AppImage).
@@ -383,7 +383,7 @@ A journal found at the next open of the workspace, or on the backups page, is ac
 
 ### Hardening
 
-- Every window: `contextIsolation`, renderer sandbox, no Node integration anywhere, `webSecurity`, no `<webview>`, safe dialogs. The preload script exposes an API only to `app://shell` pages, and the main process checks the caller's address and frame again on every call.
+- Every window: `contextIsolation`, renderer sandbox, no Node integration anywhere, `webSecurity`, no `<webview>`, safe dialogs. The exception is the AppImage on Ubuntu 24.04: its launcher passes `--no-sandbox`, so Chromium's sandbox is off there (the deb runs sandboxed under its AppArmor profile). The preload script exposes its calls only to `app://shell` pages and its four bridge functions only to the top frame of `app://opendoc`, and the main process checks the caller's address and frame again on every call.
 - Content security policy on every workspace response, added by the main process next to whatever the service sends: scripts only from the page's own address (plus WebAssembly for pdf.js), no plugins, no framing, connections only to that address (no WebSocket: nothing listens). The app's policy is appended as a further policy, never set in place of the service's, so the service's own (`default-src 'none'; sandbox` on SVG assets) still applies, and every other header of the service (`Content-Disposition`, `X-Content-Type-Options`, `Cache-Control`, `Content-Range`) passes through untouched.
 - Every request a page makes is checked: `app://opendoc` while a workspace is open, the app's own pages (`app://shell`), `data:` and `blob:`. Anything else (other hosts, any `http:` address, `file:`) is cancelled.
 - Navigation stays on the origin. A web link (`http`, `https`, `mailto`) goes to the system browser through `shell.openExternal`; anything else is dropped. Dropping a file on the window does not navigate. The app's own pages (`app://shell`) can be reached only by the main process itself (`loadURL`) and from another shell page: a page, link, form or `window.open` at `app://opendoc` (or a file window, or a blank page) that names `app://shell/...` is dropped, so the workspace window can never become the picker, which has the shell's IPC. The IPC handlers also check the sender's frame: only the top frame of the picker window or of the workspace window at an `app://shell` address.
@@ -498,6 +498,7 @@ Exit codes of the helper:
 
 | Exit | Meaning | Result |
 |---|---|---|
+| 64 | The arguments are wrong: not four of them, a path that is not absolute or is a link, a bad checksum, package type or file name, or a signature file that is not 64 bytes | Nothing is installed. |
 | 70 | The SHA-512 check failed | Nothing is installed. |
 | 71 | The signature does not verify, or the key file is missing | Nothing is installed. |
 | 72 | There is no `openssl` | Nothing is installed. |

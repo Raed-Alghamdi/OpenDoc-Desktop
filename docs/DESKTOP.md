@@ -138,7 +138,13 @@ The app is signed ad hoc and is not notarized (there is no Apple developer accou
 2. Open System Settings, then Privacy & Security, and scroll down to the Security section.
 3. Next to "opendoc-desktop was blocked", click **Open Anyway**, confirm with your password or Touch ID, and click **Open**.
 
-On macOS 14 and earlier, Control-click the app, choose **Open**, then **Open** again. You do this once; later launches do not ask again.
+On macOS 14 and earlier, Control-click the app, choose **Open**, then **Open** again. Or, on any version, run this once in Terminal instead:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/opendoc-desktop.app
+```
+
+You do this once; later launches do not ask again.
 
 ### Check a download
 

@@ -1,38 +1,69 @@
-# opendoc-desktop
+# OpenDoc Desktop
 
-opendoc-desktop is a desktop app for [OpenDoc](https://github.com/RyanYahya/OpenDoc) on Linux and on macOS with Apple Silicon, built with Electron on top of the original OpenDoc project. It opens one workspace at a time in a window and carries its own runtime, so users install no Node or npm. The package lives in [`desktop/`](../desktop/README.md) (build and release instructions are there); OpenDoc's npm packages do not include it.
+OpenDoc Desktop is a desktop app for [OpenDoc](https://github.com/RyanYahya/OpenDoc) on Linux and on macOS with Apple Silicon, built with Electron on top of the original OpenDoc project. It opens one workspace at a time in a window and carries its own runtime, so you install no Node or npm.
 
-This page starts with what a user needs: how to [install](#install) the app, what happens at the [first run](#first-run), how it [updates](#updates), which workspaces it [opens](#which-workspaces-open), the [`opendoc` command](#the-opendoc-command), how to [connect AI apps](#ai-apps) and how to [uninstall](#uninstall) it completely. How the app works inside, and how to build, test and release it, is on the [developer page](../desktop/README.md#how-the-app-works).
+"OpenDoc Desktop" is the name the app shows. Files, folders, the process and the package are named `opendoc-desktop`, and the command for agents is `opendoc`.
+
+This page is the user guide. The app's package lives in [`desktop/`](../desktop/README.md), and OpenDoc's npm packages do not include it. To build, test or release the app, or to see how it works inside, read the [developer page](../desktop/README.md).
+
+| You want to | Go to |
+|---|---|
+| Install the app | [Install](#install) |
+| Know what happens when it starts | [First run](#first-run) |
+| Keep it up to date | [Updates](#updates) |
+| Know which workspaces it opens | [Which workspaces open](#which-workspaces-open) |
+| Let an agent use OpenDoc | [The `opendoc` command](#the-opendoc-command) and [AI apps](#ai-apps) |
+| Open a design pack | [Design packs](#design-packs) |
+| Remove it completely | [Uninstall](#uninstall) |
 
 ## Install
 
-Releases are on the repository's releases page, `https://github.com/Raed-Alghamdi/OpenDoc-Desktop/releases`. A release is named `desktop-v<version>-<build>` (for example `desktop-v0.6.1-2`). The version is OpenDoc's own. The build number is raised when the app is rebuilt without a new OpenDoc version.
+Releases are on the repository's releases page, `https://github.com/Raed-Alghamdi/OpenDoc-Desktop/releases`.
+
+A release is named `desktop-v<version>-<build>` (for example `desktop-v0.6.1-2`). The version is OpenDoc's own. The build number is raised when the app is rebuilt without a new OpenDoc version.
+
+### Choose a file
 
 | System | File to download |
 |---|---|
 | Linux, any distribution (x86_64) | `opendoc-desktop-x86_64.AppImage` |
 | Debian, Ubuntu (x86_64) | `opendoc-desktop_<version>-<build>_amd64.deb` |
 | Fedora, openSUSE (x86_64) | `opendoc-desktop-<version>-<build>.x86_64.rpm` |
-| Arch Linux (x86_64) | the AUR package `opendoc-desktop-bin` (below), or `opendoc-desktop-<version>-<build>-x64.pacman` |
+| Arch Linux (x86_64) | the AUR package `opendoc-desktop-bin` (see [Arch Linux](#arch-linux)), or `opendoc-desktop-<version>-<build>-x64.pacman` |
 | macOS, Apple Silicon (M1 or newer; there is no Intel Mac build) | `opendoc-desktop-<version>-<build>-arm64.dmg` (or `.zip`) |
 
 Every release also holds `latest-linux.yml` and `latest-mac.yml`: the update information the app reads. You never need them.
 
-Every installer in a release (AppImage, deb, rpm, pacman, dmg and zip) has a signature file beside it, `<file>.sig`: the 64 raw bytes of an Ed25519 signature over the whole file, made with the release key. The public key is `desktop/resources/updater/release-key.pem` in this repository, and the deb, rpm and Arch packages install a copy as `/opt/opendoc-desktop/resources/updater/release-key.pem`. To check a download by hand (OpenSSL 3): `openssl pkeyutl -verify -pubin -inkey release-key.pem -rawin -in <file> -sigfile <file>.sig`, which prints "Signature Verified Successfully". Before you install a pacman file by hand, move its `.sig` out of the folder (or delete it): `pacman -U` reads a `<file>.sig` beside a package as the package's PGP signature and refuses it with "invalid or corrupted package (PGP signature)". The app's own updater does this check for deb, rpm and Arch updates (see [Updates](#updates)).
+### What each install gives you
 
-The packages carry no signature of their own that your package manager knows (no GPG key, no distribution signature), so some systems ask for a flag when you install them by hand (shown below). Each release's `latest-*.yml` also lists the SHA-512 of every file, which you can compare with `openssl dgst -sha512 -binary <file> | base64 -w0` (the same base64 form).
+| Install | Where the app lives | The `opendoc` command | How it updates |
+|---|---|---|---|
+| AppImage | The file you downloaded. Keep it in a folder you can write to. | `~/.local/bin/opendoc`, written at every launch | The new file replaces the AppImage when you quit. |
+| deb, rpm | `/opt/opendoc-desktop/` | `/usr/bin/opendoc` | **Restart to Update**, then your password. |
+| Arch, AUR package | `/opt/opendoc-desktop/` | `/usr/bin/opendoc` | Your system update (`yay -Syu`). The in-app updater is off. |
+| Arch, pacman file installed by hand | `/opt/opendoc-desktop/` | `/usr/bin/opendoc` | **Restart to Update**, then your password. |
+| macOS | The Applications folder | **Install Command-Line Tool...** in the app menu | **Restart to Update**. |
+
+[Updates](#updates) has the details, and [The `opendoc` command](#the-opendoc-command) says how each command works.
 
 ### AppImage
 
-```sh
-chmod +x opendoc-desktop-x86_64.AppImage
-./opendoc-desktop-x86_64.AppImage
-```
+An AppImage needs FUSE 2. On Ubuntu 24.04: `sudo apt install libfuse2t64`. The `opendoc` command also uses `setpriv` (part of util-linux, present on most systems).
 
-- An AppImage needs FUSE 2. On Ubuntu 24.04: `sudo apt install libfuse2t64`. The `opendoc` command also uses `setpriv` (part of util-linux, present on most systems).
-- Put the file where you can write to its folder and keep it there. The name has no version in it, so an update replaces the file in place when you quit the app. If you do move it, the app points the `opendoc` command at the new place the next time it starts (until then the command says so).
+1. Put the file where you can write to its folder, and keep it there. The name has no version in it, so an update replaces the file in place when you quit the app.
+2. Make it executable and start it:
+
+   ```sh
+   chmod +x opendoc-desktop-x86_64.AppImage
+   ./opendoc-desktop-x86_64.AppImage
+   ```
+
+3. The first start copies the runtime (about 185 MB) to `~/.local/share/opendoc-desktop/runtime/<version>-<build>/`, because an AppImage's own files exist only while it runs. Workspaces link to that copy.
+
+Good to know:
+
+- If you move the file, the app points the `opendoc` command at the new place the next time it starts (until then the command says so).
 - The app makes no menu entry for an AppImage. Use a tool such as Gear Lever or write your own `.desktop` file.
-- The first start copies the runtime (about 185 MB) to `~/.local/share/opendoc-desktop/runtime/<version>-<build>/`, because an AppImage's own files exist only while it runs. Workspaces link to that copy.
 - On Ubuntu 24.04, which restricts unprivileged user namespaces, the AppImage's own launcher starts the app without Chromium's sandbox (`--no-sandbox`). The deb ships an AppArmor profile and runs sandboxed, so prefer the deb there.
 
 ### deb (Debian, Ubuntu)
@@ -41,7 +72,15 @@ chmod +x opendoc-desktop-x86_64.AppImage
 sudo apt install ./opendoc-desktop_<version>-<build>_amd64.deb
 ```
 
-The package installs the app in `/opt/opendoc-desktop/`, a menu entry "OpenDoc Desktop" (Office), the `opendoc-desktop` link in `/usr/bin` and the `opendoc` command as `/usr/bin/opendoc`. Where AppArmor is on (Ubuntu 24.04 and later), it also installs `/etc/apparmor.d/opendoc-desktop`, which lets the app's sandbox work. It depends on `libgtk-3-0`, `libnotify4`, `libnss3`, `libxss1`, `libxtst6`, `xdg-utils`, `libatspi2.0-0`, `libuuid1` and `libsecret-1-0`, which `apt` installs for you.
+The package installs:
+
+- the app in `/opt/opendoc-desktop/`;
+- a menu entry "OpenDoc Desktop" (Office);
+- the `opendoc-desktop` link in `/usr/bin`;
+- the `opendoc` command as `/usr/bin/opendoc`;
+- where AppArmor is on (Ubuntu 24.04 and later), `/etc/apparmor.d/opendoc-desktop`, which lets the app's sandbox work.
+
+It depends on `libgtk-3-0`, `libnotify4`, `libnss3`, `libxss1`, `libxtst6`, `xdg-utils`, `libatspi2.0-0`, `libuuid1` and `libsecret-1-0`, which `apt` installs for you.
 
 ### rpm (Fedora, openSUSE)
 
@@ -50,33 +89,45 @@ sudo dnf install --nogpgcheck ./opendoc-desktop-<version>-<build>.x86_64.rpm    
 sudo zypper install --allow-unsigned-rpm ./opendoc-desktop-<version>-<build>.x86_64.rpm   # openSUSE
 ```
 
-The flags are needed because the rpm has no signature your package manager knows (the release's `.sig` file is a different thing, checked by the app's updater before it installs, and by you with `openssl` as shown above). This is also how the app's own updater installs an rpm, after it has checked the release signature. The layout is the deb's: `/opt/opendoc-desktop/`, the menu entry, `/usr/bin/opendoc`.
+The flags are needed because the rpm has no signature your package manager knows. The release's `.sig` file is a different thing: the app's updater checks it before it installs, and you can check it with `openssl` (see [Check a download](#check-a-download)).
+
+This is also how the app's own updater installs an rpm, after it has checked the release signature. The layout is the deb's: `/opt/opendoc-desktop/`, the menu entry, `/usr/bin/opendoc`.
 
 ### Arch Linux
 
 The AUR package is `opendoc-desktop-bin`. It repackages a release's pacman file, so it carries its own Electron and OpenDoc and uses no shared `electron` package.
 
+> The AUR package is not published yet; its first publication waits for the maintainer. Until then use the pacman file of a release.
+
+**The AUR package**
+
 ```sh
 yay -S opendoc-desktop-bin        # or paru, or: git clone the AUR repository and run makepkg -si
 ```
 
-> The AUR package is not published yet; its first publication waits for the maintainer. Until then use the pacman file of a release.
-
 Its version is OpenDoc's and its `pkgrel` is the build number. It switches the app's own updater off (see [Updates](#updates)): pacman owns updates, so `yay -Syu` or your usual system update brings new builds. It conflicts with a hand-installed `opendoc-desktop` package.
 
-To install a release's pacman file by hand instead (for example before the AUR package exists):
+**A release's pacman file, installed by hand** (for example before the AUR package exists)
 
-```sh
-sudo pacman -U ./opendoc-desktop-<version>-<build>-x64.pacman
-```
+1. Move the release's `.sig` for the file out of the folder (or delete it). `pacman -U` reads a `<file>.sig` beside a package as the package's PGP signature and refuses it with "invalid or corrupted package (PGP signature)". Keep the `.sig` in another folder if you want to check it with `openssl`.
+2. Install the package:
 
-Keep the release's `.sig` for it in another folder (see [Install](#install)): pacman would take it for a PGP signature and refuse the package.
+   ```sh
+   sudo pacman -U ./opendoc-desktop-<version>-<build>-x64.pacman
+   ```
 
-That install updates itself through the app (see below), unlike the AUR package.
+That install updates itself through the app (see [Updates](#updates)), unlike the AUR package.
 
 ### macOS
 
-The app needs a Mac with Apple Silicon (M1 or newer). Open the `.dmg` and drag opendoc-desktop to the Applications folder (or unzip the `.zip` and move the app there). Do not run it from the disk image or from the Downloads folder: macOS then runs it from a temporary read-only copy, which cannot update itself and cannot install the `opendoc` command.
+The app needs a Mac with Apple Silicon (M1 or newer).
+
+1. Open the `.dmg` and drag opendoc-desktop to the Applications folder (or unzip the `.zip` and move the app there).
+2. Open the app from Applications. The first launch is blocked: see below.
+
+Do not run it from the disk image or from the Downloads folder: macOS then runs it from a temporary read-only copy, which cannot update itself and cannot install the `opendoc` command.
+
+#### Open it the first time
 
 The app is signed ad hoc and is not notarized (there is no Apple developer account behind it), so macOS blocks the first launch. To open it anyway:
 
@@ -85,6 +136,28 @@ The app is signed ad hoc and is not notarized (there is no Apple developer accou
 3. Next to "opendoc-desktop was blocked", click **Open Anyway**, confirm with your password or Touch ID, and click **Open**.
 
 On macOS 14 and earlier, Control-click the app, choose **Open**, then **Open** again. You do this once; later launches do not ask again.
+
+### Check a download
+
+Every installer in a release (AppImage, deb, rpm, pacman, dmg and zip) has a signature file beside it, `<file>.sig`. It holds the 64 raw bytes of an Ed25519 signature over the whole file, made with the release key.
+
+The public key is `desktop/resources/updater/release-key.pem` in this repository. The deb, rpm and Arch packages install a copy as `/opt/opendoc-desktop/resources/updater/release-key.pem`.
+
+To check a download by hand (OpenSSL 3):
+
+```sh
+openssl pkeyutl -verify -pubin -inkey release-key.pem -rawin -in <file> -sigfile <file>.sig
+```
+
+It prints "Signature Verified Successfully". The app's own updater does this check for deb, rpm and Arch updates (see [Updates](#updates)).
+
+Each release's `latest-*.yml` also lists the SHA-512 of every file. To compare, print the same base64 form:
+
+```sh
+openssl dgst -sha512 -binary <file> | base64 -w0
+```
+
+The packages carry no signature of their own that your package manager knows (no GPG key, no distribution signature), so some systems ask for a flag when you install them by hand (shown above for each system). Before you install a pacman file by hand, move its `.sig` out of the folder (see [Arch Linux](#arch-linux)).
 
 ## First run
 
